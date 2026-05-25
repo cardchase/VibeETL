@@ -1,0 +1,17 @@
+===================================
+Sort Tool (sort) Documentation
+===================================
+
+Purpose:
+--------
+Sorts rows in the connected data stream based on a selected column.
+
+Parameters:
+-----------
+- column (String): The column name to sort by.
+- descending (Boolean): Toggle sort order. `True` sorts in descending order;
+  `False` sorts in ascending order (Default: False).
+
+Schema Outputs:
+---------------
+- Passes the upstream input schema unchanged.

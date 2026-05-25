@@ -1,0 +1,32 @@
+=====================================
+Filter Tool (filter) Documentation
+=====================================
+
+Purpose:
+--------
+Splits a connected data stream into two pathways ("true" matching and "false" non-matching)
+based on a conditional predicate comparison.
+
+Parameters:
+-----------
+- filterType (String): `"basic"` or `"custom"`
+- column (String): Column to evaluate (Basic filter only).
+- operator (String): Evaluator condition. Available options:
+  * "==": Equals
+  * "!=": Does not equal
+  * ">": Greater than
+  * ">=": Greater than or equal
+  * "<": Less than
+  * "<=": Less than or equal
+  * "contains": Checks substring matches (string only)
+  * "starts_with": Checks substring start (string only)
+  * "ends_with": Checks substring end (string only)
+  * "is_null": Checks missing values
+  * "is_not_null": Checks non-missing values
+- value (String): Comparison operand value (Basic filter only).
+- customExpression (String): Complex SQL-like filter expression (Custom filter only).
+  Example: `[Age] > 30 AND [Department] == "Sales"`
+
+Schema Outputs:
+---------------
+- Passes the upstream input schema unchanged to both the True and False ports.

@@ -1,0 +1,20 @@
+=====================================
+Select Tool (select) Documentation
+=====================================
+
+Purpose:
+--------
+Keeps, drops, or renames incoming columns before forwarding them downstream.
+Essential for managing data schemas and preventing naming collisions.
+
+Parameters:
+-----------
+- columns (List of Objects): Column configurations. Each item has:
+  * name (String): Upstream column name.
+  * keep (Boolean): If False, the column is dropped from the dataset (Default: True).
+  * rename (String): Optional new name to map the column to.
+
+Schema Outputs:
+---------------
+- Modifies the schema by removing dropped columns and renaming the fields in the
+  metadata outputs accordingly.

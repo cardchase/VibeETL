@@ -1,0 +1,18 @@
+Tool Name: File Output
+Description: The File Output tool is the terminus of your data pipeline. It saves your transformed dataframes to the local filesystem. By default, it exports to CSV, but it is built with an extensible Writer Registry strategy, allowing developers to easily add new formats like JSON, Parquet, Word, or PDF.
+
+Parameters:
+- `outputPath` (string): The path to save the file. If a relative path or filename is provided (e.g., "output.csv"), it will be saved inside the `outputs/` folder in the backend. Absolute paths (e.g., "C:/data/output.csv") can also be used.
+- `outputFormat` (string): The format to save the file as. Defaults to "csv".
+
+Required Input Schema:
+- The tool acts as a pass-through and accepts any upstream schema. It does not enforce any strict schema matching. It will write whatever columns are passed to it.
+
+Output Schema:
+- Matches exactly whatever was passed to it (Pass-through mode).
+
+COMMUNITY EXTENSIBILITY GUIDE:
+To add support for a new file type (e.g., JSON, Parquet, Word, PDF):
+1. Open `backend/app/tools/file_output.py`.
+2. Create a new method (e.g., `_write_json(self, df: pl.DataFrame, file_path: str)`).
+3. Register the extension mapping inside the `_get_writer_registry()` method. No messy `if/else` chains required!

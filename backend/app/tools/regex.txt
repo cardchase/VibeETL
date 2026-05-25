@@ -1,0 +1,14 @@
+Tool Name: Regex Parser
+Description: Extracts substrings from a target string column using Regular Expression capture groups. It appends the extracted groups as new columns to the end of the dataframe. You can seamlessly cast the newly extracted data to numeric or boolean types directly within the node.
+
+Parameters:
+- `column` (string): The target column in the upstream dataframe to parse.
+- `pattern` (string): The Regular Expression pattern. Ensure that your pattern uses parentheses `(...)` to define capture groups. Each capture group correlates exactly to one output column.
+- `outputColumns` (list of objects): A configuration array defining the names and data types of the new columns. For example: `[{"name": "AreaCode", "type": "Int64"}]`.
+  - Important: The first object in `outputColumns` maps to the 1st capture group `(...)` in your Regex pattern. The second object maps to the 2nd capture group, and so on.
+
+Required Input Schema:
+- The upstream schema MUST contain the column defined in the `column` parameter. If it is missing, a SchemaCompatibilityError will be thrown.
+
+Output Schema:
+- Returns the full upstream schema, plus the newly created `outputColumns` appended to the end of the dataframe, successfully casted to the chosen data types.

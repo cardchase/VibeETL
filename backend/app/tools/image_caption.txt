@@ -1,0 +1,21 @@
+===================================================
+Image Ingest Tool (imageCaption) Documentation
+===================================================
+
+Purpose:
+--------
+Loads a local image file and feeds it to a lightweight CPU ONNX model
+to auto-generate semantic captions and characteristic tags.
+
+Parameters:
+-----------
+- imagePath (String): Local absolute path or uploaded photo filename.
+
+Schema Outputs:
+---------------
+- Outputs a fixed data frame containing:
+  * ImagePath (String)
+  * ResolvedPath (String)
+  * Description (String)
+  * Dimensions (String)
+  * Format (String)

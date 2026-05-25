@@ -1,0 +1,26 @@
+=========================================
+File Input Tool (fileInput) Documentation
+=========================================
+
+Purpose:
+--------
+Loads local files (CSV, Excel sheets, or PDFs containing tables) and parses them
+into an in-memory Polars DataFrame stream.
+
+Parameters:
+-----------
+- filePath (String): The path or filename of the target dataset. If relative,
+  it resolves relative to the `backend/uploads/` directory.
+- fileType (String): File formatting parser to use. Options are:
+  * "auto": Detects type using file extension (.csv, .xlsx, .pdf).
+  * "csv": Forces comma-separated file reading.
+  * "excel": Forces Excel worksheet reading.
+  * "pdf": Forces PDF text/table scanning.
+- csvDelimiter (String): Separator character for CSV files (Default: ",").
+- csvHeader (Boolean): Toggle whether the first row represents column names (Default: True).
+- csvEncoding (String): Target character set parser (Default: "utf-8").
+- excelSheet (String): Excel sheet worksheet to load. If empty, defaults to the first sheet.
+
+Schema Outputs:
+---------------
+- Dynamic: Evaluated directly from the loaded file headers.

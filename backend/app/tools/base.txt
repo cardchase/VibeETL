@@ -1,0 +1,20 @@
+===========================================
+Base Executor (BaseNode) Developer Guide
+===========================================
+
+Overview:
+---------
+All custom backend tools must inherit from the `BaseNode` class inside `base.py`.
+The base class exposes standard lifecycle coordinates and methods.
+
+Methods to Implement:
+---------------------
+- `execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame` (or `Dict[str, pl.DataFrame]`):
+  * Inputs: Map of connection ports (e.g. `inputs.get("input")`).
+  * Output: Must return a Polars DataFrame (or dictionary of DataFrames for multi-port nodes like Filter).
+
+Exposed Base Properties:
+------------------------
+- `self.node_id` (String): Unique canvas node ID.
+- `self.parameters` (Dict): User configuration parameters mapped from the React frontend ConfigWindow.
+- `self.log(message: str)`: Appends custom logging text displayed in the Results Window under the logs tab.
