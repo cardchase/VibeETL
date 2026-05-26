@@ -384,6 +384,27 @@ function App() {
     return resolveNodeSchema(incomingEdge.source, nodes, edges, results);
   }, [nodes, edges, selectedNodeId, results]);
 
+  const handleClearCache = async () => {
+    try {
+      await fetch('http://127.0.0.1:8000/api/clear-cache', { method: 'POST' });
+      setNodes((nds) =>
+        nds.map((node) => ({
+          ...node,
+          data: {
+            ...node.data,
+            parameters: {
+              ...node.data.parameters,
+              is_cached: false
+            }
+          }
+        }))
+      );
+      setGlobalLogs((prev) => [...prev, 'System: Cache completely cleared and all nodes reset.']);
+    } catch (err) {
+      console.error("Failed to clear cache on backend:", err);
+    }
+  };
+
   // Executes the pipeline DAG by sending the graph schema JSON to the backend
   const handleRunPipeline = async () => {
     if (isRunning) return;
@@ -520,6 +541,7 @@ function App() {
       {/* 1. Tool Palette (Top Panel) */}
       <ToolPalette 
         onRunPipeline={handleRunPipeline} 
+        onClearCache={handleClearCache}
         isRunning={isRunning} 
         autoRun={autoRun}
         setAutoRun={setAutoRun}

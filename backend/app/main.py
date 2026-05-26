@@ -87,6 +87,17 @@ async def execute_dag(pipeline: Dict[str, Any] = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error executing pipeline: {str(e)}")
 
+@app.post("/api/clear-cache")
+async def clear_cache():
+    """
+    Clears the entire pipeline cache.
+    """
+    try:
+        cache.clear()
+        return {"status": "success", "message": "Cache cleared."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
+
 @app.post("/api/node/schema")
 async def get_node_schema(payload: Dict[str, Any] = Body(...)):
     """

@@ -13,6 +13,13 @@ class PipelineCache:
             self._cache.clear()
             self._global_logs.clear()
 
+    def clear_except(self, keep_ids: List[str]):
+        with self._lock:
+            keys_to_remove = [k for k in self._cache.keys() if k not in keep_ids]
+            for k in keys_to_remove:
+                del self._cache[k]
+            self._global_logs.clear()
+
     def set_node_result(self, node_id: str, df: Any, duration_ms: float, logs: List[str]):
         with self._lock:
             import polars as pl

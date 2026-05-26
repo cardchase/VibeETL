@@ -51,6 +51,13 @@ const CustomNode = ({ id, data, selected, type }) => {
         {status !== 'idle' && (
           <div className={`node-status-dot ${status}`} title={`Status: ${status}`} />
         )}
+
+        {/* Cache indicator */}
+        {data?.parameters?.is_cached && (
+          <div className="node-status-dot cached" title="Node Data is Cached">
+            <Icons.Database size={6} color="white" />
+          </div>
+        )}
       </div>
 
       {/* Node Labels floating underneath the square box */}

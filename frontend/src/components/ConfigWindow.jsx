@@ -341,9 +341,11 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   };
 
   const renderFilterConfig = () => {
+    const filterType = parameters.filterType || 'basic';
     const column = parameters.column || '';
     const operator = parameters.operator || '==';
     const value = parameters.value || '';
+    const customExpression = parameters.customExpression || '';
 
     const selectedColObj = hasUpstreamColumns ? upstreamSchema.find(col => col.name === column) : null;
     const colType = selectedColObj?.type || 'String';
@@ -379,12 +381,22 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
       'is_not_null': 'is not empty'
     };
     const opLabel = operatorLabels[operator] || operator;
-    const expressionPreview = column 
-      ? `[${column}] ${opLabel} ${operator === 'is_null' || operator === 'is_not_null' ? '' : `"${value}"`}`.trim()
-      : 'No condition configured';
+    const expressionPreview = filterType === 'custom'
+      ? customExpression || 'No custom expression configured'
+      : (column
+        ? `[${column}] ${opLabel} ${operator === 'is_null' || operator === 'is_not_null' ? '' : `"${value}"`}`.trim()
+        : 'No condition configured');
 
     return (
       <>
+        <div className="form-group">
+          <label className="form-label">Filter Mode</label>
+          <select value={filterType} onChange={(e) => handleParamChange('filterType', e.target.value)}>
+            <option value="basic">Basic</option>
+            <option value="custom">Custom Expression</option>
+          </select>
+        </div>
+
         <div className="filter-expression-bar" style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-color)',
@@ -392,7 +404,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           padding: '8px 12px',
           fontSize: '0.75rem',
           fontFamily: 'var(--font-mono)',
-          color: column ? 'var(--color-prep)' : 'var(--text-muted)',
+          color: (filterType === 'custom' ? customExpression : column) ? 'var(--color-prep)' : 'var(--text-muted)',
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
@@ -402,65 +414,83 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{expressionPreview}</span>
         </div>
 
-        {!hasUpstreamColumns && (
-          <div className="glass-panel" style={{ padding: 10, borderRadius: 6, display: 'flex', gap: 8, background: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.2)', marginBottom: 10 }}>
-            <AlertCircle size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-              Connect this node's input and execute the workflow to automatically load column fields.
+        {filterType === 'custom' ? (
+          <div className="form-group">
+            <label className="form-label">Custom Expression (AND/OR)</label>
+            <textarea
+              placeholder='e.g., [Age] > 30 AND [Department] == "Engineering"'
+              value={customExpression}
+              onChange={(e) => handleParamChange('customExpression', e.target.value)}
+              rows={4}
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+              Use brackets [ColName] and standard operators (AND, OR).
             </span>
           </div>
-        )}
-
-        <div className="form-group">
-          <label className="form-label">Filter Column</label>
-          {hasUpstreamColumns ? (
-            <select value={column} onChange={(e) => handleColumnChange(e.target.value)}>
-              <option value="">-- Select Column --</option>
-              {upstreamSchema.map((col) => (
-                <option key={col.name} value={col.name}>
-                  {col.name} ({col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'})
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              placeholder="Type column name"
-              value={column}
-              onChange={(e) => handleColumnChange(e.target.value)}
-            />
-          )}
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Operator</label>
-          <select value={operator} onChange={(e) => handleParamChange('operator', e.target.value)}>
-            {validOperators.map((op) => (
-              <option key={op.value} value={op.value}>
-                {op.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {operator !== 'is_null' && operator !== 'is_not_null' && (
-          <div className="form-group">
-            <label className="form-label">Comparison Value</label>
-            {lowerType.includes('bool') ? (
-              <select value={value} onChange={(e) => handleParamChange('value', e.target.value)}>
-                <option value="">-- Select Value --</option>
-                <option value="true">True</option>
-                <option value="false">False</option>
-              </select>
-            ) : (
-              <input
-                type={lowerType.includes('date') ? 'date' : 'text'}
-                placeholder="Enter value"
-                value={value}
-                onChange={(e) => handleParamChange('value', e.target.value)}
-              />
+        ) : (
+          <>
+            {!hasUpstreamColumns && (
+              <div className="glass-panel" style={{ padding: 10, borderRadius: 6, display: 'flex', gap: 8, background: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.2)', marginBottom: 10 }}>
+                <AlertCircle size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                  Connect this node's input and execute the workflow to automatically load column fields.
+                </span>
+              </div>
             )}
-          </div>
+
+            <div className="form-group">
+              <label className="form-label">Filter Column</label>
+              {hasUpstreamColumns ? (
+                <select value={column} onChange={(e) => handleColumnChange(e.target.value)}>
+                  <option value="">-- Select Column --</option>
+                  {upstreamSchema.map((col) => (
+                    <option key={col.name} value={col.name}>
+                      {col.name} ({col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="Type column name"
+                  value={column}
+                  onChange={(e) => handleColumnChange(e.target.value)}
+                />
+              )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Operator</label>
+              <select value={operator} onChange={(e) => handleParamChange('operator', e.target.value)}>
+                {validOperators.map((op) => (
+                  <option key={op.value} value={op.value}>
+                    {op.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {operator !== 'is_null' && operator !== 'is_not_null' && (
+              <div className="form-group">
+                <label className="form-label">Comparison Value</label>
+                {lowerType.includes('bool') ? (
+                  <select value={value} onChange={(e) => handleParamChange('value', e.target.value)}>
+                    <option value="">-- Select Value --</option>
+                    <option value="true">True</option>
+                    <option value="false">False</option>
+                  </select>
+                ) : (
+                  <input
+                    type={lowerType.includes('date') ? 'date' : 'text'}
+                    placeholder={operator === 'in' || operator === 'not_in' ? "comma-separated values" : "Type target value..."}
+                    value={value}
+                    onChange={(e) => handleParamChange('value', e.target.value)}
+                  />
+                )}
+              </div>
+            )}
+          </>
         )}
       </>
     );
@@ -986,6 +1016,21 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>ID: {id}</span>
       </div>
       <div className="sidebar-content">
+        <div className="form-group" style={{ marginBottom: '16px', background: 'var(--bg-secondary)', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+          <label className="form-label checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', margin: 0 }}>
+            <input
+              type="checkbox"
+              checked={!!parameters.is_cached}
+              onChange={(e) => handleParamChange('is_cached', e.target.checked)}
+              style={{ margin: 0 }}
+            />
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>Cache Node Data</span>
+          </label>
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
+            When enabled, this node will not re-execute if its result is already cached.
+          </span>
+        </div>
+
         {type === 'fileInput' ? renderFileInputConfig() :
          type === 'filter' ? renderFilterConfig() :
          type === 'sort' ? renderSortConfig() :

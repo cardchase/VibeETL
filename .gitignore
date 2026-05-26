@@ -1,0 +1,3 @@
+backend/app/__pycache__
+backend/app/tools/__pycache__
+*.log
