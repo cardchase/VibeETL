@@ -10,9 +10,9 @@ class JoinNode(BaseNode):
         "icon": "GitMerge",
         "description": "Join two datasets together based on a common key.",
         "ui_schema": [
-            {"field": "left_key", "type": "string", "label": "Left Key Column", "default": ""},
-            {"field": "right_key", "type": "string", "label": "Right Key Column", "default": ""},
-            {"field": "how", "type": "select", "label": "Join Type", "options": ["inner", "left", "outer", "semi", "anti"], "default": "inner"}
+            {"field": "left_keys", "type": "string", "label": "Left Key Column", "default": ""},
+            {"field": "right_keys", "type": "string", "label": "Right Key Column", "default": ""},
+            {"field": "how", "type": "select", "label": "Join Type", "options": ["left", "inner", "outer", "semi", "anti"], "default": "left"}
         ]
     }
 
@@ -31,27 +31,41 @@ class JoinNode(BaseNode):
         if left_df is None or right_df is None:
             raise ValueError("Join node missing left or right input dataframe.")
 
-        left_key = self.parameters.get("left_key", "")
-        right_key = self.parameters.get("right_key", "")
+        left_keys = self.parameters.get("left_keys", [])
+        right_keys = self.parameters.get("right_keys", [])
         how = self.parameters.get("how", "inner")
 
-        if not left_key or not right_key:
-            self.log("Left or right key not specified. Returning left dataframe.")
+        # Fallback for backward compatibility
+        if not left_keys and self.parameters.get("left_key"):
+            left_keys = [self.parameters.get("left_key")]
+        if not right_keys and self.parameters.get("right_key"):
+            right_keys = [self.parameters.get("right_key")]
+
+        # Filter empty strings
+        left_keys = [k for k in left_keys if k]
+        right_keys = [k for k in right_keys if k]
+
+        if not left_keys or not right_keys:
+            self.log("Left or right keys not specified. Returning left dataframe.")
             return left_df
 
-        if left_key not in left_df.columns:
-            from app.tools.base import SchemaCompatibilityError
-            raise SchemaCompatibilityError(f"Join error: left key '{left_key}' not found in left input schema. Available: {left_df.columns}")
+        if len(left_keys) != len(right_keys):
+            raise ValueError(f"Join error: Mismatched number of left keys ({len(left_keys)}) and right keys ({len(right_keys)})")
 
-        if right_key not in right_df.columns:
-            from app.tools.base import SchemaCompatibilityError
-            raise SchemaCompatibilityError(f"Join error: right key '{right_key}' not found in right input schema. Available: {right_df.columns}")
+        from app.tools.base import SchemaCompatibilityError
+        for l_key in left_keys:
+            if l_key not in left_df.columns:
+                raise SchemaCompatibilityError(f"Join error: left key '{l_key}' not found in left input schema. Available: {left_df.columns}")
 
-        self.log(f"Performing {how} join. Left key: '{left_key}', Right key: '{right_key}'.")
+        for r_key in right_keys:
+            if r_key not in right_df.columns:
+                raise SchemaCompatibilityError(f"Join error: right key '{r_key}' not found in right input schema. Available: {right_df.columns}")
+
+        self.log(f"Performing {how} join. Left keys: {left_keys}, Right keys: {right_keys}.")
 
         try:
             # Polars join
-            res_df = left_df.join(right_df, left_on=left_key, right_on=right_key, how=how)
+            res_df = left_df.join(right_df, left_on=left_keys, right_on=right_keys, how=how)
             self.log(f"Join successful. Result has {res_df.height} rows and {res_df.width} columns.")
             return res_df
         except Exception as e:

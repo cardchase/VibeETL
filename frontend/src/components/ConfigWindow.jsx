@@ -57,7 +57,18 @@ const getOperatorsForType = (type = '') => {
   ];
 };
 
-const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableTools = [], results = {}, nodes = [], edges = [], style = {} }) => {
+const ConfigWindow = ({
+  selectedNode,
+  upstreamSchema = [],
+  upstreamSchemaLeft = [],
+  upstreamSchemaRight = [],
+  onUpdateParams,
+  availableTools = [],
+  results = {},
+  nodes = [],
+  edges = [],
+  style = {}
+}) => {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [excelSheets, setExcelSheets] = useState([]);
@@ -424,7 +435,28 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
               rows={4}
               style={{ fontFamily: 'var(--font-mono)' }}
             />
-            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                Insert Column: 
+              </span>
+              <select 
+                style={{ fontSize: '0.65rem', padding: '2px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) {
+                    const appendText = `[${e.target.value}]`;
+                    const currentVal = parameters.customExpression || '';
+                    handleParamChange('customExpression', currentVal + (currentVal && !currentVal.endsWith(' ') ? ' ' : '') + appendText);
+                  }
+                }}
+              >
+                <option value="">-- Select --</option>
+                {hasUpstreamColumns && upstreamSchema.map((col) => (
+                  <option key={col.name} value={col.name}>{col.name}</option>
+                ))}
+              </select>
+            </div>
+            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '4px' }}>
               Use brackets [ColName] and standard operators (AND, OR).
             </span>
           </div>
@@ -916,6 +948,130 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
     );
   };
 
+  const renderJoinConfig = () => {
+    const leftKeys = parameters.left_keys || [];
+    const rightKeys = parameters.right_keys || [];
+    const how = parameters.how || 'left';
+
+    const currentLeftKeys = leftKeys.length > 0 ? leftKeys : (parameters.left_key ? [parameters.left_key] : ['']);
+    const currentRightKeys = rightKeys.length > 0 ? rightKeys : (parameters.right_key ? [parameters.right_key] : ['']);
+
+    const hasLeft = upstreamSchemaLeft && upstreamSchemaLeft.length > 0;
+    const hasRight = upstreamSchemaRight && upstreamSchemaRight.length > 0;
+
+    const updateKeyPair = (index, side, value) => {
+       const newLeft = [...currentLeftKeys];
+       const newRight = [...currentRightKeys];
+       if (side === 'left') newLeft[index] = value;
+       else newRight[index] = value;
+       
+       onUpdateParams(id, {
+         ...parameters,
+         left_keys: newLeft,
+         right_keys: newRight
+       });
+    };
+
+    const addKeyPair = () => {
+       onUpdateParams(id, {
+         ...parameters,
+         left_keys: [...currentLeftKeys, ''],
+         right_keys: [...currentRightKeys, '']
+       });
+    };
+
+    const removeKeyPair = (index) => {
+       const newLeft = currentLeftKeys.filter((_, i) => i !== index);
+       const newRight = currentRightKeys.filter((_, i) => i !== index);
+       onUpdateParams(id, {
+         ...parameters,
+         left_keys: newLeft,
+         right_keys: newRight
+       });
+    };
+    
+    const warnings = [];
+    currentLeftKeys.forEach((lk, i) => {
+       const rk = currentRightKeys[i];
+       if (lk && rk) {
+          const lCol = upstreamSchemaLeft.find(c => c.name === lk);
+          const rCol = upstreamSchemaRight.find(c => c.name === rk);
+          if (lCol && rCol && lCol.type !== rCol.type && lCol.type && rCol.type) {
+             const lTypeStr = typeof lCol.type === 'string' ? lCol.type.split('.').pop() : 'Unknown';
+             const rTypeStr = typeof rCol.type === 'string' ? rCol.type.split('.').pop() : 'Unknown';
+             warnings.push(`Mismatch at Pair ${i+1}: Cannot join ${lTypeStr} with ${rTypeStr}.`);
+          }
+       }
+    });
+
+    return (
+      <>
+        <div className="form-group">
+          <label className="form-label">Join Type</label>
+          <select value={how} onChange={(e) => handleParamChange('how', e.target.value)}>
+            <option value="inner">Inner Join</option>
+            <option value="left">Left Join</option>
+            <option value="outer">Outer Join</option>
+            <option value="semi">Semi Join</option>
+            <option value="anti">Anti Join</option>
+          </select>
+        </div>
+
+        {currentLeftKeys.map((_, i) => (
+          <div key={i} style={{ padding: '8px', background: 'var(--bg-secondary)', borderRadius: '4px', marginBottom: '8px', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+               <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Key Pair {i + 1}</span>
+               {currentLeftKeys.length > 1 && (
+                 <button onClick={() => removeKeyPair(i)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '0.8rem' }}>Remove</button>
+               )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Left Column</label>
+              {hasLeft ? (
+                <select value={currentLeftKeys[i]} onChange={(e) => updateKeyPair(i, 'left', e.target.value)}>
+                  <option value="">-- Select Left Key --</option>
+                  {upstreamSchemaLeft.map((col) => (
+                    <option key={col.name} value={col.name}>
+                      {col.name} ({col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Connect a left upstream node.</span>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Right Column</label>
+              {hasRight ? (
+                <select value={currentRightKeys[i]} onChange={(e) => updateKeyPair(i, 'right', e.target.value)}>
+                  <option value="">-- Select Right Key --</option>
+                  {upstreamSchemaRight.map((col) => (
+                    <option key={col.name} value={col.name}>
+                      {col.name} ({col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Connect a right upstream node.</span>
+              )}
+            </div>
+          </div>
+        ))}
+
+        <button onClick={addKeyPair} style={{ width: '100%', padding: '6px', background: 'var(--bg-tertiary)', border: '1px dashed var(--border-color)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', marginBottom: '16px' }}>
+          + Add Key Pair
+        </button>
+
+        {warnings.length > 0 && (
+          <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#451a1a', borderLeft: '4px solid #ef4444', color: '#fca5a5', fontSize: '0.8rem' }}>
+            ⚠️ <strong>Incompatible Types:</strong><br />
+            {warnings.map((w, idx) => <div key={idx}>{w}</div>)}
+          </div>
+        )}
+      </>
+    );
+  };
+
   const getTitle = () => {
     if (toolDef && toolDef.name) return toolDef.name;
 
@@ -986,7 +1142,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 <option value="">-- Select Target Column --</option>
                 {upstreamSchema.map((col) => (
                   <option key={col.name} value={col.name}>
-                    {col.name}
+                    {col.name} {col.type ? `(${typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'})` : ''}
                   </option>
                 ))}
               </select>
@@ -998,6 +1154,90 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
               />
             )}
+          </div>
+        );
+      }
+
+      if (fieldDef.type === 'multi_column_select') {
+        const selectedCols = Array.isArray(val) ? val : (val ? val.split(',').map(s => s.trim()).filter(Boolean) : []);
+        
+        const toggleColumn = (colName) => {
+          if (selectedCols.includes(colName)) {
+            handleParamChange(fieldDef.field, selectedCols.filter(c => c !== colName));
+          } else {
+            handleParamChange(fieldDef.field, [...selectedCols, colName]);
+          }
+        };
+
+        return (
+          <div key={idx} className="form-group">
+            <label className="form-label">{fieldDef.label}</label>
+            {hasUpstreamColumns ? (
+              <div className="select-columns-list" style={{ maxHeight: '150px' }}>
+                {upstreamSchema.map((col) => {
+                  const isChecked = selectedCols.includes(col.name);
+                  return (
+                    <div key={col.name} className="column-row">
+                      <label className="column-name-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleColumn(col.name)}
+                        />
+                        {col.name} {col.type ? `(${typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'})` : ''}
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                Connect an upstream node to see columns.
+              </span>
+            )}
+          </div>
+        );
+      }
+
+      if (fieldDef.type === 'dynamic_output_columns') {
+        const columns = Array.isArray(val) ? val : [];
+        
+        const updateCol = (index, key, v) => {
+          const newCols = [...columns];
+          newCols[index] = { ...newCols[index], [key]: v };
+          handleParamChange(fieldDef.field, newCols);
+        };
+        const addCol = () => handleParamChange(fieldDef.field, [...columns, { name: '', type: 'String' }]);
+        const removeCol = (index) => handleParamChange(fieldDef.field, columns.filter((_, i) => i !== index));
+
+        return (
+          <div key={idx} className="form-group">
+            <label className="form-label">{fieldDef.label}</label>
+            {columns.map((col, i) => (
+              <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  placeholder="Col Name (Group "
+                  value={col.name || ''}
+                  onChange={(e) => updateCol(i, 'name', e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <select 
+                  value={col.type || 'String'} 
+                  onChange={(e) => updateCol(i, 'type', e.target.value)}
+                  style={{ flex: 1, padding: '4px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '4px' }}
+                >
+                  <option value="String">String</option>
+                  <option value="Int64">Integer</option>
+                  <option value="Float64">Float</option>
+                  <option value="Boolean">Boolean</option>
+                </select>
+                <button onClick={() => removeCol(i)} style={{ color: 'var(--color-danger)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+              </div>
+            ))}
+            <button onClick={addCol} style={{ width: '100%', padding: '6px', background: 'var(--bg-tertiary)', border: '1px dashed var(--border-color)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>
+              + Add Capture Group Column
+            </button>
           </div>
         );
       }
@@ -1031,6 +1271,32 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           </span>
         </div>
 
+        {hasUpstreamColumns && (
+          <div style={{ marginBottom: '16px', background: 'var(--bg-secondary)', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Incoming Data Schema</div>
+            <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+              <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '4px' }}>Column Name</th>
+                    <th style={{ padding: '4px' }}>Data Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {upstreamSchema.map((col) => (
+                    <tr key={col.name} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <td style={{ padding: '4px', color: 'var(--text-secondary)' }}>{col.name}</td>
+                      <td style={{ padding: '4px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+                        {col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {type === 'fileInput' ? renderFileInputConfig() :
          type === 'filter' ? renderFilterConfig() :
          type === 'sort' ? renderSortConfig() :
@@ -1039,7 +1305,17 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
          type === 'imageCaption' ? renderImageCaptionConfig() :
          type === 'fileOutput' ? renderFileOutputConfig() :
          type === 'regex' ? renderRegexConfig() :
-         (toolDef && toolDef.ui_schema) ? renderDynamicForm(toolDef.ui_schema) : null}
+         type === 'join' ? renderJoinConfig() :
+         (toolDef && toolDef.ui_schema) ? (
+            <>
+              {renderDynamicForm(toolDef.ui_schema)}
+              {type === 'summarize' && parameters.agg_function && parameters.agg_function !== 'count' && !parameters.agg_column && (
+                <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#451a1a', borderLeft: '4px solid #ef4444', color: '#fca5a5', fontSize: '0.8rem' }}>
+                  ⚠️ You selected '{parameters.agg_function}' but no Aggregation Column. The operation will default to counting rows.
+                </div>
+              )}
+            </>
+         ) : null}
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import * as Icons from 'lucide-react';
 import { Play, RefreshCw, Trash2 } from 'lucide-react';
 
-const ToolPalette = ({ onRunPipeline, onClearCache, isRunning, autoRun, setAutoRun, availableTools = [] }) => {
+const ToolPalette = ({ onRunPipeline, onClearCache, onSaveWorkflow, onLoadWorkflow, isRunning, autoRun, setAutoRun, availableTools = [] }) => {
   // Drag start handler for tool items
   const onDragStart = (event, nodeType) => {
     event.dataTransfer.setData('application/reactflow', nodeType);
@@ -74,6 +74,31 @@ const ToolPalette = ({ onRunPipeline, onClearCache, isRunning, autoRun, setAutoR
           />
           <span>Auto-Run</span>
         </label>
+
+        <label
+          className="copy-logs-btn"
+          title="Load workflow from YAML file"
+          style={{ padding: '6px 10px', height: '32px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', borderRadius: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: '0.75rem', fontWeight: 600 }}
+        >
+          <Icons.Upload size={14} />
+          <span>Load</span>
+          <input
+            type="file"
+            accept=".yaml,.yml"
+            style={{ display: 'none' }}
+            onChange={onLoadWorkflow}
+          />
+        </label>
+
+        <button
+          className="copy-logs-btn"
+          onClick={onSaveWorkflow}
+          title="Save current workflow to YAML file"
+          style={{ padding: '6px 10px', height: '32px' }}
+        >
+          <Icons.Save size={14} />
+          <span>Save</span>
+        </button>
 
         <button
           className="copy-logs-btn"

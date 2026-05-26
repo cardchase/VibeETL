@@ -58,11 +58,14 @@ Nodes are color-coded to align with standard data processing categories:
 
 | Category | Color | Node | Description |
 | :--- | :--- | :--- | :--- |
-| **In / Out** | Green 🟢 | **File Input** | Loads CSV, Excel, or PDF. Autodetects formatting and extracts schema. |
+| **In / Out** | Green 🟢 | **File Input** | Loads CSV, Excel, PDF, Parquet, or JSON. Autodetects formatting and extracts schema. |
 | **In / Out** | Green 🟢 | **Browse** | Displays target schema and preview rows from any point in the workflow. |
-| **Prep** | Blue 🔵 | **Filter** | Filters rows using expressions (e.g., `Age > 30`, `Department == "Engineering"`). |
+| **Prep** | Blue 🔵 | **Filter** | Filters rows using basic operators or custom expressions (e.g., `[Age] > 30 AND [Dept] == 'Sales'`). |
 | **Prep** | Blue 🔵 | **Sort** | Sorts the dataset by a selected column in ascending or descending order. |
 | **Transform** | Orange 🟠 | **Select** | Keeps/drops columns and renames fields, propagating schemas downstream. |
+| **Transform** | Orange 🟠 | **Summarize** | Groups by columns and applies aggregate functions (Sum, Count, Min, Max, Mean). |
+| **Transform** | Orange 🟠 | **Regex Parser** | Extracts substrings from columns using Regular Expressions. |
+| **Join** | Slate-Gray 🔘 | **Join** | Joins two datasets together based on common keys. |
 
 ### 📖 Reference Examples: How the Built-in Nodes Work
 
@@ -73,7 +76,7 @@ To guide your development, here is a detailed breakdown of how each standard nod
 *   **Category**: In / Out (`inout`)
 *   **Parameters**:
     *   `filePath` (String): The path or filename of the target file.
-    *   `fileType` (String): `"auto"`, `"csv"`, `"excel"`, or `"pdf"`.
+    *   `fileType` (String): `"auto"`, `"csv"`, `"excel"`, `"pdf"`, `"parquet"`, or `"json"`.
     *   `detectedSchema` (Array of objects): Caches the column list.
 *   **Schema Output**: Dynamically read from the file structure (e.g. `[{"name": "ColA", "type": "String"}, ...]`).
 
@@ -94,9 +97,11 @@ To guide your development, here is a detailed breakdown of how each standard nod
 *   **Purpose**: Filter the rows of the dataset using a conditional predicate.
 *   **Category**: Prep (`prep`)
 *   **Parameters**:
-    *   `column` (String): Upstream column name to inspect.
-    *   `operator` (String): `"=="`, `"!="`, `">"`, `"<"`, `">="`, `"<="`, `"contains"`.
-    *   `value` (String): Operand comparison string/number.
+    *   `filterType` (String): Filter Mode (`"basic"` or `"custom"`).
+    *   `column` (String): Upstream column name to inspect (Basic Mode).
+    *   `operator` (String): Basic operator (`"=="`, `"!="`, `">"`, `"<"`, `">="`, `"<="`, `"contains"`, `"not_contains"`, `"starts_with"`, `"ends_with"`, `"is_null"`, `"is_not_null"`, `"in"`, `"not_in"`, `"matches_regex"`).
+    *   `value` (String): Operand comparison string/number (Basic Mode).
+    *   `customExpression` (String): Custom boolean expression (e.g., `[Age] > 30 AND [Dept] == 'Sales'`).
 *   **Schema Output**: Passes the exact incoming upstream schema through unchanged.
 *   **Note**: Implements **two output handles** (`T` for True matching rows and `F` for False matching rows) allowing for conditional data stream branching.
 
@@ -123,6 +128,34 @@ To guide your development, here is a detailed breakdown of how each standard nod
 *   **Category**: In / Out (`inout`)
 *   **Parameters**: *None*
 *   **Schema Output**: Passes the incoming upstream schema through unchanged.
+
+#### 7. Join Node (`join`)
+*   **Purpose**: Combines two input datasets based on specified key columns for each dataset.
+*   **Category**: Join (`join`)
+*   **Parameters**:
+    *   `left_keys` (Array of Strings): Left Key Column(s)
+    *   `right_keys` (Array of Strings): Right Key Column(s)
+    *   `how` (String): Join Type (`"inner"`, `"left"`, `"outer"`, `"semi"`, `"anti"`)
+*   **Schema Output**: Combines columns from both input schemas based on the join logic.
+
+#### 8. Summarize Node (`summarize`)
+*   **Purpose**: Performs grouping and aggregation operations on datasets.
+*   **Category**: Transform (`transform`)
+*   **Parameters**:
+    *   `group_by` (Array of Strings): Group By Column(s) selected via multi_column_select
+    *   `agg_column` (String): Aggregation Column
+    *   `agg_function` (String): Aggregation Function (`"sum"`, `"count"`, `"min"`, `"max"`, `"mean"`)
+    *   `output_name` (String): Output Column Name
+*   **Schema Output**: Outputs a new schema containing the grouped columns and the new aggregated column.
+
+#### 9. Regex Parser Node (`regex`)
+*   **Purpose**: Extracts substrings into new columns using Regular Expression capture groups.
+*   **Category**: Transform (`transform`)
+*   **Parameters**:
+    *   `column` (String): Target Column to apply the regex pattern.
+    *   `pattern` (String): Regex Pattern with capture groups `(...)`.
+    *   `outputColumns` (Array of objects): Dynamic list of capture group names and types (e.g. `[{"name": "Col1", "type": "String"}]`).
+*   **Schema Output**: Appends the extracted capture group columns to the incoming schema.
 
 ---
 
@@ -379,6 +412,21 @@ Do **not** modify any Javascript or React files (`frontend/src/...`) to register
 *   Specify `"ui_schema"` inputs carefully:
     *   For column operations, always use `"type": "column_select"` so the UI automatically loads upstream schemas.
     *   Set sensible `"default"` values so the engine does not fail on empty configurations.
+
+#### 3. In-Memory execution contract:
+*   Your executor class must inherit from `BaseNode`.
+*   Always implement `execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame`.
+*   Use standard **Polars** (`import polars as pl`) for sub-millisecond, multi-threaded DataFrame operations. Avoid heavy disk writing unless explicitly requested.
+*   Log meaningful steps using `self.log("Message text")` so the user can debug the execution live from the canvas log panels.
+
+#### 4. Verification Check:
+Before ending your task, run:
+```bash
+python -m unittest backend/test_tool.py
+```
+This guarantees your manifest is perfectly formatted and compatible with the dynamic form solver!
+
+not fail on empty configurations.
 
 #### 3. In-Memory execution contract:
 *   Your executor class must inherit from `BaseNode`.

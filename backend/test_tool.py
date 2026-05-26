@@ -74,7 +74,12 @@ def test_tool(file_path: str):
         # 7. Execute Node
         print(f"[*] Executing node with mock DataFrame...")
         try:
-            result_df = node.execute({"input": mock_df})
+            # Pass mock_df to common port names to support different types of nodes (e.g. input, left, right)
+            result_df = node.execute({
+                "input": mock_df,
+                "left": mock_df,
+                "right": mock_df
+            })
         except Exception as e:
             print(f"[WARN] WARNING: Node execution threw an error. This might be expected depending on the default parameters. Error: {e}")
             continue

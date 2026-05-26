@@ -6,6 +6,7 @@ import ConfigWindow from './components/ConfigWindow';
 import ResultsWindow from './components/ResultsWindow';
 import ErrorBoundary from './components/ErrorBoundary';
 import CustomNode from './components/CustomNode';
+import yaml from 'js-yaml';
 import './App.css';
 
 // Initial nodes to populate the workspace with a working demo out-of-the-box
@@ -114,6 +115,24 @@ const resolveNodeSchema = (nodeId, nodes, edges, results = {}) => {
       });
   }
 
+  // If node is join, combine left and right schemas
+  if (node.type === 'join') {
+    const leftEdge = edges.find(e => e.target === nodeId && e.targetHandle === 'left');
+    const rightEdge = edges.find(e => e.target === nodeId && e.targetHandle === 'right');
+    const leftSchema = leftEdge ? resolveNodeSchema(leftEdge.source, nodes, edges, results) : [];
+    const rightSchema = rightEdge ? resolveNodeSchema(rightEdge.source, nodes, edges, results) : [];
+    
+    const combined = [...leftSchema];
+    rightSchema.forEach(rc => {
+      if (!combined.find(lc => lc.name === rc.name)) {
+        combined.push(rc);
+      } else {
+        combined.push({ name: `${rc.name}_right`, type: rc.type });
+      }
+    });
+    return combined;
+  }
+
   // Regex appends new columns to the upstream schema
   if (node.type === 'regex') {
     const outputCols = node.data?.parameters?.outputColumns || [];
@@ -122,6 +141,40 @@ const resolveNodeSchema = (nodeId, nodes, edges, results = {}) => {
       type: c.type || 'String'
     }));
     return [...upstreamSchema, ...newSchema];
+  }
+
+  // Summarize node reduces schema to group_by columns + output_name column
+  if (node.type === 'summarize') {
+    const groupBy = node.data?.parameters?.group_by || [];
+    const outName = node.data?.parameters?.output_name || 'Aggregated';
+    const aggFunc = node.data?.parameters?.agg_function || 'sum';
+    const aggColName = node.data?.parameters?.agg_column;
+
+    const groupByCols = Array.isArray(groupBy) ? groupBy : (typeof groupBy === 'string' ? groupBy.split(',').map(s=>s.trim()).filter(Boolean) : []);
+
+    // If no grouping and no aggregation column, it just passes through original schema
+    if (groupByCols.length === 0 && !aggColName) {
+      return upstreamSchema;
+    }
+
+    const newSchema = [];
+    
+    // Add group by columns with their original types
+    groupByCols.forEach(colName => {
+      const upstreamCol = upstreamSchema.find(uc => uc.name === colName);
+      if (upstreamCol) newSchema.push(upstreamCol);
+      else newSchema.push({ name: colName, type: 'Unknown' });
+    });
+
+    let outType = 'Float64';
+    if (aggFunc === 'count' || !aggColName) outType = 'Int64';
+    else if (aggColName) {
+      const aggUpstreamCol = upstreamSchema.find(uc => uc.name === aggColName);
+      if (aggUpstreamCol) outType = aggUpstreamCol.type;
+    }
+    
+    newSchema.push({ name: outName, type: outType });
+    return newSchema;
   }
 
   // Filter, Sort, and File Output don't modify the schema, they just pass it through
@@ -174,6 +227,7 @@ function App() {
   const [autoRun, setAutoRun] = useState(true);
   const [availableTools, setAvailableTools] = useState([]);
   const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [lastSavedConfigStr, setLastSavedConfigStr] = useState(null);
   const isResizing = React.useRef(false);
 
   const startResizing = useCallback((mouseDownEvent) => {
@@ -244,7 +298,7 @@ function App() {
     (params) => {
       const edge = {
         ...params,
-        id: `e-${params.source}-${params.target}`,
+        id: `e-${params.source}-${params.sourceHandle}-${params.target}-${params.targetHandle}`,
         style: { stroke: '#9ca3af', strokeWidth: 2 }
       };
       setEdges((eds) => addEdge(edge, eds));
@@ -289,7 +343,11 @@ function App() {
       label = toolDef.name || label;
       category = toolDef.category || category;
       icon = toolDef.icon || icon;
-      defaultParams = toolDef.defaultParams || {};
+      if (toolDef.ui_schema) {
+        toolDef.ui_schema.forEach(field => {
+          defaultParams[field.field] = field.default !== undefined ? field.default : '';
+        });
+      }
     } else {
       console.warn(`Tool definition not found for: ${type}. Using fallback defaults.`);
       if (type === 'fileInput') {
@@ -352,7 +410,7 @@ function App() {
 
     setNodes((nds) => nds.concat(newNode));
     setSelectedNodeId(newNodeId);
-  }, [setNodes]);
+  }, [setNodes, availableTools]);
 
   // Clean state when nodes are deleted
   const onNodesDelete = useCallback((deleted) => {
@@ -368,20 +426,37 @@ function App() {
   }, [nodes, selectedNodeId]);
 
   // Resolves the schema of the selected node's upstream connection
-  const upstreamSchema = useMemo(() => {
-    if (!selectedNodeId) return [];
+  const { upstreamSchema, upstreamSchemaLeft, upstreamSchemaRight } = useMemo(() => {
+    if (!selectedNodeId) return { upstreamSchema: [] };
     
     // Find if the selected node is a FileInput (doesn't have upstream)
     const activeNode = nodes.find(n => n.id === selectedNodeId);
-    if (!activeNode || activeNode.type === 'fileInput') return [];
+    if (!activeNode || activeNode.type === 'fileInput') return { upstreamSchema: [] };
+
+    if (activeNode.type === 'join') {
+      const leftEdge = edges.find(e => e.target === selectedNodeId && e.targetHandle === 'left');
+      const rightEdge = edges.find(e => e.target === selectedNodeId && e.targetHandle === 'right');
+      const leftSchema = leftEdge ? resolveNodeSchema(leftEdge.source, nodes, edges, results) : [];
+      const rightSchema = rightEdge ? resolveNodeSchema(rightEdge.source, nodes, edges, results) : [];
+      
+      const combined = [...leftSchema];
+      rightSchema.forEach(rc => {
+        if (!combined.find(lc => lc.name === rc.name)) {
+          combined.push(rc);
+        } else {
+          combined.push({ name: `${rc.name}_right`, type: rc.type });
+        }
+      });
+      return { upstreamSchema: combined, upstreamSchemaLeft: leftSchema, upstreamSchemaRight: rightSchema };
+    }
 
     // Find connection entering the selected node's "input" port
     const incomingEdge = edges.find(
       (e) => e.target === selectedNodeId && (e.targetPort === 'input' || e.targetHandle === 'input')
     );
-    if (!incomingEdge) return [];
+    if (!incomingEdge) return { upstreamSchema: [] };
 
-    return resolveNodeSchema(incomingEdge.source, nodes, edges, results);
+    return { upstreamSchema: resolveNodeSchema(incomingEdge.source, nodes, edges, results) };
   }, [nodes, edges, selectedNodeId, results]);
 
   const handleClearCache = async () => {
@@ -459,11 +534,23 @@ function App() {
           const nodeResult = data.results?.[node.id];
           const outcomeStatus = nodeResult?.status || 'idle';
           
+          let resultStats = null;
+          if (nodeResult) {
+            resultStats = {
+              row_count: nodeResult.row_count,
+              ports: nodeResult.ports ? Object.keys(nodeResult.ports).reduce((acc, port) => {
+                acc[port] = nodeResult.ports[port].row_count;
+                return acc;
+              }, {}) : null
+            };
+          }
+
           return {
             ...node,
             data: {
               ...node.data,
               status: outcomeStatus,
+              resultStats: resultStats,
               // If node is a FileInput and returned a schema, cache it in parameters
               parameters: {
                 ...node.data.parameters,
@@ -517,6 +604,80 @@ function App() {
     runPipelineRef.current = handleRunPipeline;
   }, [handleRunPipeline]);
 
+  // Track initial state and beforeunload
+  useEffect(() => {
+    if (lastSavedConfigStr === null) {
+      setLastSavedConfigStr(dagConfigStr);
+    }
+  }, [dagConfigStr, lastSavedConfigStr]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      const isDirty = lastSavedConfigStr !== null && lastSavedConfigStr !== dagConfigStr;
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dagConfigStr, lastSavedConfigStr]);
+
+  // Handle Save
+  const handleSaveWorkflow = useCallback(() => {
+    const workflow = {
+      nodes: nodes.map(n => ({
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data: n.data
+      })),
+      edges: edges.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        style: e.style
+      }))
+    };
+    
+    const yamlStr = yaml.dump(workflow);
+    const blob = new Blob([yamlStr], { type: 'text/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'workflow.yaml';
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    setLastSavedConfigStr(dagConfigStr);
+    setGlobalLogs((prev) => [...prev, `System: Workflow saved to workflow.yaml`]);
+  }, [nodes, edges, dagConfigStr]);
+
+  // Handle Load
+  const handleLoadWorkflow = useCallback((e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const workflow = yaml.load(evt.target.result);
+        if (workflow && workflow.nodes && workflow.edges) {
+          setNodes(workflow.nodes);
+          setEdges(workflow.edges);
+          setLastSavedConfigStr(null); // Reset so it captures the loaded state
+          setGlobalLogs((prev) => [...prev, `System: Loaded workflow from ${file.name}`]);
+        }
+      } catch (err) {
+        setGlobalLogs((prev) => [...prev, `ERROR: Failed to load workflow - ${err.message}`]);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = null; 
+  }, [setNodes, setEdges]);
+
   // Debounced auto-run compile action
   React.useEffect(() => {
     if (!autoRun) return;
@@ -542,6 +703,8 @@ function App() {
       <ToolPalette 
         onRunPipeline={handleRunPipeline} 
         onClearCache={handleClearCache}
+        onSaveWorkflow={handleSaveWorkflow}
+        onLoadWorkflow={handleLoadWorkflow}
         isRunning={isRunning} 
         autoRun={autoRun}
         setAutoRun={setAutoRun}
@@ -554,6 +717,8 @@ function App() {
           <ConfigWindow
             selectedNode={selectedNode}
             upstreamSchema={upstreamSchema}
+            upstreamSchemaLeft={upstreamSchemaLeft}
+            upstreamSchemaRight={upstreamSchemaRight}
             onUpdateParams={handleUpdateParams}
             availableTools={availableTools}
             results={results}

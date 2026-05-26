@@ -50,7 +50,8 @@ class RegexNode(BaseNode):
                 continue
                 
             # Extract group (1-indexed based on capture groups in the regex)
-            expr = pl.col(column).str.extract(pattern, group_index=i+1).alias(name)
+            # We first cast the target column to String so regex can run on integers/floats etc.
+            expr = pl.col(column).cast(pl.String).str.extract(pattern, group_index=i+1).alias(name)
             
             # Apply casting if not String
             pl_type = self._map_to_polars_type(target_type)

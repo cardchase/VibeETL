@@ -27,6 +27,12 @@ const CustomNode = ({ id, data, selected, type }) => {
     description = `${activeCols} cols`;
   } else if (type === 'browse' || type === 'browse') {
     description = 'View Data';
+  } else if (type === 'summarize') {
+    const aggFunc = data?.parameters?.agg_function || 'count';
+    const groupCols = Array.isArray(data?.parameters?.group_by) ? data.parameters.group_by.length : (typeof data?.parameters?.group_by === 'string' && data.parameters.group_by ? data.parameters.group_by.split(',').length : 0);
+    description = `${aggFunc} by ${groupCols} cols`;
+  } else if (type === 'join') {
+    description = `${data?.parameters?.how || 'inner'} join`;
   } else if (data?.description) {
     description = data.description;
   }
@@ -34,7 +40,26 @@ const CustomNode = ({ id, data, selected, type }) => {
   return (
     <div className={`custom-node ${category} ${selected ? 'selected' : ''}`}>
       {/* Target port (Left) for all nodes except FileInput and ImageCaption */}
-      {type !== 'fileInput' && type !== 'imageCaption' && (
+      {type === 'join' ? (
+        <>
+          <div className="filter-port-label" style={{ left: 4, top: 'calc(30% - 5px)' }}>L</div>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="left"
+            style={{ top: '30%' }}
+            className="node-handle left-handle"
+          />
+          <div className="filter-port-label" style={{ left: 4, top: 'calc(70% - 5px)' }}>R</div>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="right"
+            style={{ top: '70%' }}
+            className="node-handle left-handle"
+          />
+        </>
+      ) : type !== 'fileInput' && type !== 'imageCaption' && (
         <Handle
           type="target"
           position={Position.Left}
@@ -66,6 +91,19 @@ const CustomNode = ({ id, data, selected, type }) => {
         {description && (
           <div className="node-label-sub" title={description}>
             {description}
+          </div>
+        )}
+        
+        {/* Row Count Badge */}
+        {data?.resultStats && (
+          <div className="node-row-count-badge" title="Rows processed">
+            {data.resultStats.ports ? (
+              <span style={{color: 'var(--text-secondary)'}}>
+                {Object.entries(data.resultStats.ports).map(([port, count]) => `${port[0].toUpperCase()}: ${count}`).join(' | ')}
+              </span>
+            ) : (
+              <span style={{color: 'var(--text-secondary)'}}>{data.resultStats.row_count} rows</span>
+            )}
           </div>
         )}
       </div>
