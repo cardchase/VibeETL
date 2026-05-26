@@ -22,7 +22,7 @@ class FileOutputNode(BaseNode):
         "ui_schema": [
             {"field": "saveFile", "type": "boolean", "label": "Write to Disk", "default": False},
             {"field": "outputPath", "type": "string", "label": "Output Path / File Name", "default": "output.csv"},
-            {"field": "outputFormat", "type": "select", "label": "Output Format", "options": ["csv"], "default": "csv"}
+            {"field": "outputFormat", "type": "select", "label": "Output Format", "options": ["csv", "parquet", "json"], "default": "csv"}
         ]
     }
 
@@ -65,9 +65,19 @@ class FileOutputNode(BaseNode):
     def _get_writer_registry(self) -> Dict[str, Callable[[pl.DataFrame, str], None]]:
         """Registry mapping file type identifiers to their writing strategies."""
         return {
-            "csv": self._write_csv
+            "csv": self._write_csv,
+            "parquet": self._write_parquet,
+            "json": self._write_json
         }
 
     def _write_csv(self, df: pl.DataFrame, file_path: str) -> None:
         self.log(f"Writing CSV file to {file_path}")
         df.write_csv(file_path)
+
+    def _write_parquet(self, df: pl.DataFrame, file_path: str) -> None:
+        self.log(f"Writing Parquet file to {file_path}")
+        df.write_parquet(file_path)
+
+    def _write_json(self, df: pl.DataFrame, file_path: str) -> None:
+        self.log(f"Writing JSON file to {file_path}")
+        df.write_json(file_path, row_oriented=True)

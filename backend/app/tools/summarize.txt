@@ -1,0 +1,4 @@
+Summarize Node
+---
+Performs grouping and aggregation (Sum, Count, Min, Max, Mean) operations on datasets.
+Allows specifying one or more columns to group by, and a target column to aggregate.

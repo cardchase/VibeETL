@@ -7,6 +7,8 @@ from app.tools.browse import BrowseNode
 from app.tools.image_caption import ImageCaptionNode
 from app.tools.file_output import FileOutputNode
 from app.tools.regex import RegexNode
+from app.tools.join import JoinNode
+from app.tools.summarize import SummarizeNode
 
 NODE_CLASSES = {
     "fileInput": FileInputNode,
@@ -16,5 +18,7 @@ NODE_CLASSES = {
     "select": SelectNode,
     "regex": RegexNode,
     "browse": BrowseNode,
-    "imageCaption": ImageCaptionNode
+    "imageCaption": ImageCaptionNode,
+    "join": JoinNode,
+    "summarize": SummarizeNode
 }
