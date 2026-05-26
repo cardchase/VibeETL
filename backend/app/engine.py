@@ -11,11 +11,16 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
       - nodes: List[Dict[str, Any]]
       - edges: List[Dict[str, Any]]
     """
-    cache.clear()
-    cache.add_global_log("Initializing pipeline execution...")
-
     nodes_list = pipeline_data.get("nodes", [])
     edges_list = pipeline_data.get("edges", [])
+
+    # Collect nodes that are requested to be cached
+    cached_node_ids = [n["id"] for n in nodes_list if n.get("parameters", {}).get("is_cached", False)]
+
+    # Keep cached data only for nodes that explicitly request it
+    cache.clear_except(cached_node_ids)
+
+    cache.add_global_log("Initializing pipeline execution...")
 
     # Map node_id to its full configuration
     node_map = {n["id"]: n for n in nodes_list}
@@ -58,6 +63,13 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
         node_type = node_cfg.get("type")
         parameters = node_cfg.get("parameters", {})
         node_name = node_cfg.get("data", {}).get("label", f"{node_type}_{node_id}")
+        is_cached = parameters.get("is_cached", False)
+
+        # Skip execution if the node is cached and already has a valid result
+        existing_result = cache.get_node_result_payload(node_id)
+        if is_cached and existing_result.get("status") == "success":
+            cache.add_global_log(f"Skipping execution of node '{node_name}' ({node_id}). Using CACHED result.")
+            continue
 
         cache.add_global_log(f"Starting execution of node '{node_name}' ({node_id})")
         start_time = time.time()

@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import * as Icons from 'lucide-react';
-import { Play, RefreshCw } from 'lucide-react';
+import { Play, RefreshCw, Trash2 } from 'lucide-react';
 
-const ToolPalette = ({ onRunPipeline, isRunning, autoRun, setAutoRun, availableTools = [] }) => {
+const ToolPalette = ({ onRunPipeline, onClearCache, isRunning, autoRun, setAutoRun, availableTools = [] }) => {
   // Drag start handler for tool items
   const onDragStart = (event, nodeType) => {
     event.dataTransfer.setData('application/reactflow', nodeType);
@@ -74,6 +74,16 @@ const ToolPalette = ({ onRunPipeline, isRunning, autoRun, setAutoRun, availableT
           />
           <span>Auto-Run</span>
         </label>
+
+        <button
+          className="copy-logs-btn"
+          onClick={onClearCache}
+          title="Clear all node caches"
+          style={{ padding: '6px 10px', height: '32px' }}
+        >
+          <Trash2 size={14} />
+          <span>Clear Cache</span>
+        </button>
 
         <button
           className="run-button"

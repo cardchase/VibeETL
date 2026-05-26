@@ -166,9 +166,11 @@ class FilterNode(BaseNode):
         "icon": "Filter",
         "description": "Filter rows by a condition.",
         "ui_schema": [
-            {"field": "column", "type": "column_select", "label": "Filter Column", "default": ""},
-            {"field": "operator", "type": "select", "label": "Operator", "options": ["==", "!=", ">", "<", ">=", "<=", "contains", "not_contains", "starts_with", "ends_with", "is_null", "is_not_null", "in", "not_in", "matches_regex"], "default": "=="},
-            {"field": "value", "type": "string", "label": "Comparison Value", "default": ""}
+            {"field": "filterType", "type": "select", "label": "Filter Mode", "options": ["basic", "custom"], "default": "basic"},
+            {"field": "column", "type": "column_select", "label": "Filter Column (Basic)", "default": ""},
+            {"field": "operator", "type": "select", "label": "Operator (Basic)", "options": ["==", "!=", ">", "<", ">=", "<=", "contains", "not_contains", "starts_with", "ends_with", "is_null", "is_not_null", "in", "not_in", "matches_regex"], "default": "=="},
+            {"field": "value", "type": "string", "label": "Comparison Value (Basic)", "default": ""},
+            {"field": "customExpression", "type": "string", "label": "Custom Expression (AND/OR)", "default": ""}
         ]
     }
 

@@ -16,8 +16,9 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 24px;
-  height: 80px; /* Increased height */
+  height: 48px;
   padding: 0 20px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
@@ -535,6 +536,19 @@
   background: var(--color-warning);
   box-shadow: 0 0 4px var(--color-warning);
   animation: pulse 1.5s infinite;
+}
+
+.node-status-dot.cached {
+  top: auto;
+  bottom: -4px;
+  right: -4px;
+  background: var(--color-accent);
+  box-shadow: 0 0 4px var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
 }
 
 /* Node Labels positioned absolute UNDER the node box */
