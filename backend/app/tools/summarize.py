@@ -10,7 +10,7 @@ class SummarizeNode(BaseNode):
         "icon": "Sigma",
         "description": "Group by columns and apply aggregate functions (Sum, Count, Min, Max, Mean).",
         "ui_schema": [
-            {"field": "group_by", "type": "string", "label": "Group By Column(s) (comma separated)", "default": ""},
+            {"field": "group_by", "type": "multi_column_select", "label": "Group By Column(s)", "default": []},
             {"field": "agg_column", "type": "column_select", "label": "Aggregation Column", "default": ""},
             {"field": "agg_function", "type": "select", "label": "Aggregation Function", "options": ["sum", "count", "min", "max", "mean"], "default": "sum"},
             {"field": "output_name", "type": "string", "label": "Output Column Name", "default": "Aggregated"}
@@ -22,7 +22,7 @@ class SummarizeNode(BaseNode):
         if df is None:
             raise ValueError("Input dataframe is missing.")
 
-        group_by_raw = self.parameters.get("group_by", "")
+        group_by_raw = self.parameters.get("group_by", [])
         agg_column = self.parameters.get("agg_column", "")
         agg_function = self.parameters.get("agg_function", "sum")
         output_name = self.parameters.get("output_name", "Aggregated")
@@ -31,7 +31,12 @@ class SummarizeNode(BaseNode):
             self.log("No grouping or aggregation specified. Returning original dataframe.")
             return df
 
-        group_by_cols = [c.strip() for c in group_by_raw.split(",")] if group_by_raw else []
+        if isinstance(group_by_raw, str):
+            group_by_cols = [c.strip() for c in group_by_raw.split(",") if c.strip()]
+        elif isinstance(group_by_raw, list):
+            group_by_cols = [c.strip() for c in group_by_raw if isinstance(c, str) and c.strip()]
+        else:
+            group_by_cols = []
 
         # Verify columns exist
         from app.tools.base import SchemaCompatibilityError
@@ -69,7 +74,7 @@ class SummarizeNode(BaseNode):
                 if agg_expr is not None:
                     res_df = grouped.agg(agg_expr)
                 else:
-                    res_df = grouped.agg(pl.count().alias("count")) # Default to row count if no agg specified
+                    res_df = grouped.agg(pl.count().alias(output_name)) # Default to row count if no agg specified
             else:
                 if agg_expr is not None:
                      res_df = df.select(agg_expr)
