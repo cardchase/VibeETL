@@ -1,0 +1,4 @@
+Join Node
+---
+Combines two input datasets based on a specified key column for each dataset.
+It supports different join types including Inner, Left, Outer, Semi, and Anti joins.

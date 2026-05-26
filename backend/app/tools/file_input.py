@@ -23,7 +23,7 @@ class FileInputNode(BaseNode):
         "description": "Read data from local CSV, Excel, PDF, or Image files.",
         "ui_schema": [
             {"field": "filePath", "type": "string", "label": "File Path / Name", "default": ""},
-            {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "pdf", "image"], "default": "auto"}
+            {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "pdf", "image", "parquet", "json"], "default": "auto"}
         ]
     }
 
@@ -60,7 +60,9 @@ class FileInputNode(BaseNode):
             "csv": self._parse_csv,
             "excel": self._parse_excel,
             "pdf": self._parse_pdf,
-            "image": self._parse_image
+            "image": self._parse_image,
+            "parquet": self._parse_parquet,
+            "json": self._parse_json
         }
 
     def _resolve_auto_type(self, ext: str, registry: dict) -> str:
@@ -69,7 +71,21 @@ class FileInputNode(BaseNode):
         if ext in [".xls", ".xlsx", ".xlsm", ".xlsb", ".ods"]: return "excel"
         if ext == ".pdf": return "pdf"
         if ext in [".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif", ".webp"]: return "image"
+        if ext == ".parquet": return "parquet"
+        if ext == ".json": return "json"
         return "csv" # Fallback
+
+    def _parse_parquet(self, file_path: str) -> pl.DataFrame:
+        self.log(f"Parsing Parquet file...")
+        df = pl.read_parquet(file_path)
+        self.log(f"Successfully read Parquet. Row count: {df.height}, Column count: {df.width}")
+        return df
+
+    def _parse_json(self, file_path: str) -> pl.DataFrame:
+        self.log(f"Parsing JSON file...")
+        df = pl.read_json(file_path)
+        self.log(f"Successfully read JSON. Row count: {df.height}, Column count: {df.width}")
+        return df
 
     def _parse_csv(self, file_path: str) -> pl.DataFrame:
         delimiter = self.parameters.get("csvDelimiter", ",")

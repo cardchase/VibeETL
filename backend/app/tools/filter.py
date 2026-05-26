@@ -167,7 +167,7 @@ class FilterNode(BaseNode):
         "description": "Filter rows by a condition.",
         "ui_schema": [
             {"field": "column", "type": "column_select", "label": "Filter Column", "default": ""},
-            {"field": "operator", "type": "select", "label": "Operator", "options": ["==", "!=", ">", "<", ">=", "<=", "contains", "not_contains", "starts_with", "ends_with", "is_null", "is_not_null"], "default": "=="},
+            {"field": "operator", "type": "select", "label": "Operator", "options": ["==", "!=", ">", "<", ">=", "<=", "contains", "not_contains", "starts_with", "ends_with", "is_null", "is_not_null", "in", "not_in", "matches_regex"], "default": "=="},
             {"field": "value", "type": "string", "label": "Comparison Value", "default": ""}
         ]
     }
@@ -278,6 +278,29 @@ class FilterNode(BaseNode):
             true_expr = pl.col(column).is_null()
         elif operator == "is_not_null":
             true_expr = pl.col(column).is_not_null()
+        elif operator in ["in", "not_in"]:
+            # Handle comma separated lists for 'in' and 'not_in'
+            val_list = [v.strip() for v in str(value_raw).split(",")]
+            # Cast the list values to match the column type
+            casted_list = []
+            for v in val_list:
+                try:
+                    if col_type in [pl.Int64, pl.Int32, pl.Int16, pl.Int8, pl.UInt64, pl.UInt32, pl.UInt16, pl.UInt8]:
+                        casted_list.append(int(v))
+                    elif col_type in [pl.Float64, pl.Float32]:
+                        casted_list.append(float(v))
+                    else:
+                        casted_list.append(str(v))
+                except:
+                    # Ignore values that can't be cast
+                    pass
+
+            if operator == "in":
+                true_expr = pl.col(column).is_in(casted_list)
+            else:
+                true_expr = ~pl.col(column).is_in(casted_list)
+        elif operator == "matches_regex":
+            true_expr = pl.col(column).cast(pl.Utf8).str.contains(str(value_raw))
         else:
             raise ValueError(f"Unsupported filter operator: {operator}")
 
