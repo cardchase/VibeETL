@@ -332,6 +332,16 @@ function App() {
         category = 'inout';
         icon = 'Image';
         defaultParams = { imagePath: '' };
+      } else if (type === 'join') {
+        label = 'Join';
+        category = 'join';
+        icon = 'GitMerge';
+        defaultParams = { left_key: '', right_key: '', how: 'inner' };
+      } else if (type === 'summarize') {
+        label = 'Summarize';
+        category = 'transform';
+        icon = 'Sigma';
+        defaultParams = { group_by: '', agg_column: '', agg_function: 'sum', output_name: 'Aggregated' };
       }
     }
 

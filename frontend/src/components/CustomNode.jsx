@@ -34,7 +34,26 @@ const CustomNode = ({ id, data, selected, type }) => {
   return (
     <div className={`custom-node ${category} ${selected ? 'selected' : ''}`}>
       {/* Target port (Left) for all nodes except FileInput and ImageCaption */}
-      {type !== 'fileInput' && type !== 'imageCaption' && (
+      {type === 'join' ? (
+        <>
+          <div className="filter-port-label" style={{ position: 'absolute', left: '-12px', top: '30%', transform: 'translateY(-50%)', fontSize: '0.6rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>L</div>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="left"
+            style={{ top: '30%' }}
+            className="node-handle left-handle true-handle"
+          />
+          <div className="filter-port-label" style={{ position: 'absolute', left: '-12px', top: '70%', transform: 'translateY(-50%)', fontSize: '0.6rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>R</div>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="right"
+            style={{ top: '70%' }}
+            className="node-handle left-handle false-handle"
+          />
+        </>
+      ) : type !== 'fileInput' && type !== 'imageCaption' && (
         <Handle
           type="target"
           position={Position.Left}
@@ -63,7 +82,11 @@ const CustomNode = ({ id, data, selected, type }) => {
       {/* Node Labels floating underneath the square box */}
       <div className="node-labels-container">
         <div className="node-label-main">{data?.label || 'Node'}</div>
-        {description && (
+        {type === 'join' && data?.parameters?.how ? (
+          <div className="node-label-sub" style={{ textTransform: 'capitalize' }}>
+            {data.parameters.how} Join
+          </div>
+        ) : description && (
           <div className="node-label-sub" title={description}>
             {description}
           </div>

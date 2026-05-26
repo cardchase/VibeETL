@@ -18,8 +18,8 @@
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 24px;
-  height: 48px;
-  padding: 0 20px;
+  min-height: 80px;
+  padding: 10px 20px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
   z-index: 10;

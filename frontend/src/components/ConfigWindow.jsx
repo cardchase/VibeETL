@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Upload, Check, AlertCircle } from 'lucide-react';
+import MentionsTextarea from './MentionsTextarea';
+import MentionsInput from './MentionsInput';
 
 const getOperatorsForType = (type = '') => {
   const lowerType = type.toLowerCase();
@@ -417,15 +419,16 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         {filterType === 'custom' ? (
           <div className="form-group">
             <label className="form-label">Custom Expression (AND/OR)</label>
-            <textarea
+            <MentionsTextarea
               placeholder='e.g., [Age] > 30 AND [Department] == "Engineering"'
               value={customExpression}
               onChange={(e) => handleParamChange('customExpression', e.target.value)}
               rows={4}
               style={{ fontFamily: 'var(--font-mono)' }}
+              schema={upstreamSchema}
             />
             <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-              Use brackets [ColName] and standard operators (AND, OR).
+              Use brackets [ColName] and standard operators (AND, OR). Type '[' to select columns.
             </span>
           </div>
         ) : (
@@ -940,11 +943,21 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         return (
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
-            <input
-              type="text"
-              value={val}
-              onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
-            />
+            {hasUpstreamColumns ? (
+                <MentionsInput
+                placeholder="Type here or use '[' to select columns"
+                value={val}
+                onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
+                schema={upstreamSchema}
+                style={{ fontSize: '0.75rem', padding: '6px', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                />
+            ) : (
+                <input
+                type="text"
+                value={val}
+                onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
+                />
+            )}
           </div>
         );
       }
