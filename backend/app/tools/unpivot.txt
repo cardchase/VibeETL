@@ -1,0 +1,11 @@
+Unpivot (Melt) Node
+
+Reshapes data from wide to long format (melting).
+
+Parameters:
+- id_vars (Array): Columns to keep as identifier variables.
+- value_vars (Array): Columns to unpivot (leave empty to unpivot all non-ID vars).
+- variable_name (String): Name for the new column containing the original column headers.
+- value_name (String): Name for the new column containing the values.
+
+Schema Output: Returns id_vars, variable_name, and value_name columns.

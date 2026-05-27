@@ -1,0 +1,48 @@
+name: "Visual Analytics Showcase - Serie A"
+description: "A beautifully crafted example workflow demonstrating data cleansing, formula calculations, interactive Plotly visualizations, and HTML report generation using Serie A historical data."
+version: "1.0"
+
+nodes:
+  - id: "node_input"
+    type: "fileInput"
+    position: { x: 100, y: 300 }
+    parameters:
+      filePath: "C:\\Users\\harsh\\OneDrive\\Documents\\Projects\\Sage Barge\\backend\\uploads\\data_historical.csv"
+      fileType: "csv"
+
+  - id: "node_calc_total_goals"
+    type: "formula"
+    position: { x: 350, y: 300 }
+    parameters:
+      output_column: "Total_Goals"
+      expression: "[FT_HomeScore] + [FT_AwayScore]"
+
+  - id: "node_filter"
+    type: "filter"
+    position: { x: 600, y: 300 }
+    parameters:
+      filterType: "custom"
+      customExpression: "pl.col('FT_HomeOdds').is_not_null() & (pl.col('Total_Goals') >= 0)"
+
+  - id: "node_visualization"
+    type: "visualization"
+    position: { x: 850, y: 300 }
+    parameters:
+      chartType: "scatter"
+      xAxis: "FT_HomeOdds"
+      yAxis: "Total_Goals"
+      title: "Serie A: Home Odds vs Total Match Goals"
+
+  - id: "node_export"
+    type: "fileOutput"
+    position: { x: 1100, y: 300 }
+    parameters:
+      saveFile: true
+      outputPath: "serie_a_analysis.html"
+      outputFormat: "html"
+      
+edges:
+  - { source: "node_input", target: "node_calc_total_goals" }
+  - { source: "node_calc_total_goals", target: "node_filter" }
+  - { source: "node_filter", target: "node_visualization" }
+  - { source: "node_visualization", target: "node_export" }

@@ -18,11 +18,12 @@ class FileOutputNode(BaseNode):
         "name": "File Output",
         "category": "inout",
         "icon": "Save",
-        "description": "Write data to local CSV, PDF, or other formats.",
+        "description": "Write data to local CSV, Excel, Parquet, JSON, or HTML.",
         "ui_schema": [
             {"field": "saveFile", "type": "boolean", "label": "Write to Disk", "default": False},
             {"field": "outputPath", "type": "string", "label": "Output Path / File Name", "default": "output.csv"},
-            {"field": "outputFormat", "type": "select", "label": "Output Format", "options": ["csv", "parquet", "json"], "default": "csv"}
+            {"field": "outputFormat", "type": "select", "label": "Output Format", "options": ["csv", "excel", "parquet", "json", "html"], "default": "csv"},
+            {"field": "sheetName", "type": "string", "label": "Sheet Name (Excel Only)", "default": "Sheet1"}
         ]
     }
 
@@ -66,18 +67,61 @@ class FileOutputNode(BaseNode):
         """Registry mapping file type identifiers to their writing strategies."""
         return {
             "csv": self._write_csv,
+            "excel": self._write_excel,
             "parquet": self._write_parquet,
-            "json": self._write_json
+            "json": self._write_json,
+            "html": self._write_html_payload
         }
 
     def _write_csv(self, df: pl.DataFrame, file_path: str) -> None:
+        if "__vibe_html_payload__" in df.columns:
+            raise ValueError("Attempted to write an HTML payload as a CSV. Please change the Output Format to HTML.")
         self.log(f"Writing CSV file to {file_path}")
         df.write_csv(file_path)
+        
+    def _write_excel(self, df: pl.DataFrame, file_path: str) -> None:
+        if "__vibe_html_payload__" in df.columns:
+            raise ValueError("Attempted to write an HTML payload as an Excel file. Please change the Output Format to HTML.")
+        
+        sheet_name = self.parameters.get("sheetName", "Sheet1")
+        self.log(f"Writing Excel file to {file_path} (Sheet: {sheet_name})")
+        
+        # If file exists, we try to append/replace the sheet using pandas and openpyxl
+        if os.path.exists(file_path):
+            try:
+                import pandas as pd
+                self.log(f"File exists. Appending to existing workbook.")
+                pandas_df = df.to_pandas()
+                with pd.ExcelWriter(file_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+                    pandas_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                return
+            except Exception as e:
+                self.log(f"Warning: Could not append to existing Excel file ({e}). Overwriting instead.")
+        
+        # Default behavior: overwrite the file using polars native writer
+        df.write_excel(file_path, worksheet=sheet_name)
 
     def _write_parquet(self, df: pl.DataFrame, file_path: str) -> None:
+        if "__vibe_html_payload__" in df.columns:
+            raise ValueError("Attempted to write an HTML payload as a Parquet file. Please change the Output Format to HTML.")
         self.log(f"Writing Parquet file to {file_path}")
         df.write_parquet(file_path)
 
     def _write_json(self, df: pl.DataFrame, file_path: str) -> None:
+        if "__vibe_html_payload__" in df.columns:
+            raise ValueError("Attempted to write an HTML payload as a JSON file. Please change the Output Format to HTML.")
         self.log(f"Writing JSON file to {file_path}")
-        df.write_json(file_path, row_oriented=True)
+        df.write_json(file_path)
+
+    def _write_html_payload(self, df: pl.DataFrame, file_path: str) -> None:
+        if "__vibe_html_payload__" not in df.columns:
+            raise ValueError("Output Format is set to HTML, but upstream node did not provide an HTML payload.")
+            
+        self.log(f"Writing HTML payload to {file_path}")
+        
+        html_str = df["__vibe_html_payload__"][0]
+        if not html_str:
+            raise ValueError("HTML payload was empty.")
+            
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(html_str)

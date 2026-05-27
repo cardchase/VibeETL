@@ -13,3 +13,7 @@ huggingface_hub>=0.16.0
 transformers>=4.30.0
 pillow>=9.0.0
 pytesseract>=0.3.10
+plotly>=5.24.0
+connectorx>=0.3.2
+sqlalchemy>=2.0.0
+adbc-driver-sqlite

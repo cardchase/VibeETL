@@ -1,0 +1,9 @@
+# Record ID Node
+
+Appends a unique sequential integer identifier to each row in your dataset.
+
+## Parameters:
+- **Output Column**: The name of the new column to hold the IDs (e.g., `RecordID`).
+- **Starting Value**: The integer to start counting from (default: `1`).
+
+This is commonly used as a primary key generator or to track the original row order before applying sorts or joins.

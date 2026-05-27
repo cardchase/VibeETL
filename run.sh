@@ -4,7 +4,7 @@
 set -e
 
 echo -e "\033[0;36m============================================="
-echo -e "        ⛵ Welcome to VibeETL ⛵"
+echo -e "        *** Welcome to VibeETL ***"
 echo -e "=============================================\033[0m"
 echo ""
 

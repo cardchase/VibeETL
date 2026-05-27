@@ -1,5 +1,7 @@
 import uvicorn
+import os
 
 if __name__ == "__main__":
-    print("Starting VibeETL Engine...")
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    print(f"Starting VibeETL Engine on port {port}...")
+    uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=True)

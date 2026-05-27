@@ -1,0 +1,12 @@
+Visualization Node
+
+Generates high-quality interactive statistical graphics using Plotly. It outputs an HTML string payload designed to be rendered directly in the UI or routed into a File Output node to save as an interactive .html file.
+
+Parameters:
+- chartType (String): The type of chart to render ('scatter', 'line', 'bar', 'box', 'sankey', etc).
+- xAxis (String): The column to map to the X-axis.
+- yAxis (String): The column to map to the Y-axis.
+- title (String): Optional title for the chart.
+
+Example:
+Set chartType to 'scatter', xAxis to 'Age', and yAxis to 'Salary'. Connect the output to a File Output node configured for 'html'.

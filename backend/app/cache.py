@@ -7,20 +7,24 @@ class PipelineCache:
         self._lock = threading.Lock()
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._global_logs: List[str] = []
+        self._node_statuses: Dict[str, str] = {}
 
     def clear(self):
         with self._lock:
             self._cache.clear()
             self._global_logs.clear()
+            self._node_statuses.clear()
 
-    def clear_except(self, keep_ids: List[str]):
+    def clear_except(self, keep_node_ids: List[str]):
         with self._lock:
-            keys_to_remove = [k for k in self._cache.keys() if k not in keep_ids]
-            for k in keys_to_remove:
+            nodes_to_delete = [k for k in self._cache.keys() if k not in keep_node_ids]
+            for k in nodes_to_delete:
                 del self._cache[k]
+                if k in self._node_statuses:
+                    del self._node_statuses[k]
             self._global_logs.clear()
 
-    def set_node_result(self, node_id: str, df: Any, duration_ms: float, logs: List[str]):
+    def set_node_result(self, node_id: str, df: Any, duration_ms: float, logs: List[str], semantic_metadata: Dict[str, str] = None):
         with self._lock:
             import polars as pl
             if isinstance(df, dict):
@@ -29,7 +33,12 @@ class PipelineCache:
                 for port, port_df in df.items():
                     if port_df is not None:
                         preview_df = port_df.head(100)
-                        schema = [{"name": name, "type": str(dtype)} for name, dtype in port_df.schema.items()]
+                        schema = []
+                        for name, dtype in port_df.schema.items():
+                            col_meta = {"name": name, "type": str(dtype)}
+                            if semantic_metadata and name in semantic_metadata:
+                                col_meta["semantic_type"] = semantic_metadata[name]
+                            schema.append(col_meta)
                         preview_rows = preview_df.to_dicts()
                         ports_data[port] = {
                             "schema": schema,
@@ -52,13 +61,21 @@ class PipelineCache:
                     "duration_ms": duration_ms,
                     "logs": logs,
                     "error": None,
+                    "semantic_metadata": semantic_metadata or {},
                     "ports": {p: {k: v for k, v in data.items() if k != "_df"} for p, data in ports_data.items()},
                     "_ports_df": {p: data.get("_df") for p, data in ports_data.items()}
                 }
+                self._node_statuses[node_id] = "success"
             else:
                 # Single-port results
                 preview_df = df.head(100) if df is not None else pl.DataFrame()
-                schema = [{"name": name, "type": str(dtype)} for name, dtype in df.schema.items()] if df is not None else []
+                schema = []
+                if df is not None:
+                    for name, dtype in df.schema.items():
+                        col_meta = {"name": name, "type": str(dtype)}
+                        if semantic_metadata and name in semantic_metadata:
+                            col_meta["semantic_type"] = semantic_metadata[name]
+                        schema.append(col_meta)
                 preview_rows = preview_df.to_dicts() if df is not None else []
 
                 self._cache[node_id] = {
@@ -69,9 +86,11 @@ class PipelineCache:
                     "column_count": df.width if df is not None else 0,
                     "duration_ms": duration_ms,
                     "logs": logs,
-                    "error": None
+                    "error": None,
+                    "semantic_metadata": semantic_metadata or {}
                 }
                 self._cache[node_id]["_df"] = df
+                self._node_statuses[node_id] = "success"
 
     def set_node_error(self, node_id: str, error_msg: str, duration_ms: float, logs: List[str]):
         with self._lock:
@@ -84,8 +103,10 @@ class PipelineCache:
                 "duration_ms": duration_ms,
                 "logs": logs + [f"Error: {error_msg}"],
                 "error": error_msg,
+                "semantic_metadata": {},
                 "_df": None
             }
+            self._node_statuses[node_id] = "error"
 
     def get_node_df(self, node_id: str, port_id: str = "output") -> pl.DataFrame:
         with self._lock:
@@ -126,6 +147,22 @@ class PipelineCache:
     def get_global_logs(self) -> List[str]:
         with self._lock:
             return list(self._global_logs)
+
+    def set_node_status(self, node_id: str, status: str):
+        with self._lock:
+            self._node_statuses[node_id] = status
+
+    def get_status_payload(self) -> Dict[str, Any]:
+        with self._lock:
+            payload = {}
+            for node_id, status in self._node_statuses.items():
+                node_data = self._cache.get(node_id, {})
+                payload[node_id] = {
+                    "status": status,
+                    "row_count": node_data.get("row_count"),
+                    "ports": node_data.get("ports")
+                }
+            return payload
 
 # Global singleton cache instance
 cache = PipelineCache()

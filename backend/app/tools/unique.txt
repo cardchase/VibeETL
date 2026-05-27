@@ -1,0 +1,9 @@
+Unique Node
+
+Deduplicates rows based on a subset of column keys.
+
+Parameters:
+- columns (Array): The columns to determine uniqueness (leave empty for all).
+- keep (String): Which duplicate to retain ('first', 'last', 'any', 'none').
+
+Schema Output: Passes incoming schema through unchanged.

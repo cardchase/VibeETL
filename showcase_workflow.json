@@ -1,0 +1,142 @@
+{
+  "nodes": [
+    {
+      "id": "node_1",
+      "type": "fileInput",
+      "position": { "x": 100, "y": 100 },
+      "data": { "label": "Sales Data", "category": "inout", "icon": "FileText", "parameters": { "filePath": "uploads/sales.csv", "fileType": "csv" } }
+    },
+    {
+      "id": "node_2",
+      "type": "fileInput",
+      "position": { "x": 100, "y": 300 },
+      "data": { "label": "Customer Data", "category": "inout", "icon": "FileText", "parameters": { "filePath": "uploads/customers.csv", "fileType": "csv" } }
+    },
+    {
+      "id": "node_3",
+      "type": "data_cleansing",
+      "position": { "x": 350, "y": 100 },
+      "data": { "label": "Cleanse Sales", "category": "prep", "icon": "Sparkles", "parameters": { "columns": ["Amount"], "replace_nulls_numeric": true } }
+    },
+    {
+      "id": "node_4",
+      "type": "data_cleansing",
+      "position": { "x": 350, "y": 300 },
+      "data": { "label": "Cleanse Customers", "category": "prep", "icon": "Sparkles", "parameters": { "columns": ["Name", "Email"], "trim_whitespace": true } }
+    },
+    {
+      "id": "node_5",
+      "type": "join",
+      "position": { "x": 600, "y": 200 },
+      "data": { "label": "Join on CustomerID", "category": "join", "icon": "GitMerge", "parameters": { "left_keys": "CustomerID", "right_keys": "ID", "how": "inner" } }
+    },
+    {
+      "id": "node_6",
+      "type": "formula",
+      "position": { "x": 850, "y": 200 },
+      "data": { "label": "Calculate Tax", "category": "prep", "icon": "Calculator", "parameters": { "output_column": "Tax", "expression": "[Amount] * 0.20" } }
+    },
+    {
+      "id": "node_7",
+      "type": "filter",
+      "position": { "x": 1100, "y": 200 },
+      "data": { "label": "High Value > $100", "category": "prep", "icon": "Filter", "parameters": { "column": "Amount", "operator": ">", "value": "100" } }
+    },
+    {
+      "id": "node_8",
+      "type": "sort",
+      "position": { "x": 1350, "y": 100 },
+      "data": { "label": "Sort by Amount", "category": "prep", "icon": "ArrowUpDown", "parameters": { "column": "Amount", "descending": true } }
+    },
+    {
+      "id": "node_9",
+      "type": "summarize",
+      "position": { "x": 1350, "y": 300 },
+      "data": { "label": "Avg Sale per Region", "category": "transform", "icon": "Sigma", "parameters": { "group_by": ["Region"], "agg_column": "Amount", "agg_function": "mean", "output_name": "Average_Amount" } }
+    },
+    {
+      "id": "node_10",
+      "type": "visualization",
+      "position": { "x": 1600, "y": 100 },
+      "data": { "label": "Sales Chart", "category": "analysis", "icon": "BarChart3", "parameters": { "chartType": "scatter", "xAxis": "Date", "yAxis": "Amount", "colorBy": "Region" } }
+    },
+    {
+      "id": "node_11",
+      "type": "fileOutput",
+      "position": { "x": 1600, "y": 300 },
+      "data": { "label": "Save Summary", "category": "inout", "icon": "Save", "parameters": { "outputPath": "uploads/region_summary.csv", "outputType": "csv" } }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_1_3",
+      "source": "node_1",
+      "target": "node_3",
+      "sourceHandle": "output",
+      "targetHandle": "input"
+    },
+    {
+      "id": "e_2_4",
+      "source": "node_2",
+      "target": "node_4",
+      "sourceHandle": "output",
+      "targetHandle": "input"
+    },
+    {
+      "id": "e_3_5",
+      "source": "node_3",
+      "target": "node_5",
+      "sourceHandle": "output",
+      "targetHandle": "left"
+    },
+    {
+      "id": "e_4_5",
+      "source": "node_4",
+      "target": "node_5",
+      "sourceHandle": "output",
+      "targetHandle": "right"
+    },
+    {
+      "id": "e_5_6",
+      "source": "node_5",
+      "target": "node_6",
+      "sourceHandle": "output",
+      "targetHandle": "input"
+    },
+    {
+      "id": "e_6_7",
+      "source": "node_6",
+      "target": "node_7",
+      "sourceHandle": "output",
+      "targetHandle": "input"
+    },
+    {
+      "id": "e_7_8",
+      "source": "node_7",
+      "target": "node_8",
+      "sourceHandle": "true",
+      "targetHandle": "input"
+    },
+    {
+      "id": "e_7_9",
+      "source": "node_7",
+      "target": "node_9",
+      "sourceHandle": "true",
+      "targetHandle": "input"
+    },
+    {
+      "id": "e_8_10",
+      "source": "node_8",
+      "target": "node_10",
+      "sourceHandle": "output",
+      "targetHandle": "input"
+    },
+    {
+      "id": "e_9_11",
+      "source": "node_9",
+      "target": "node_11",
+      "sourceHandle": "output",
+      "targetHandle": "input"
+    }
+  ]
+}

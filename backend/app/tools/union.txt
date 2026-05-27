@@ -1,0 +1,8 @@
+Union Node
+
+Stacks multiple data streams together into one continuous stream.
+
+Parameters:
+- how (String): Alignment method ('vertical', 'diagonal').
+
+Schema Output: Takes the union of all connected incoming schemas. Note: The input port supports an infinite number of edges!

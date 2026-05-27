@@ -1,0 +1,11 @@
+Pivot Node
+
+Reshapes data from long to wide format by aggregating values.
+
+Parameters:
+- index (Array): Columns to group by.
+- columns (String): Column containing new wide column headers.
+- values (String): Column containing the numerical values to aggregate.
+- aggregate_function (String): sum, mean, max, min, first, etc.
+
+Schema Output: Returns index columns plus dynamic columns determined by the data.

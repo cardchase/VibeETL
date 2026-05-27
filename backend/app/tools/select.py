@@ -6,7 +6,7 @@ class SelectNode(BaseNode):
     MANIFEST = {
         "id": "select",
         "name": "Select",
-        "category": "transform",
+        "category": "prep",
         "icon": "Columns",
         "description": "Select, rename, and cast columns.",
         "ui_schema": [

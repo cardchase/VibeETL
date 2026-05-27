@@ -1,0 +1,72 @@
+=======================================================
+VIBE ETL - FORMULA TOOL GUIDE
+Language: Polars Expressions (with Alteryx-style Helpers)
+=======================================================
+
+The Formula Tool in VibeETL is extremely powerful. Behind the scenes, it compiles your formulas into Lightning-Fast Rust-based Polars expressions. 
+
+We have injected Alteryx-style helper functions to make it feel instantly familiar to Data Scientists.
+
+Here is a guide on how to use it, using the `data_historical.csv` (Football Odds) dataset as an example.
+
+---
+0. UNIVERSAL SYNTAX RULE: [ColumnName]
+---
+Across the entire VibeETL platform (in the Formula Tool, the Filter Tool's Custom Expressions, etc.), you MUST wrap your column names in square brackets like `[Column_Name]`. 
+The platform provides intelligent **Auto-Fill Suggestion**: As soon as you type `[`, the UI will suggest column names!
+
+---
+1. BASIC MATH OPERATIONS
+---
+You can perform standard mathematical operations on numeric columns just by wrapping column names in brackets `[Column_Name]`.
+
+Example (Calculate Goal Difference):
+Expression: [FT_HomeScore] - [FT_AwayScore]
+
+Example (Calculate Total Goals):
+Expression: [FT_HomeScore] + [FT_AwayScore]
+
+Example (Calculate Implied Probability from Odds):
+Expression: 1 / [FT_HomeOdds]
+
+---
+2. STRING CONCATENATION (String + Number)
+---
+Polars requires types to match when joining strings. If you want to concatenate a string column with a number (or numeric column), wrap the number in `ToString()`. You can then use the standard `+` operator.
+
+Example (Create a Match Title):
+Expression: [HomeTeam] + ' vs ' + [AwayTeam]
+
+Example (Concat String and Number):
+Expression: [HomeTeam] + ' scored ' + ToString([FT_HomeScore]) + ' goals!'
+
+---
+3. CONDITIONAL STATEMENTS (IIF)
+---
+You can use `IIF(condition, true_value, false_value)` exactly like you do in Alteryx.
+
+Example (Determine if Home Team Won):
+Expression: IIF([FT_HomeScore] > [FT_AwayScore], 'Home Win', 'Did Not Win')
+
+Example (Identify Huge Favorites):
+Expression: IIF([FT_HomeOdds] < 1.30, 'Heavy Favorite', 'Normal Odds')
+
+---
+4. BOOLEAN LOGIC (AND / OR)
+---
+You can use standard `AND` and `OR` logic (case-insensitive) between conditions. The engine will automatically convert this to bitwise logic for Polars!
+
+Example (Home Win AND Both Teams Scored):
+Expression: ([FT_HomeScore] > [FT_AwayScore]) AND ([FT_AwayScore] > 0)
+
+Example (Italian or Spanish Match):
+Expression: ([Country] == 'Italy') OR ([Country] == 'Spain')
+
+---
+5. TYPE CASTING HELPERS
+---
+- `ToString([Column])`: Casts any column to a String type.
+- `ToNumber([Column])`: Casts any column to a Float/Number type.
+
+Example (Force converting Odds to String to append text):
+Expression: 'Odds are: ' + ToString([FT_HomeOdds])

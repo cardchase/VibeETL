@@ -6,13 +6,16 @@ const ResultsWindow = ({ selectedNode, results, globalLogs, style = {} }) => {
   const [selectedPort, setSelectedPort] = useState(null);
   const [prevNodeId, setPrevNodeId] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [dataCopied, setDataCopied] = useState(false);
+  const [selectedRows, setSelectedRows] = useState(new Set());
 
   const nodeId = selectedNode?.id;
 
-  // Reset selectedPort if we select a different node
+  // Reset selectedPort and rows if we select a different node
   if (nodeId !== prevNodeId) {
     setPrevNodeId(nodeId);
     setSelectedPort(null);
+    setSelectedRows(new Set());
   }
 
   const nodeResult = nodeId ? results?.[nodeId] : null;
@@ -52,6 +55,42 @@ const ResultsWindow = ({ selectedNode, results, globalLogs, style = {} }) => {
     navigator.clipboard.writeText(logText).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const toggleRowSelection = (rowIdx) => {
+    const newSelection = new Set(selectedRows);
+    if (newSelection.has(rowIdx)) {
+      newSelection.delete(rowIdx);
+    } else {
+      newSelection.add(rowIdx);
+    }
+    setSelectedRows(newSelection);
+  };
+
+  const handleCopyData = () => {
+    if (selectedRows.size === 0) return;
+    
+    // Sort selected indices
+    const sortedIndices = Array.from(selectedRows).sort((a, b) => a - b);
+    
+    // Get headers
+    const headers = schema.map(c => c.name).join('\t');
+    
+    // Get rows data
+    const rowsText = sortedIndices.map(idx => {
+      const row = previewData[idx];
+      return schema.map(col => {
+        const val = row[col.name];
+        return val !== null && val !== undefined ? String(val) : '';
+      }).join('\t');
+    }).join('\n');
+    
+    const clipboardText = headers + '\n' + rowsText;
+    
+    navigator.clipboard.writeText(clipboardText).then(() => {
+      setDataCopied(true);
+      setTimeout(() => setDataCopied(false), 2000);
     });
   };
 
@@ -122,39 +161,113 @@ const ResultsWindow = ({ selectedNode, results, globalLogs, style = {} }) => {
                 <p>Select a node on the canvas to inspect its output dataframe.</p>
               </div>
             ) : status === 'error' ? (
-              <div className="no-node-selected" style={{ color: 'var(--color-error)', padding: 20 }}>
-                <span style={{ fontSize: '2.5rem', marginBottom: 10 }}>&otimes;</span>
-                <p style={{ fontWeight: 600 }}>Execution Failed</p>
-                <p style={{ fontSize: '0.85rem', marginTop: 5, maxWidth: '500px' }}>{error}</p>
-              </div>
+              error?.toLowerCase().includes("input dataframe is missing") || error?.toLowerCase().includes("missing input") || error?.toLowerCase().includes("requires an input") ? (
+                <div className="no-node-selected" style={{ color: 'var(--text-secondary)', padding: 20 }}>
+                  <span style={{ fontSize: '2.5rem', marginBottom: 10 }}>🔌</span>
+                  <p style={{ fontWeight: 600, color: '#f59e0b' }}>Awaiting Connection</p>
+                  <p style={{ fontSize: '0.85rem', marginTop: 5, maxWidth: '500px' }}>Connect an incoming data stream to this tool to begin processing data.</p>
+                </div>
+              ) : (
+                <div className="no-node-selected" style={{ color: 'var(--color-error)', padding: 20 }}>
+                  <span style={{ fontSize: '2.5rem', marginBottom: 10 }}>&otimes;</span>
+                  <p style={{ fontWeight: 600 }}>Execution Failed</p>
+                  <p style={{ fontSize: '0.85rem', marginTop: 5, maxWidth: '500px' }}>{error}</p>
+                </div>
+              )
             ) : status === 'success' ? (
-              previewData.length > 0 ? (
-                <div className="spreadsheet-container">
-                  <table className="spreadsheet">
-                    <thead>
-                      <tr>
-                        {schema.map((col) => (
-                          <th key={col.name}>
-                            {col.name}
-                            <span className="col-header-type">
-                              {col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'}
-                            </span>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previewData.map((row, rowIdx) => (
-                        <tr key={rowIdx}>
+              previewData.length > 0 && schema.some(c => c.name === '__vibe_html_payload__') ? (
+                <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', padding: '20px', overflow: 'hidden', alignItems: 'flex-start', boxSizing: 'border-box' }}>
+                  <div style={{ 
+                    backgroundColor: 'white', 
+                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)', 
+                    borderRadius: '8px', 
+                    border: '1px solid #e2e8f0',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    resize: 'both',
+                    overflow: 'auto',
+                    minWidth: '300px',
+                    minHeight: '200px',
+                    width: `${(parseInt(selectedNode?.data?.parameters?.width) || 800)}px`, 
+                    height: `${(parseInt(selectedNode?.data?.parameters?.height) || 500) + 45}px`,
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    boxSizing: 'border-box'
+                  }}>
+                    <div style={{ padding: '12px 16px', background: '#ffffff', borderBottom: '1px solid #e2e8f0', fontSize: '0.85rem', fontWeight: 600, color: '#475569', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ whiteSpace: 'nowrap', marginRight: '30px' }}>Interactive Report Visualization 📊</span>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#94a3b8', whiteSpace: 'nowrap' }}>Hover to export</span>
+                    </div>
+                    <iframe 
+                      srcDoc={previewData[0]['__vibe_html_payload__']} 
+                      style={{ 
+                        width: '100%', 
+                        height: 'calc(100% - 45px)', 
+                        border: 'none', 
+                        background: 'white',
+                        transition: 'opacity 0.3s ease'
+                      }}
+                      title="Plotly Chart"
+                    />
+                  </div>
+                </div>
+              ) : previewData.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  {selectedRows.size > 0 && (
+                    <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {selectedRows.size} row{selectedRows.size > 1 ? 's' : ''} selected
+                      </span>
+                      <button className="copy-logs-btn" onClick={handleCopyData}>
+                        {dataCopied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
+                        {dataCopied ? "Copied Data" : "Copy Selected Rows"}
+                      </button>
+                    </div>
+                  )}
+                  <div className="spreadsheet-container" style={{ flex: 1, overflow: 'auto' }}>
+                    <table className="spreadsheet" style={{ tableLayout: 'auto' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px', minWidth: '40px', textAlign: 'center', background: 'var(--bg-secondary)' }}>#</th>
                           {schema.map((col) => (
-                            <td key={col.name} title={String(row[col.name] ?? '')}>
-                              {row[col.name] !== null && row[col.name] !== undefined ? String(row[col.name]) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>null</span>}
-                            </td>
+                            <th key={col.name} style={{ resize: 'horizontal', overflow: 'hidden', minWidth: '80px', position: 'relative' }}>
+                              {col.name}
+                              {col.semantic_type === 'currency_usd' && (
+                                <span title="Currency" style={{ marginLeft: '6px', color: 'var(--color-success)', fontWeight: 800 }}>$</span>
+                              )}
+                              {col.semantic_type === 'percentage' && (
+                                <span title="Percentage" style={{ marginLeft: '6px', color: 'var(--color-accent)', fontWeight: 800 }}>%</span>
+                              )}
+                              <span className="col-header-type" style={{ marginLeft: '6px' }}>
+                                {col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'}
+                              </span>
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {previewData.map((row, rowIdx) => (
+                          <tr 
+                            key={rowIdx} 
+                            onClick={() => toggleRowSelection(rowIdx)}
+                            style={{ 
+                              cursor: 'pointer',
+                              backgroundColor: selectedRows.has(rowIdx) ? 'rgba(59, 130, 246, 0.1)' : undefined
+                            }}
+                          >
+                            <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 600, background: 'var(--bg-secondary)' }}>
+                              {rowIdx + 1}
+                            </td>
+                            {schema.map((col) => (
+                              <td key={col.name} title={String(row[col.name] ?? '')}>
+                                {row[col.name] !== null && row[col.name] !== undefined ? String(row[col.name]) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>null</span>}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : (
                 <div className="no-node-selected" style={{ padding: 20 }}>
