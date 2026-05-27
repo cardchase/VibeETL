@@ -1,0 +1,12 @@
+Data Cleansing Node
+
+Sanitizes text and null values in datasets.
+
+Parameters:
+- columns (Array): Which columns to apply cleansing to.
+- replace_nulls_string (Boolean): Replaces string nulls with empty string.
+- replace_nulls_numeric (Boolean): Replaces numeric nulls with 0.
+- trim_whitespace (Boolean): Trims leading/trailing whitespace.
+- remove_punctuation (Boolean): Strips all punctuation characters.
+
+Schema Output: Passes incoming schema through unchanged.

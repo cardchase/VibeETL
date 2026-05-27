@@ -7,11 +7,25 @@ from app.tools.browse import BrowseNode
 from app.tools.image_caption import ImageCaptionNode
 from app.tools.file_output import FileOutputNode
 from app.tools.regex import RegexNode
+from app.tools.pivot import PivotNode
+from app.tools.unpivot import UnpivotNode
+from app.tools.union import UnionNode
+from app.tools.data_cleansing import CleansingNode
+from app.tools.formula import FormulaNode
 from app.tools.join import JoinNode
 from app.tools.summarize import SummarizeNode
+from app.tools.unique import UniqueNode
+from app.tools.visualization import VisualizationNode
+from app.tools.database_input import DatabaseInputExecutor
+from app.tools.database_output import DatabaseOutputExecutor
+from app.tools.record_id import RecordIDNode
+
+from app.tools.gemini_ai import GeminiAINode
 
 NODE_CLASSES = {
     "fileInput": FileInputNode,
+    "databaseInput": DatabaseInputExecutor,
+    "databaseOutput": DatabaseOutputExecutor,
     "fileOutput": FileOutputNode,
     "filter": FilterNode,
     "sort": SortNode,
@@ -19,6 +33,15 @@ NODE_CLASSES = {
     "regex": RegexNode,
     "browse": BrowseNode,
     "imageCaption": ImageCaptionNode,
+    "pivot": PivotNode,
+    "unpivot": UnpivotNode,
+    "union": UnionNode,
+    "data_cleansing": CleansingNode,
+    "formula": FormulaNode,
     "join": JoinNode,
-    "summarize": SummarizeNode
+    "summarize": SummarizeNode,
+    "unique": UniqueNode,
+    "visualization": VisualizationNode,
+    "record_id": RecordIDNode,
+    "gemini_ai": GeminiAINode
 }

@@ -4,6 +4,7 @@ import pdfplumber
 import pandas as pd
 from typing import Dict, Any, Callable
 from app.tools.base import BaseNode
+from app.utils.semantic_profiler import profile_and_cast_df
 
 class FileInputNode(BaseNode):
     """
@@ -19,40 +20,93 @@ class FileInputNode(BaseNode):
         "id": "fileInput",
         "name": "File Input",
         "category": "inout",
-        "icon": "Database",
+        "icon": "FileText",
         "description": "Read data from local CSV, Excel, PDF, or Image files.",
         "ui_schema": [
             {"field": "filePath", "type": "string", "label": "File Path / Name", "default": ""},
-            {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "pdf", "image", "parquet", "json"], "default": "auto"}
+            {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "pdf", "image", "multimodal"], "default": "auto"},
+            {"field": "process_local", "type": "boolean", "label": "Process Media Locally (OCR/Parse vs AI Pass-through)", "default": True}
         ]
     }
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
-        file_path = self.parameters.get("filePath", "")
-        file_type = self.parameters.get("fileType", "auto").lower()
+        raw_path = self.parameters.get("filePath", "")
+        file_type_setting = self.parameters.get("fileType", "auto").lower()
+        process_local = self.parameters.get("process_local", True)
         
         # If the file path is a relative path or just a filename, assume it is in the uploads directory
-        if file_path and not os.path.isabs(file_path):
-            file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", file_path))
+        if raw_path and not os.path.isabs(raw_path):
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
+            file_path = os.path.join(base_dir, raw_path)
+        else:
+            file_path = raw_path
 
-        self.log(f"Starting file read for path: {file_path}")
-        if not file_path or not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+        is_wildcard = "*" in file_path or "?" in file_path
 
-        # Resolve file type mapping
+        import glob
+        if is_wildcard:
+            self.log(f"Wildcard detected. Resolving files for pattern: {file_path}")
+            files = glob.glob(file_path)
+            if not files:
+                raise FileNotFoundError(f"No files matched wildcard: {file_path}")
+        else:
+            if not file_path or not os.path.exists(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+            files = [file_path]
+
         registry = self._get_parser_registry()
         
-        if file_type == "auto":
-            ext = os.path.splitext(file_path)[1].lower()
-            file_type = self._resolve_auto_type(ext, registry)
-            self.log(f"Auto-detected file type: {file_type}")
+        dfs = []
+        for fp in files:
+            self.log(f"Starting file read for path: {fp}")
+            
+            # Resolve file type mapping for this specific file
+            current_file_type = file_type_setting
+            if current_file_type == "auto":
+                ext = os.path.splitext(fp)[1].lower()
+                current_file_type = self._resolve_auto_type(ext, registry)
+                self.log(f"Auto-detected file type: {current_file_type}")
 
-        if file_type not in registry:
-            raise ValueError(f"Unsupported file type: {file_type}. Supported types: {list(registry.keys())}")
+            # Override behavior if user wants to pass media to Gemini instead of local parsing
+            if not process_local and current_file_type in ["image", "pdf"]:
+                self.log("Process Locally is OFF. Routing media file to multimodal pass-through mode.")
+                current_file_type = "multimodal"
 
-        # Execute parser
-        parser_func = registry[file_type]
-        return parser_func(file_path)
+            if current_file_type not in registry:
+                raise ValueError(f"Unsupported file type: {current_file_type}. Supported types: {list(registry.keys())}")
+
+            # Execute parser
+            parser_func = registry[current_file_type]
+            try:
+                df = parser_func(fp)
+                # Add a metadata column to track the source file
+                df = df.with_columns(pl.lit(os.path.basename(fp)).alias("Source_File"))
+                dfs.append(df)
+            except Exception as e:
+                self.log(f"Failed to read {fp}: {e}")
+                raise RuntimeError(f"Failed to read {fp}: {e}")
+                
+        if len(dfs) == 1:
+            combined_df = dfs[0]
+        else:
+            self.log(f"Concatenating {len(dfs)} files...")
+            try:
+                combined_df = pl.concat(dfs, how="diagonal")
+                self.log(f"Successfully combined {len(dfs)} files. Total rows: {combined_df.height}, Columns: {combined_df.width}")
+            except Exception as e:
+                self.log(f"Error concatenating files: {e}")
+                raise ValueError(f"Could not combine files. They may have incompatible schemas: {e}")
+                
+        # Run Semantic Profiler to detect Currency, Percentages, and Accounting formats
+        self.log("Running Semantic Data Profiler...")
+        final_df, semantic_meta = profile_and_cast_df(combined_df)
+        if semantic_meta:
+            self.log(f"Detected semantic types: {semantic_meta}")
+            
+        # Store metadata in self so it can be picked up by the execution engine
+        self._semantic_metadata = semantic_meta
+        
+        return final_df
 
     def _get_parser_registry(self) -> Dict[str, Callable[[str], pl.DataFrame]]:
         """Registry mapping file type identifiers to their parsing strategies."""
@@ -61,8 +115,7 @@ class FileInputNode(BaseNode):
             "excel": self._parse_excel,
             "pdf": self._parse_pdf,
             "image": self._parse_image,
-            "parquet": self._parse_parquet,
-            "json": self._parse_json
+            "multimodal": self._parse_multimodal
         }
 
     def _resolve_auto_type(self, ext: str, registry: dict) -> str:
@@ -71,21 +124,12 @@ class FileInputNode(BaseNode):
         if ext in [".xls", ".xlsx", ".xlsm", ".xlsb", ".ods"]: return "excel"
         if ext == ".pdf": return "pdf"
         if ext in [".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif", ".webp"]: return "image"
-        if ext == ".parquet": return "parquet"
-        if ext == ".json": return "json"
+        if ext in [".mp3", ".wav", ".m4a", ".mp4", ".mov", ".avi", ".mkv", ".webm"]: return "multimodal"
         return "csv" # Fallback
 
-    def _parse_parquet(self, file_path: str) -> pl.DataFrame:
-        self.log(f"Parsing Parquet file...")
-        df = pl.read_parquet(file_path)
-        self.log(f"Successfully read Parquet. Row count: {df.height}, Column count: {df.width}")
-        return df
-
-    def _parse_json(self, file_path: str) -> pl.DataFrame:
-        self.log(f"Parsing JSON file...")
-        df = pl.read_json(file_path)
-        self.log(f"Successfully read JSON. Row count: {df.height}, Column count: {df.width}")
-        return df
+    def _parse_multimodal(self, file_path: str) -> pl.DataFrame:
+        self.log("Multimodal pass-through mode: Flowing raw file path downstream for AI processing.")
+        return pl.DataFrame({"FilePath": [file_path]})
 
     def _parse_csv(self, file_path: str) -> pl.DataFrame:
         delimiter = self.parameters.get("csvDelimiter", ",")

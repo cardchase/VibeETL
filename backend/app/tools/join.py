@@ -35,13 +35,21 @@ class JoinNode(BaseNode):
         right_keys = self.parameters.get("right_keys", [])
         how = self.parameters.get("how", "inner")
 
+        # Convert to list if it's a comma-separated string
+        if isinstance(left_keys, str):
+            left_keys = [k.strip() for k in left_keys.split(",") if k.strip()]
+        if isinstance(right_keys, str):
+            right_keys = [k.strip() for k in right_keys.split(",") if k.strip()]
+
         # Fallback for backward compatibility
         if not left_keys and self.parameters.get("left_key"):
-            left_keys = [self.parameters.get("left_key")]
+            left_key = self.parameters.get("left_key")
+            left_keys = [left_key.strip()] if isinstance(left_key, str) else left_key
         if not right_keys and self.parameters.get("right_key"):
-            right_keys = [self.parameters.get("right_key")]
+            right_key = self.parameters.get("right_key")
+            right_keys = [right_key.strip()] if isinstance(right_key, str) else right_key
 
-        # Filter empty strings
+        # Filter empty strings (in case they were lists containing empty strings)
         left_keys = [k for k in left_keys if k]
         right_keys = [k for k in right_keys if k]
 

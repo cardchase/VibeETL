@@ -1,0 +1,9 @@
+# DB-In Node
+
+Read data from SQL Databases (PostgreSQL, MySQL, SQLite) using high-speed Polars connectors.
+
+## Parameters:
+- **Connection String (URI)**: The SQLAlchemy or ADBC connection string (e.g. `postgresql://user:pass@host:5432/dbname`).
+- **SQL Query**: The SQL query to execute to fetch the data.
+
+This node leverages connectorx for zero-copy Arrow memory transfers, making it incredibly fast for large datasets.

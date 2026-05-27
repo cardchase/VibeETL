@@ -1,0 +1,82 @@
+name: "SerieA Historical Analytics Showcase"
+description: "A massive, multi-tool data pipeline demonstrating VibeETL's processing power on sports analytics data."
+version: "1.0"
+
+nodes:
+  - id: "node_input_seriea"
+    type: "fileInput"
+    position: { x: 100, y: 300 }
+    parameters:
+      filePath: "C:\\Users\\harsh\\OneDrive\\Documents\\Projects\\Sports\\Soccer\\SerieA\\data_historical.csv"
+      fileType: "csv"
+
+  - id: "node_cleanse_teams"
+    type: "data_cleansing"
+    position: { x: 350, y: 300 }
+    parameters:
+      columns: ["HomeTeam", "AwayTeam"]
+      trim_whitespace: true
+      remove_punctuation: true
+
+  - id: "node_filter_recent"
+    type: "filter"
+    position: { x: 600, y: 300 }
+    parameters:
+      filterType: "custom"
+      customExpression: "pl.col('FT_HomeScore').is_not_null() & pl.col('FT_AwayScore').is_not_null()"
+
+  - id: "node_calc_goals"
+    type: "formula"
+    position: { x: 850, y: 300 }
+    parameters:
+      output_column: "Total_Match_Goals"
+      expression: "[FT_HomeScore] + [FT_AwayScore]"
+
+  - id: "node_calc_profit"
+    type: "formula"
+    position: { x: 1100, y: 300 }
+    parameters:
+      output_column: "Max_Return_Odds"
+      expression: "pl.max_horizontal([pl.col('FT_HomeOdds'), pl.col('FT_AwayOdds')])"
+
+  - id: "node_unique_matches"
+    type: "unique"
+    position: { x: 1350, y: 300 }
+    parameters:
+      columns: ["Date", "HomeTeam", "AwayTeam"]
+      keep: "first"
+
+  - id: "node_select_columns"
+    type: "select"
+    position: { x: 1600, y: 300 }
+    parameters:
+      columns:
+        - { name: "Date", keep: true }
+        - { name: "HomeTeam", keep: true }
+        - { name: "AwayTeam", keep: true }
+        - { name: "Total_Match_Goals", keep: true }
+        - { name: "Max_Return_Odds", keep: true }
+
+  - id: "node_pivot_heatmap"
+    type: "pivot"
+    position: { x: 1850, y: 300 }
+    parameters:
+      index: ["HomeTeam"]
+      columns: "AwayTeam"
+      values: "Total_Match_Goals"
+      aggregate_function: "mean"
+
+  - id: "node_final_browse"
+    type: "browse"
+    position: { x: 2100, y: 300 }
+    parameters: {}
+
+edges:
+  - { source: "node_input_seriea", target: "node_cleanse_teams" }
+  - { source: "node_cleanse_teams", target: "node_filter_recent" }
+  - { source: "node_filter_recent", target: "node_calc_goals", sourceHandle: "T" }
+  - { source: "node_calc_goals", target: "node_calc_profit" }
+  - { source: "node_calc_profit", target: "node_unique_matches" }
+  - { source: "node_unique_matches", target: "node_select_columns" }
+  - { source: "node_select_columns", target: "node_pivot_heatmap" }
+  - { source: "node_pivot_heatmap", target: "node_final_browse" }

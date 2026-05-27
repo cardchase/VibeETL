@@ -58,7 +58,7 @@ const CanvasContent = ({
   }, [onNodeSelect, onEdgeSelect]);
 
   const onEdgeClick = useCallback((event, edge) => {
-    if (onEdgeSelect) onEdgeSelect(edge ? edge.id : null);
+    if (onEdgeSelect) onEdgeSelect(edge);
     onNodeSelect(null);
   }, [onEdgeSelect, onNodeSelect]);
 
@@ -114,7 +114,6 @@ const CanvasContent = ({
         panOnDrag={isPanMode}
         selectionOnDrag={!isPanMode}
         selectionMode={SelectionMode.Partial}
-        connectionRadius={40}
         fitView
         fitViewOptions={{ maxZoom: 1.1, padding: 0.2 }}
         defaultViewport={{ x: 50, y: 50, zoom: 1.1 }}

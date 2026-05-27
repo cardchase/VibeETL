@@ -1,0 +1,10 @@
+# DB-Out Node
+
+Write data from your ETL pipeline directly to SQL Databases (PostgreSQL, MySQL, SQLite) using high-speed Polars connectors.
+
+## Parameters:
+- **Connection String (URI)**: The connection string (e.g. `postgresql://user:pass@host:5432/dbname`).
+- **Table Name**: The name of the destination table.
+- **If Table Exists**: Strategy for handling existing tables (`replace`, `append`, `fail`).
+
+This node uses Polars native `write_database` to write data efficiently.

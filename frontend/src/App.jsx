@@ -6,8 +6,10 @@ import ConfigWindow from './components/ConfigWindow';
 import ResultsWindow from './components/ResultsWindow';
 import ErrorBoundary from './components/ErrorBoundary';
 import CustomNode from './components/CustomNode';
-import yaml from 'js-yaml';
 import './App.css';
+
+// Dynamic API Base URL from environment variables
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 // Initial nodes to populate the workspace with a working demo out-of-the-box
 const initialNodes = [
@@ -87,14 +89,29 @@ const resolveNodeSchema = (nodeId, nodes, edges, results = {}) => {
     ];
   }
 
-  // Find incoming connection
-  const incomingEdge = edges.find(
+  // Find incoming connections
+  const incomingEdges = edges.filter(
     (e) => e.target === nodeId && (e.targetPort === 'input' || e.targetHandle === 'input')
   );
-  if (!incomingEdge) return [];
+  if (incomingEdges.length === 0) return [];
 
   // Resolve upstream node's schema recursively
-  const upstreamSchema = resolveNodeSchema(incomingEdge.source, nodes, edges, results);
+  // If union, we merge all incoming schemas (deduplicated by name)
+  let upstreamSchema = [];
+  if (node.type === 'union' && incomingEdges.length > 1) {
+    const allSchemas = incomingEdges.map(edge => resolveNodeSchema(edge.source, nodes, edges, results));
+    const mergedMap = new Map();
+    allSchemas.forEach(schema => {
+      schema.forEach(col => {
+        if (!mergedMap.has(col.name)) {
+          mergedMap.set(col.name, col);
+        }
+      });
+    });
+    upstreamSchema = Array.from(mergedMap.values());
+  } else {
+    upstreamSchema = resolveNodeSchema(incomingEdges[0].source, nodes, edges, results);
+  }
 
   // If node is select, modify the schema according to the select parameters
   if (node.type === 'select') {
@@ -115,24 +132,6 @@ const resolveNodeSchema = (nodeId, nodes, edges, results = {}) => {
       });
   }
 
-  // If node is join, combine left and right schemas
-  if (node.type === 'join') {
-    const leftEdge = edges.find(e => e.target === nodeId && e.targetHandle === 'left');
-    const rightEdge = edges.find(e => e.target === nodeId && e.targetHandle === 'right');
-    const leftSchema = leftEdge ? resolveNodeSchema(leftEdge.source, nodes, edges, results) : [];
-    const rightSchema = rightEdge ? resolveNodeSchema(rightEdge.source, nodes, edges, results) : [];
-    
-    const combined = [...leftSchema];
-    rightSchema.forEach(rc => {
-      if (!combined.find(lc => lc.name === rc.name)) {
-        combined.push(rc);
-      } else {
-        combined.push({ name: `${rc.name}_right`, type: rc.type });
-      }
-    });
-    return combined;
-  }
-
   // Regex appends new columns to the upstream schema
   if (node.type === 'regex') {
     const outputCols = node.data?.parameters?.outputColumns || [];
@@ -143,64 +142,162 @@ const resolveNodeSchema = (nodeId, nodes, edges, results = {}) => {
     return [...upstreamSchema, ...newSchema];
   }
 
-  // Summarize node reduces schema to group_by columns + output_name column
-  if (node.type === 'summarize') {
-    const groupBy = node.data?.parameters?.group_by || [];
-    const outName = node.data?.parameters?.output_name || 'Aggregated';
-    const aggFunc = node.data?.parameters?.agg_function || 'sum';
-    const aggColName = node.data?.parameters?.agg_column;
-
-    const groupByCols = Array.isArray(groupBy) ? groupBy : (typeof groupBy === 'string' ? groupBy.split(',').map(s=>s.trim()).filter(Boolean) : []);
-
-    // If no grouping and no aggregation column, it just passes through original schema
-    if (groupByCols.length === 0 && !aggColName) {
-      return upstreamSchema;
+  // Formula node appends or replaces a column
+  if (node.type === 'formula') {
+    const outputCol = node.data?.parameters?.output_column;
+    if (outputCol) {
+      const exists = upstreamSchema.some(c => c.name === outputCol);
+      if (!exists) {
+        return [...upstreamSchema, { name: outputCol, type: 'String' }];
+      }
     }
-
-    const newSchema = [];
-    
-    // Add group by columns with their original types
-    groupByCols.forEach(colName => {
-      const upstreamCol = upstreamSchema.find(uc => uc.name === colName);
-      if (upstreamCol) newSchema.push(upstreamCol);
-      else newSchema.push({ name: colName, type: 'Unknown' });
-    });
-
-    let outType = 'Float64';
-    if (aggFunc === 'count' || !aggColName) outType = 'Int64';
-    else if (aggColName) {
-      const aggUpstreamCol = upstreamSchema.find(uc => uc.name === aggColName);
-      if (aggUpstreamCol) outType = aggUpstreamCol.type;
-    }
-    
-    newSchema.push({ name: outName, type: outType });
-    return newSchema;
+    return upstreamSchema;
   }
 
-  // Filter, Sort, and File Output don't modify the schema, they just pass it through
+  // Record ID appends a column
+  if (node.type === 'record_id') {
+    const outputCol = node.data?.parameters?.column_name || 'RecordID';
+    const exists = upstreamSchema.some(c => c.name === outputCol);
+    if (!exists) {
+      return [{ name: outputCol, type: 'Int64' }, ...upstreamSchema];
+    }
+    return upstreamSchema;
+  }
+
+  // Pivot returns index columns + dynamic columns
+  if (node.type === 'pivot') {
+    const indices = node.data?.parameters?.index || [];
+    return indices.map(i => ({ name: i, type: 'String' })).concat([{ name: '...Pivoted Columns', type: 'Any' }]);
+  }
+
+  // Unpivot returns id columns + variable_name + value_name
+  if (node.type === 'unpivot') {
+    const idVars = node.data?.parameters?.id_vars || [];
+    const varName = node.data?.parameters?.variable_name || 'name';
+    const valName = node.data?.parameters?.value_name || 'value';
+    const idSchema = idVars.map(v => {
+      const existing = upstreamSchema.find(s => s.name === v);
+      return { name: v, type: existing ? existing.type : 'String' };
+    });
+    return [...idSchema, { name: varName, type: 'String' }, { name: valName, type: 'Any' }];
+  }
+
+  // Filter, Sort, Cleansing, Union, and File Output don't fundamentally change the column names (for simulation)
   return upstreamSchema;
 };
 
+const getInitialTabs = () => {
+  try {
+    const savedTabs = localStorage.getItem('vibeetl_autosave_workflow_tabs');
+    if (savedTabs) {
+      const parsed = JSON.parse(savedTabs);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+    const savedSingle = localStorage.getItem('vibeetl_autosave_workflow');
+    if (savedSingle) {
+      const parsed = JSON.parse(savedSingle);
+      return [{
+        id: 'tab-1',
+        name: 'Untitled Workflow',
+        nodes: parsed.nodes || initialNodes,
+        edges: parsed.edges || initialEdges,
+        results: {},
+        globalLogs: [],
+        isDirty: false
+      }];
+    }
+  } catch (e) {}
+  return [{
+    id: 'tab-1',
+    name: 'Untitled Workflow',
+    nodes: initialNodes,
+    edges: initialEdges,
+    results: {},
+    globalLogs: [],
+    isDirty: false
+  }];
+};
+
 function App() {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [tabs, setTabs] = useState(getInitialTabs());
+  const [activeTabId, setActiveTabId] = useState(tabs[0]?.id || 'tab-1');
+
+  const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  
+  const [nodes, setNodes, onNodesChange] = useNodesState(activeTab.nodes || []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(activeTab.edges || []);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+
+  // Pipeline execution state
+  const [isRunning, setIsRunning] = useState(false);
+  const [results, setResults] = useState(activeTab.results || {});
+  const [globalLogs, setGlobalLogs] = useState(activeTab.globalLogs || []);
+  const [isDirty, setIsDirty] = useState(activeTab.isDirty || false);
+
+  const handleTabChange = useCallback((newTabId) => {
+    if (newTabId === activeTabId) return;
+    setTabs(prev => prev.map(t => {
+      if (t.id === activeTabId) {
+        return { ...t, nodes, edges, results, globalLogs, isDirty };
+      }
+      return t;
+    }));
+    const incoming = tabs.find(t => t.id === newTabId);
+    if (incoming) {
+      setNodes(incoming.nodes || []);
+      setEdges(incoming.edges || []);
+      setResults(incoming.results || {});
+      setGlobalLogs(incoming.globalLogs || []);
+      setIsDirty(incoming.isDirty || false);
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+      setActiveTabId(newTabId);
+    }
+  }, [activeTabId, nodes, edges, results, globalLogs, isDirty, tabs, setNodes, setEdges]);
+
+  const handleAddTab = useCallback(() => {
+    setTabs(prev => {
+      const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty } : t);
+      const newTabId = `tab-${Date.now()}`;
+      const newTab = { id: newTabId, name: `Workflow ${currentSaved.length + 1}`, nodes: [], edges: [], results: {}, globalLogs: [], isDirty: false };
+      setNodes([]);
+      setEdges([]);
+      setResults({});
+      setGlobalLogs([]);
+      setIsDirty(false);
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+      setActiveTabId(newTabId);
+      return [...currentSaved, newTab];
+    });
+  }, [activeTabId, nodes, edges, results, globalLogs, isDirty, setNodes, setEdges]);
+
+  const handleCloseTab = useCallback((idToClose) => {
+    setTabs(prev => {
+      const newTabs = prev.filter(t => t.id !== idToClose);
+      if (newTabs.length === 0) return prev; // Don't close the last tab
+      if (idToClose === activeTabId) {
+        const incoming = newTabs[newTabs.length - 1];
+        setNodes(incoming.nodes || []);
+        setEdges(incoming.edges || []);
+        setResults(incoming.results || {});
+        setGlobalLogs(incoming.globalLogs || []);
+        setIsDirty(incoming.isDirty || false);
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        setActiveTabId(incoming.id);
+      }
+      return newTabs;
+    });
+  }, [activeTabId, setNodes, setEdges]);
 
   // Global keydown event listener to delete selected node or edge
   React.useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Backspace' || e.key === 'Delete') {
         const activeTag = document.activeElement?.tagName;
-        if (
-          activeTag === 'INPUT' ||
-          activeTag === 'SELECT' ||
-          activeTag === 'TEXTAREA' ||
-          document.activeElement?.isContentEditable
-        ) {
-          return;
-        }
-
+        if (activeTag === 'INPUT' || activeTag === 'SELECT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
         if (selectedNodeId) {
           e.preventDefault();
           setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
@@ -213,21 +310,45 @@ function App() {
         }
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedNodeId, selectedEdgeId, setNodes, setEdges]);
-  
-  // Pipeline execution state
-  const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState({});
-  const [globalLogs, setGlobalLogs] = useState([]);
+  const isFirstRender = React.useRef(true);
+
+  // Auto-save & Dirty Tracking
+  React.useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    setIsDirty(true);
+    localStorage.setItem('vibeetl_autosave_workflow', JSON.stringify({ nodes, edges }));
+
+    const timer = setTimeout(() => {
+      fetch(`${API_BASE}/api/autosave`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes, edges })
+      }).catch(err => console.error("Autosave backend failed:", err));
+    }, 2000);
+    
+    return () => clearTimeout(timer);
+  }, [nodes, edges]);
+
+  // Unsaved changes protection
+  React.useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
   const [autoRun, setAutoRun] = useState(true);
   const [availableTools, setAvailableTools] = useState([]);
   const [sidebarWidth, setSidebarWidth] = useState(320);
-  const [lastSavedConfigStr, setLastSavedConfigStr] = useState(null);
   const isResizing = React.useRef(false);
 
   const startResizing = useCallback((mouseDownEvent) => {
@@ -285,7 +406,7 @@ function App() {
 
   // Fetch dynamic tools from backend
   useEffect(() => {
-    fetch('http://127.0.0.1:8000/api/tools')
+    fetch(`${API_BASE}/api/tools`)
       .then(res => res.json())
       .then(data => {
         if (data.tools) setAvailableTools(data.tools);
@@ -296,14 +417,20 @@ function App() {
   // Handles adding wire connections between nodes
   const onConnect = useCallback(
     (params) => {
+      const sourceNode = nodes.find(n => n.id === params.source);
+      if (sourceNode?.type === 'visualization') {
+        alert("Visualization tools generate interactive reports, not tabular data. They cannot be connected downstream to other tools.");
+        return;
+      }
+
       const edge = {
         ...params,
-        id: `e-${params.source}-${params.sourceHandle}-${params.target}-${params.targetHandle}`,
+        id: `e-${params.source}-${params.target}`,
         style: { stroke: '#9ca3af', strokeWidth: 2 }
       };
       setEdges((eds) => addEdge(edge, eds));
     },
-    [setEdges]
+    [nodes, setEdges]
   );
 
   // Handles selection of a node on the canvas
@@ -343,11 +470,7 @@ function App() {
       label = toolDef.name || label;
       category = toolDef.category || category;
       icon = toolDef.icon || icon;
-      if (toolDef.ui_schema) {
-        toolDef.ui_schema.forEach(field => {
-          defaultParams[field.field] = field.default !== undefined ? field.default : '';
-        });
-      }
+      defaultParams = toolDef.defaultParams || {};
     } else {
       console.warn(`Tool definition not found for: ${type}. Using fallback defaults.`);
       if (type === 'fileInput') {
@@ -390,6 +513,46 @@ function App() {
         category = 'inout';
         icon = 'Image';
         defaultParams = { imagePath: '' };
+      } else if (type === 'pivot') {
+        label = 'Pivot';
+        category = 'transform';
+        icon = 'ArrowLeftRight';
+        defaultParams = { index: [], columns: '', values: '', aggregate_function: 'sum' };
+      } else if (type === 'unpivot') {
+        label = 'Unpivot (Melt)';
+        category = 'transform';
+        icon = 'ArrowDownUp';
+        defaultParams = { id_vars: [], value_vars: [], variable_name: 'name', value_name: 'value' };
+      } else if (type === 'union') {
+        label = 'Union';
+        category = 'join';
+        icon = 'Layers';
+        defaultParams = { how: 'diagonal' };
+      } else if (type === 'data_cleansing') {
+        label = 'Data Cleansing';
+        category = 'prep';
+        icon = 'Sparkles';
+        defaultParams = { columns: [], replace_nulls_string: false, replace_nulls_numeric: false, trim_whitespace: false, remove_punctuation: false };
+      } else if (type === 'formula') {
+        label = 'Formula';
+        category = 'prep';
+        icon = 'Calculator';
+        defaultParams = { output_column: 'NewColumn', expression: '' };
+      } else if (type === 'unique') {
+        label = 'Unique';
+        category = 'prep';
+        icon = 'Fingerprint';
+        defaultParams = { columns: [], keep: 'first' };
+      } else if (type === 'visualization') {
+        label = 'Visualization';
+        category = 'analysis';
+        icon = 'BarChart3';
+        defaultParams = { chartType: 'scatter', xAxis: '', yAxis: '', title: '' };
+      } else if (type === 'record_id') {
+        label = 'Record ID';
+        category = 'prep';
+        icon = 'Hash';
+        defaultParams = { column_name: 'RecordID', starting_value: 1 };
       }
     }
 
@@ -426,59 +589,32 @@ function App() {
   }, [nodes, selectedNodeId]);
 
   // Resolves the schema of the selected node's upstream connection
-  const { upstreamSchema, upstreamSchemaLeft, upstreamSchemaRight } = useMemo(() => {
-    if (!selectedNodeId) return { upstreamSchema: [] };
+  const upstreamSchema = useMemo(() => {
+    if (!selectedNodeId) return [];
     
     // Find if the selected node is a FileInput (doesn't have upstream)
     const activeNode = nodes.find(n => n.id === selectedNodeId);
-    if (!activeNode || activeNode.type === 'fileInput') return { upstreamSchema: [] };
+    if (!activeNode || activeNode.type === 'fileInput') return [];
 
+    // Special case for Join Node: resolve schemas for both 'left' and 'right' inputs
     if (activeNode.type === 'join') {
-      const leftEdge = edges.find(e => e.target === selectedNodeId && e.targetHandle === 'left');
-      const rightEdge = edges.find(e => e.target === selectedNodeId && e.targetHandle === 'right');
-      const leftSchema = leftEdge ? resolveNodeSchema(leftEdge.source, nodes, edges, results) : [];
-      const rightSchema = rightEdge ? resolveNodeSchema(rightEdge.source, nodes, edges, results) : [];
+      const leftEdge = edges.find(e => e.target === selectedNodeId && (e.targetHandle === 'left' || e.targetPort === 'left'));
+      const rightEdge = edges.find(e => e.target === selectedNodeId && (e.targetHandle === 'right' || e.targetPort === 'right'));
       
-      const combined = [...leftSchema];
-      rightSchema.forEach(rc => {
-        if (!combined.find(lc => lc.name === rc.name)) {
-          combined.push(rc);
-        } else {
-          combined.push({ name: `${rc.name}_right`, type: rc.type });
-        }
-      });
-      return { upstreamSchema: combined, upstreamSchemaLeft: leftSchema, upstreamSchemaRight: rightSchema };
+      return {
+        left: leftEdge ? resolveNodeSchema(leftEdge.source, nodes, edges, results) : [],
+        right: rightEdge ? resolveNodeSchema(rightEdge.source, nodes, edges, results) : []
+      };
     }
 
-    // Find connection entering the selected node's "input" port
+    // Default behavior for nodes with a single generic 'input' port
     const incomingEdge = edges.find(
       (e) => e.target === selectedNodeId && (e.targetPort === 'input' || e.targetHandle === 'input')
     );
-    if (!incomingEdge) return { upstreamSchema: [] };
+    if (!incomingEdge) return [];
 
-    return { upstreamSchema: resolveNodeSchema(incomingEdge.source, nodes, edges, results) };
+    return resolveNodeSchema(incomingEdge.source, nodes, edges, results);
   }, [nodes, edges, selectedNodeId, results]);
-
-  const handleClearCache = async () => {
-    try {
-      await fetch('http://127.0.0.1:8000/api/clear-cache', { method: 'POST' });
-      setNodes((nds) =>
-        nds.map((node) => ({
-          ...node,
-          data: {
-            ...node.data,
-            parameters: {
-              ...node.data.parameters,
-              is_cached: false
-            }
-          }
-        }))
-      );
-      setGlobalLogs((prev) => [...prev, 'System: Cache completely cleared and all nodes reset.']);
-    } catch (err) {
-      console.error("Failed to clear cache on backend:", err);
-    }
-  };
 
   // Executes the pipeline DAG by sending the graph schema JSON to the backend
   const handleRunPipeline = async () => {
@@ -486,11 +622,11 @@ function App() {
     setIsRunning(true);
     setGlobalLogs(['Triggering pipeline execution...', 'Serializing DAG graph structure...']);
 
-    // Set all nodes' status to running
+    // Set all nodes' status to waiting
     setNodes((nds) =>
       nds.map((node) => ({
         ...node,
-        data: { ...node.data, status: 'running' }
+        data: { ...node.data, status: 'waiting' }
       }))
     );
 
@@ -513,7 +649,7 @@ function App() {
     };
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/execute', {
+      const response = await fetch(`${API_BASE}/api/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(dagPayload)
@@ -534,23 +670,15 @@ function App() {
           const nodeResult = data.results?.[node.id];
           const outcomeStatus = nodeResult?.status || 'idle';
           
-          let resultStats = null;
-          if (nodeResult) {
-            resultStats = {
-              row_count: nodeResult.row_count,
-              ports: nodeResult.ports ? Object.keys(nodeResult.ports).reduce((acc, port) => {
-                acc[port] = nodeResult.ports[port].row_count;
-                return acc;
-              }, {}) : null
-            };
-          }
-
           return {
             ...node,
             data: {
               ...node.data,
               status: outcomeStatus,
-              resultStats: resultStats,
+              resultSummary: nodeResult ? {
+                row_count: nodeResult.row_count,
+                ports: nodeResult.ports
+              } : null,
               // If node is a FileInput and returned a schema, cache it in parameters
               parameters: {
                 ...node.data.parameters,
@@ -604,80 +732,6 @@ function App() {
     runPipelineRef.current = handleRunPipeline;
   }, [handleRunPipeline]);
 
-  // Track initial state and beforeunload
-  useEffect(() => {
-    if (lastSavedConfigStr === null) {
-      setLastSavedConfigStr(dagConfigStr);
-    }
-  }, [dagConfigStr, lastSavedConfigStr]);
-
-  useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      const isDirty = lastSavedConfigStr !== null && lastSavedConfigStr !== dagConfigStr;
-      if (isDirty) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [dagConfigStr, lastSavedConfigStr]);
-
-  // Handle Save
-  const handleSaveWorkflow = useCallback(() => {
-    const workflow = {
-      nodes: nodes.map(n => ({
-        id: n.id,
-        type: n.type,
-        position: n.position,
-        data: n.data
-      })),
-      edges: edges.map(e => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-        style: e.style
-      }))
-    };
-    
-    const yamlStr = yaml.dump(workflow);
-    const blob = new Blob([yamlStr], { type: 'text/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'workflow.yaml';
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    setLastSavedConfigStr(dagConfigStr);
-    setGlobalLogs((prev) => [...prev, `System: Workflow saved to workflow.yaml`]);
-  }, [nodes, edges, dagConfigStr]);
-
-  // Handle Load
-  const handleLoadWorkflow = useCallback((e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const workflow = yaml.load(evt.target.result);
-        if (workflow && workflow.nodes && workflow.edges) {
-          setNodes(workflow.nodes);
-          setEdges(workflow.edges);
-          setLastSavedConfigStr(null); // Reset so it captures the loaded state
-          setGlobalLogs((prev) => [...prev, `System: Loaded workflow from ${file.name}`]);
-        }
-      } catch (err) {
-        setGlobalLogs((prev) => [...prev, `ERROR: Failed to load workflow - ${err.message}`]);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = null; 
-  }, [setNodes, setEdges]);
-
   // Debounced auto-run compile action
   React.useEffect(() => {
     if (!autoRun) return;
@@ -689,6 +743,87 @@ function App() {
     return () => clearTimeout(delayDebounceFn);
   }, [dagConfigStr, autoRun]);
 
+  // Live polling of execution status
+  React.useEffect(() => {
+    if (!isRunning) return;
+
+    const intervalId = setInterval(() => {
+      fetch(`${API_BASE}/api/status`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.statuses) {
+            setNodes((nds) => nds.map((node) => {
+              const nodePayload = data.statuses[node.id];
+              if (!nodePayload) return node;
+              const currentStatus = nodePayload.status;
+
+              // Only update if it exists and changed, and don't overwrite if node is already success/error 
+              // (because /api/execute response might have beaten the polling!)
+              if (currentStatus && node.data?.status !== currentStatus && node.data?.status !== 'success' && node.data?.status !== 'error') {
+                return { 
+                  ...node, 
+                  data: { 
+                    ...node.data, 
+                    status: currentStatus,
+                    resultSummary: currentStatus === 'success' ? {
+                      row_count: nodePayload.row_count,
+                      ports: nodePayload.ports
+                    } : null
+                  } 
+                };
+              }
+              return node;
+            }));
+          }
+          if (data.global_logs) {
+            setGlobalLogs(data.global_logs);
+          }
+        })
+        .catch(err => console.error("Polling error:", err));
+    }, 250);
+
+    return () => clearInterval(intervalId);
+  }, [isRunning, setNodes]);
+
+  // Synchronize edge styles with their source node's execution status
+  React.useEffect(() => {
+    setEdges((eds) => {
+      let hasChanges = false;
+      const newEdges = eds.map((edge) => {
+        const sourceNode = nodes.find((n) => n.id === edge.source);
+        const status = sourceNode?.data?.status || 'idle';
+        
+        let stroke = '#9ca3af'; // idle grey
+        let strokeWidth = 2;
+        let animated = false;
+
+        if (status === 'running') {
+          stroke = '#3b82f6'; // blue
+          animated = true;
+        } else if (status === 'success') {
+          stroke = '#10b981'; // green for all successful routes
+          strokeWidth = 3;
+          animated = false; 
+        } else if (status === 'error') {
+          stroke = '#ef4444'; // red
+          strokeWidth = 3;
+        }
+
+        if (edge.style?.stroke !== stroke || edge.style?.strokeWidth !== strokeWidth || edge.animated !== animated) {
+          hasChanges = true;
+          return {
+            ...edge,
+            animated,
+            style: { ...edge.style, stroke, strokeWidth }
+          };
+        }
+        return edge;
+      });
+
+      return hasChanges ? newEdges : eds;
+    });
+  }, [nodes, setEdges]);
+
   const nodeTypes = useMemo(() => {
     const types = { custom: CustomNode };
     availableTools.forEach(tool => {
@@ -697,18 +832,122 @@ function App() {
     return types;
   }, [availableTools]);
 
+  const handleSaveWorkflow = () => {
+    setIsDirty(false);
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ nodes, edges }));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    const activeTabName = tabs.find(t => t.id === activeTabId)?.name || 'workflow';
+    downloadAnchorNode.setAttribute("download", `${activeTabName}.json`);
+    document.body.appendChild(downloadAnchorNode); // required for firefox
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleExportYAML = () => {
+    setIsDirty(false);
+    // Build clean execution dag
+    const cleanNodes = nodes.map(n => ({
+      id: n.id,
+      type: n.type,
+      parameters: n.data?.parameters || {}
+    }));
+    const cleanEdges = edges.map(e => ({
+      source: e.source,
+      target: e.target,
+      sourcePort: e.sourceHandle || e.sourcePort || 'output',
+      targetPort: e.targetHandle || e.targetPort || 'input'
+    }));
+
+    let yamlStr = "nodes:\n";
+    cleanNodes.forEach(n => {
+      yamlStr += `  - id: ${n.id}\n`;
+      yamlStr += `    type: ${n.type}\n`;
+      if (Object.keys(n.parameters).length > 0) {
+        yamlStr += `    parameters:\n`;
+        Object.keys(n.parameters).forEach(k => {
+          let val = n.parameters[k];
+          if (typeof val === 'object') {
+            yamlStr += `      ${k}: '${JSON.stringify(val).replace(/'/g, "''")}'\n`;
+          } else if (typeof val === 'string') {
+            yamlStr += `      ${k}: '${val.replace(/'/g, "''")}'\n`;
+          } else {
+            yamlStr += `      ${k}: ${val}\n`;
+          }
+        });
+      }
+    });
+    yamlStr += "edges:\n";
+    cleanEdges.forEach(e => {
+      yamlStr += `  - source: ${e.source}\n`;
+      yamlStr += `    target: ${e.target}\n`;
+      if (e.sourcePort !== 'output') yamlStr += `    sourcePort: ${e.sourcePort}\n`;
+      if (e.targetPort !== 'input') yamlStr += `    targetPort: ${e.targetPort}\n`;
+    });
+
+    const dataStr = "data:text/yaml;charset=utf-8," + encodeURIComponent(yamlStr);
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "agent_workflow.yaml");
+    document.body.appendChild(downloadAnchorNode); 
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleLoadWorkflow = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const loaded = JSON.parse(e.target.result);
+        if (loaded.nodes && loaded.edges) {
+          setTabs(prev => {
+            const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty } : t);
+            const newTabId = `tab-${Date.now()}`;
+            const newTabName = file.name.replace('.json', '');
+            const newTab = { id: newTabId, name: newTabName, nodes: loaded.nodes, edges: loaded.edges, results: {}, globalLogs: ['Workflow loaded successfully.'], isDirty: false };
+            setNodes(newTab.nodes);
+            setEdges(newTab.edges);
+            setResults({});
+            setGlobalLogs(newTab.globalLogs);
+            setIsDirty(false);
+            setSelectedNodeId(null);
+            setSelectedEdgeId(null);
+            setActiveTabId(newTabId);
+            return [...currentSaved, newTab];
+          });
+        } else {
+          alert('Invalid workflow file format.');
+        }
+      } catch (err) {
+        alert('Failed to parse workflow file.');
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = ''; // reset input
+  };
+
   return (
     <div className="app-container">
       {/* 1. Tool Palette (Top Panel) */}
       <ToolPalette 
         onRunPipeline={handleRunPipeline} 
-        onClearCache={handleClearCache}
         onSaveWorkflow={handleSaveWorkflow}
         onLoadWorkflow={handleLoadWorkflow}
+        onExportYAML={handleExportYAML}
         isRunning={isRunning} 
         autoRun={autoRun}
         setAutoRun={setAutoRun}
         availableTools={availableTools}
+        selectedNode={selectedNode}
+        onUpdateParams={handleUpdateParams}
+        onAddNode={(type) => {
+          // Find the highest X coordinate of existing nodes to place the new node to the right
+          const maxX = nodes.length > 0 ? Math.max(...nodes.map(n => n.position.x)) : 50;
+          // Keep Y roughly near the top of the canvas (100) so it's instantly visible
+          handleAddNode(type, { x: maxX + 250, y: 100 });
+        }}
       />
 
       {/* Workspace Area */}
@@ -717,8 +956,6 @@ function App() {
           <ConfigWindow
             selectedNode={selectedNode}
             upstreamSchema={upstreamSchema}
-            upstreamSchemaLeft={upstreamSchemaLeft}
-            upstreamSchemaRight={upstreamSchemaRight}
             onUpdateParams={handleUpdateParams}
             availableTools={availableTools}
             results={results}
@@ -732,6 +969,38 @@ function App() {
 
         {/* Center Panel (Canvas + Results splitting vertically) */}
         <div className="main-content">
+          {/* Tabs Bar */}
+          <div className="tab-bar">
+            {tabs.map(tab => (
+              <div 
+                key={tab.id} 
+                className={`tab-item ${tab.id === activeTabId ? 'active' : ''}`}
+                onClick={() => handleTabChange(tab.id)}
+              >
+                <span className="tab-title" onDoubleClick={(e) => {
+                  const newName = prompt("Rename Tab:", tab.name);
+                  if (newName) {
+                    setTabs(prev => prev.map(t => t.id === tab.id ? { ...t, name: newName } : t));
+                  }
+                }}>{tab.name}</span>
+                {tabs.length > 1 && (
+                  <button 
+                    className="tab-close-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCloseTab(tab.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+            <button className="tab-add-btn" onClick={handleAddTab}>
+              +
+            </button>
+          </div>
+
           {/* 3. The Canvas Workspace */}
           <div style={{ flex: 1, position: 'relative' }}>
             <ErrorBoundary>

@@ -75,6 +75,8 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process uploaded file: {str(e)}")
 
+from fastapi.concurrency import run_in_threadpool
+
 @app.post("/api/execute")
 async def execute_dag(pipeline: Dict[str, Any] = Body(...)):
     """
@@ -82,21 +84,22 @@ async def execute_dag(pipeline: Dict[str, Any] = Body(...)):
     and executes nodes in order. Returns preview rows and execution logs for each node.
     """
     try:
-        result = execute_pipeline(pipeline)
+        # Run the CPU-bound execution in a separate thread so we don't block the event loop
+        result = await run_in_threadpool(execute_pipeline, pipeline)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error executing pipeline: {str(e)}")
 
-@app.post("/api/clear-cache")
-async def clear_cache():
+@app.get("/api/status")
+def get_status():
     """
-    Clears the entire pipeline cache.
+    Returns the real-time execution status of all nodes. 
+    Can be polled by the frontend during pipeline execution.
     """
-    try:
-        cache.clear()
-        return {"status": "success", "message": "Cache cleared."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
+    return {
+        "statuses": cache.get_status_payload(),
+        "global_logs": cache.get_global_logs()
+    }
 
 @app.post("/api/node/schema")
 async def get_node_schema(payload: Dict[str, Any] = Body(...)):
@@ -147,3 +150,34 @@ def get_excel_sheets(filePath: str):
 @app.get("/api/logs")
 def get_global_logs():
     return {"logs": cache.get_global_logs()}
+
+import json
+import glob
+from datetime import datetime
+
+AUTOSAVES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".autosaves"))
+os.makedirs(AUTOSAVES_DIR, exist_ok=True)
+
+@app.post("/api/autosave")
+async def autosave_workflow(pipeline: Dict[str, Any] = Body(...)):
+    """
+    Saves a rolling backup of the workflow to the server's .autosaves directory.
+    Maintains a maximum of 10 backups.
+    """
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = os.path.join(AUTOSAVES_DIR, f"autosave_{timestamp}.json")
+        
+        with open(filepath, "w") as f:
+            json.dump(pipeline, f)
+            
+        # Keep only the last 10 files
+        files = glob.glob(os.path.join(AUTOSAVES_DIR, "autosave_*.json"))
+        files.sort() # Sorted by timestamp ascending because of %Y%m%d_%H%M%S format
+        if len(files) > 10:
+            for old_file in files[:-10]:
+                os.remove(old_file)
+                
+        return {"status": "success", "message": f"Saved to {os.path.basename(filepath)}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Autosave failed: {str(e)}")

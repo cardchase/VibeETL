@@ -25,62 +25,74 @@ const CustomNode = ({ id, data, selected, type }) => {
   } else if (data?.parameters?.columns && Array.isArray(data.parameters.columns)) {
     const activeCols = data.parameters.columns.filter(c => c && c.keep).length;
     description = `${activeCols} cols`;
-  } else if (type === 'browse' || type === 'browse') {
+  } else if (type === 'browse') {
     description = 'View Data';
-  } else if (type === 'summarize') {
-    const aggFunc = data?.parameters?.agg_function || 'count';
-    const groupCols = Array.isArray(data?.parameters?.group_by) ? data.parameters.group_by.length : (typeof data?.parameters?.group_by === 'string' && data.parameters.group_by ? data.parameters.group_by.split(',').length : 0);
-    description = `${aggFunc} by ${groupCols} cols`;
-  } else if (type === 'join') {
-    description = `${data?.parameters?.how || 'inner'} join`;
   } else if (data?.description) {
     description = data.description;
   }
 
+  // If node has executed successfully, replace the sub-label with the output row counts!
+  if (status === 'success' && data?.resultSummary) {
+    if (type === 'filter' && data.resultSummary.ports) {
+      const trueCount = data.resultSummary.ports['true']?.row_count || 0;
+      const falseCount = data.resultSummary.ports['false']?.row_count || 0;
+      description = `T: ${trueCount} | F: ${falseCount} rows`;
+    } else if (data.resultSummary.row_count !== undefined) {
+      description = `${data.resultSummary.row_count} rows`;
+    }
+  }
+
+  const isCached = data?.parameters?.isCached || false;
+
   return (
-    <div className={`custom-node ${category} ${selected ? 'selected' : ''}`}>
-      {/* Target port (Left) for all nodes except FileInput and ImageCaption */}
+    <div className={`custom-node ${category} ${selected ? 'selected' : ''} ${isCached ? 'is-cached' : ''}`}>
+      {/* Target port (Left) for all nodes except FileInput, DatabaseInput, and ImageCaption */}
       {type === 'join' ? (
         <>
-          <div className="filter-port-label" style={{ left: 4, top: 'calc(30% - 5px)' }}>L</div>
+          <div className="join-port-label left-label">L</div>
           <Handle
             type="target"
             position={Position.Left}
             id="left"
             style={{ top: '30%' }}
-            className="node-handle left-handle"
+            className="node-handle left-handle join-left-handle"
           />
-          <div className="filter-port-label" style={{ left: 4, top: 'calc(70% - 5px)' }}>R</div>
+          <div className="join-port-label right-label">R</div>
           <Handle
             type="target"
             position={Position.Left}
             id="right"
             style={{ top: '70%' }}
-            className="node-handle left-handle"
+            className="node-handle left-handle join-right-handle"
           />
         </>
-      ) : type !== 'fileInput' && type !== 'imageCaption' && (
+      ) : (type !== 'fileInput' && type !== 'databaseInput' && type !== 'imageCaption') ? (
         <Handle
           type="target"
           position={Position.Left}
           id="input"
           className="node-handle left-handle"
         />
-      )}
+      ) : null}
 
       {/* Node Square Box (The tool icon) */}
       <div className={`node-icon-box ${category} ${status} ${selected ? 'selected' : ''}`}>
         <IconComponent size={16} className="node-icon" />
         
         {/* Status indicator on the top corner */}
-        {status !== 'idle' && (
+        {status !== 'idle' && status !== 'waiting' && status !== 'running' && (
           <div className={`node-status-dot ${status}`} title={`Status: ${status}`} />
         )}
-
-        {/* Cache indicator */}
-        {data?.parameters?.is_cached && (
-          <div className="node-status-dot cached" title="Node Data is Cached">
-            <Icons.Database size={6} color="white" />
+        {status === 'running' && (
+          <div className="node-status-running" title="Processing...">
+            <Icons.Loader2 size={12} className="animate-spin" style={{ color: '#3b82f6' }} />
+          </div>
+        )}
+        
+        {/* Cached indicator on the top left corner */}
+        {isCached && (
+          <div className="node-cached-icon" title="Node Output is Cached">
+            <span style={{ fontSize: '10px', fontWeight: 'bold' }}>©</span>
           </div>
         )}
       </div>
@@ -93,22 +105,9 @@ const CustomNode = ({ id, data, selected, type }) => {
             {description}
           </div>
         )}
-        
-        {/* Row Count Badge */}
-        {data?.resultStats && (
-          <div className="node-row-count-badge" title="Rows processed">
-            {data.resultStats.ports ? (
-              <span style={{color: 'var(--text-secondary)'}}>
-                {Object.entries(data.resultStats.ports).map(([port, count]) => `${port[0].toUpperCase()}: ${count}`).join(' | ')}
-              </span>
-            ) : (
-              <span style={{color: 'var(--text-secondary)'}}>{data.resultStats.row_count} rows</span>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* Source port (Right) for all nodes */}
+      {/* Source port (Right) for all nodes except terminal nodes */}
       {type === 'filter' ? (
         <>
           <div className="filter-port-label true-label">T</div>
@@ -128,7 +127,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             className="node-handle right-handle false-handle"
           />
         </>
-      ) : type !== 'browse' ? (
+      ) : (type !== 'browse' && type !== 'fileOutput' && type !== 'databaseOutput') ? (
         <Handle
           type="source"
           position={Position.Right}

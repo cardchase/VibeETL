@@ -1,0 +1,9 @@
+Formula Compute Node
+
+Calculate new columns or overwrite existing ones using expressions.
+
+Parameters:
+- output_column (String): Name of the column to output the calculation to.
+- expression (String): The math/text formula (e.g. [A] + [B]).
+
+Schema Output: Appends the new output_column or overwrites its type if it already exists.
