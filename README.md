@@ -11,6 +11,20 @@
   [![React Flow](https://img.shields.io/badge/UI-ReactFlow-ff0055)](https://reactflow.dev/)
 </div>
 
+<div align="center">
+  <img src="docs/screenshot_workflow.png" width="100%" alt="VibeETL Interactive Canvas Showcase">
+  <br>
+  <i>Build lightning-fast Polars data pipelines visually via an interactive React Flow DAG canvas.</i>
+</div>
+
+<br>
+
+<div align="center">
+  <img src="docs/screenshot_ui.png" width="100%" alt="VibeETL Tabular UI Configuration">
+  <br>
+  <i>Configure tools effortlessly using enterprise-grade, compact spreadsheet-like UI panels.</i>
+</div>
+
 ---
 
 > [!NOTE]
