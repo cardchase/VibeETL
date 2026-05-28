@@ -23,6 +23,8 @@ from app.tools.record_id import RecordIDNode
 from app.tools.gemini_ai import GeminiAINode
 from app.tools.datetime_parser import DateTimeNode
 from app.tools.python_code import PythonCodeNode
+from app.tools.sampling import SamplingNode
+from app.tools.llm_chunker import LLMChunkerNode
 
 NODE_CLASSES = {
     "fileInput": FileInputNode,
@@ -47,5 +49,7 @@ NODE_CLASSES = {
     "record_id": RecordIDNode,
     "gemini_ai": GeminiAINode,
     "datetime": DateTimeNode,
-    "python_code": PythonCodeNode
+    "python_code": PythonCodeNode,
+    "sampling": SamplingNode,
+    "llm_chunker": LLMChunkerNode
 }

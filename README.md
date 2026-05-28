@@ -91,10 +91,10 @@ VibeETL comes pre-loaded with an extensive suite of data engineering nodes, eleg
 | Category | Color | Included Tools |
 | :--- | :--- | :--- |
 | **In / Out** | Green 🟢 | `File Input`, `Database Input`, `Browse`, `File Output`, `Database Output`, `Image Ingest` |
-| **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Cleanse`, `Formula Compute`, `Unique`, `Regex`, `Record ID` |
+| **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Cleanse`, `Formula Compute`, `Unique`, `Regex`, `Record ID`, `Sample Records` |
 | **Transform** | Orange 🟠 | `Select`, `Pivot`, `Unpivot`, `Summarize`, `Date Time` |
 | **Join** | Purple 🟣 | `Union`, `Join` |
-| **Analysis** | Pink 🦩 | `Gemini AI (Multimodal LLM)`, `Visualization`, `Python Code` |
+| **Analysis** | Pink 🦩 | `Gemini AI (Multimodal LLM)`, `Visualization`, `Python Code`, `LLM Chunker` |
 
 > 🚀 **More Tools on the Horizon!**
 > We are continuously expanding the VibeETL ecosystem! As we develop more incredible tools, they will be dynamically baked right into our platform. Expect advanced integrations like Machine Learning predictors, Cloud Storage connectors (S3/GCS), and geospatial transformers very soon.

@@ -8,6 +8,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
   const [copied, setCopied] = useState(false);
   const [dataCopied, setDataCopied] = useState(false);
   const [selectedRows, setSelectedRows] = useState(new Set());
+  const [wrapText, setWrapText] = useState(false);
 
   const nodeId = selectedNode?.id;
   const isInspectingUpstream = originalNode && selectedNode && originalNode.id !== selectedNode.id;
@@ -231,17 +232,30 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                 </div>
               ) : previewData.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  {selectedRows.size > 0 && (
-                    <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {selectedRows.size} row{selectedRows.size > 1 ? 's' : ''} selected
-                      </span>
+                  <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      {selectedRows.size > 0 && (
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {selectedRows.size} row{selectedRows.size > 1 ? 's' : ''} selected
+                        </span>
+                      )}
+                      <label style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={wrapText} 
+                          onChange={(e) => setWrapText(e.target.checked)} 
+                          style={{ margin: 0 }}
+                        />
+                        Wrap Text
+                      </label>
+                    </div>
+                    {selectedRows.size > 0 && (
                       <button className="copy-logs-btn" onClick={handleCopyData}>
                         {dataCopied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
                         {dataCopied ? "Copied Data" : "Copy Selected Rows"}
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                   <div className="spreadsheet-container" style={{ flex: 1, overflow: 'auto' }}>
                     <table className="spreadsheet" style={{ tableLayout: 'auto' }}>
                       <thead>
@@ -277,7 +291,11 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                               {rowIdx + 1}
                             </td>
                             {schema.map((col) => (
-                              <td key={col.name} title={String(row[col.name] ?? '')}>
+                              <td 
+                                key={col.name} 
+                                title={String(row[col.name] ?? '')}
+                                style={wrapText ? { whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: '300px', lineHeight: '1.4', verticalAlign: 'top' } : {}}
+                              >
                                 {row[col.name] !== null && row[col.name] !== undefined ? String(row[col.name]) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>null</span>}
                               </td>
                             ))}

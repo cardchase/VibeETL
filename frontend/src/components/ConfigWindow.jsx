@@ -1785,6 +1785,19 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         );
       }
 
+      if (fieldDef.type === 'number') {
+        return (
+          <div key={idx} className="form-group">
+            <label className="form-label">{fieldDef.label}</label>
+            <input
+              type="number"
+              value={val}
+              onChange={(e) => handleParamChange(fieldDef.field, Number(e.target.value))}
+            />
+          </div>
+        );
+      }
+
       if (fieldDef.type === 'column_creatable') {
         const listId = `datalist-${id}-${fieldDef.field}`;
         return (

@@ -208,3 +208,20 @@ To guide your development, here is a detailed breakdown of how each standard nod
 *   **Parameters**:
     *   `code` (Textarea): Multiline Python code string. The incoming dataframe is available as `df` and Polars as `pl`.
 *   **Schema Output**: Outputs whatever Polars dataframe is assigned to the `df_out` variable in the script.
+
+#### 24. Sample Records Node (`sampling`)
+*   **Purpose**: Extract a subset of records (First N, Last N, or Random).
+*   **Category**: Prep (`prep`)
+*   **Parameters**:
+    *   `sample_type` (String): Extraction method (`first`, `last`, `random`).
+    *   `n_records` (Integer): The number of records to extract.
+*   **Schema Output**: Passes the incoming upstream schema through unchanged, just reducing the row count.
+
+#### 25. LLM Chunker Node (`llm_chunker`)
+*   **Purpose**: Batch sequential rows of text into large prompt chunks for LLMs.
+*   **Category**: Analysis (`analysis`)
+*   **Parameters**:
+    *   `chunk_size` (Integer): The number of sequential rows to group together.
+    *   `columns_to_chunk` (Array): Text column(s) to aggregate.
+    *   `row_separator` (String): Joining character (e.g., `\n`, `, `).
+*   **Schema Output**: Outputs a highly aggregated dataframe with chunk IDs. Each selected column is independently aggregated and retains its original name.
