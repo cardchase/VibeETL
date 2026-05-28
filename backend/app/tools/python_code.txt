@@ -1,0 +1,36 @@
+# Python Code Tool
+Execute custom Python scripts to manipulate data on the fly. 
+This tool provides total flexibility, exposing the incoming dataframe as `df` and the Polars library as `pl`.
+
+## Usage
+- You must write standard Python code.
+- The input dataframe is pre-loaded as the variable `df`.
+- The `polars` package is pre-loaded as the variable `pl`.
+- You can import any installed standard libraries (e.g. `import math`, `import re`).
+- At the end of your script, you must assign the resulting dataframe to the variable `df_out`.
+- Be careful with infinite loops or heavy operations, as they execute synchronously in the backend!
+
+## Parameters
+- **code** (textarea): The Python script to execute.
+
+## Examples
+### Create a New Column using Polars
+```python
+df_out = df.with_columns(
+    pl.col("Revenue") - pl.col("Cost").alias("Profit")
+)
+```
+
+### Drop Nulls and Sort
+```python
+df_out = df.drop_nulls().sort("Date", descending=True)
+```
+
+### Import Libraries for Advanced Math
+```python
+import math
+
+df_out = df.with_columns(
+    (pl.col("Score") * math.pi).alias("Score_Pi")
+)
+```

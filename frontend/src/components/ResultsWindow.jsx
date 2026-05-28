@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Terminal, Database, FileText, Copy, Check } from 'lucide-react';
 
-const ResultsWindow = ({ selectedNode, results, globalLogs, style = {} }) => {
+const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style = {} }) => {
   const [activeTab, setActiveTab] = useState('data'); // 'logs' or 'data'
   const [selectedPort, setSelectedPort] = useState(null);
   const [prevNodeId, setPrevNodeId] = useState(null);
@@ -10,6 +10,7 @@ const ResultsWindow = ({ selectedNode, results, globalLogs, style = {} }) => {
   const [selectedRows, setSelectedRows] = useState(new Set());
 
   const nodeId = selectedNode?.id;
+  const isInspectingUpstream = originalNode && selectedNode && originalNode.id !== selectedNode.id;
 
   // Reset selectedPort and rows if we select a different node
   if (nodeId !== prevNodeId) {
@@ -136,14 +137,31 @@ const ResultsWindow = ({ selectedNode, results, globalLogs, style = {} }) => {
           {selectedNode ? (
             status === 'success' ? (
               <span>
+                {isInspectingUpstream && (
+                  <span style={{ color: '#8b5cf6', fontWeight: 'bold', marginRight: 8, padding: '2px 6px', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: '4px' }}>
+                    Incoming Data to {originalNode?.data?.label || originalNode?.id}
+                  </span>
+                )}
                 Node '{selectedNode.data?.label || selectedNode.id}' {hasPorts ? `[Port: ${activePort === 'true' ? 'True' : activePort === 'false' ? 'False' : activePort}]` : ''}: <strong>{rowCount}</strong> rows, <strong>{colCount}</strong> columns ({typeof duration === 'number' ? duration.toFixed(0) : '0'}ms)
               </span>
             ) : status === 'error' ? (
               <span style={{ color: 'var(--color-error)' }}>
+                {isInspectingUpstream && (
+                  <span style={{ color: '#8b5cf6', fontWeight: 'bold', marginRight: 8, padding: '2px 6px', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: '4px' }}>
+                    Incoming Data to {originalNode?.data?.label || originalNode?.id}
+                  </span>
+                )}
                 Node '{selectedNode.data?.label || selectedNode.id}' failed.
               </span>
             ) : (
-              <span>Node '{selectedNode.data?.label || selectedNode.id}' (Not executed)</span>
+              <span>
+                {isInspectingUpstream && (
+                  <span style={{ color: '#8b5cf6', fontWeight: 'bold', marginRight: 8, padding: '2px 6px', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: '4px' }}>
+                    Incoming Data to {originalNode?.data?.label || originalNode?.id}
+                  </span>
+                )}
+                Node '{selectedNode.data?.label || selectedNode.id}' (Not executed)
+              </span>
             )
           ) : (
             <span>No node selected</span>

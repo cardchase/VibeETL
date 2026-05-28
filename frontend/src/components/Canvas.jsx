@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState } from 'react';
+import React, { useRef, useCallback, useState, useEffect } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -7,10 +7,80 @@ import {
   useReactFlow,
   ReactFlowProvider,
   SelectionMode,
+  Panel
 } from '@xyflow/react';
-import { Hand, MousePointer } from 'lucide-react';
+import { Hand, MousePointer, Search, X } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
+
+const FindNodePanel = ({ nodes, onNodeSelect }) => {
+  const [query, setQuery] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const { setCenter } = useReactFlow();
+
+  const matchingNodes = query.trim() ? nodes.filter(n => 
+    n.id.toLowerCase().includes(query.toLowerCase()) || 
+    (n.data?.label || '').toLowerCase().includes(query.toLowerCase())
+  ) : [];
+
+  const handleSelect = (node) => {
+    // Pan to node
+    setCenter(node.position.x + 50, node.position.y + 50, { zoom: 1.2, duration: 800 });
+    // Select node
+    onNodeSelect(node);
+    // Close search
+    setIsOpen(false);
+    setQuery('');
+  };
+
+  return (
+    <Panel position="top-right" className="find-node-panel">
+      {!isOpen ? (
+        <button className="mode-btn" onClick={() => setIsOpen(true)} title="Find Tool on Canvas" style={{ background: 'white', padding: '8px', borderRadius: '8px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Search size={16} />
+          <span style={{ fontSize: '12px', fontWeight: 600 }}>Find...</span>
+        </button>
+      ) : (
+        <div style={{ background: 'white', borderRadius: '8px', boxShadow: '0 4px 15px rgba(0,0,0,0.15)', border: '1px solid #e2e8f0', width: '250px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #e2e8f0' }}>
+            <Search size={14} style={{ color: '#94a3b8', marginRight: '8px' }} />
+            <input 
+              autoFocus
+              type="text" 
+              placeholder="Find by ID or Name..." 
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{ border: 'none', outline: 'none', width: '100%', fontSize: '12px' }}
+            />
+            <button onClick={() => { setIsOpen(false); setQuery(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#94a3b8' }}>
+              <X size={14} />
+            </button>
+          </div>
+          {query.trim() && (
+            <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {matchingNodes.length === 0 ? (
+                <div style={{ padding: '12px', fontSize: '12px', color: '#94a3b8', textAlign: 'center' }}>No tools found</div>
+              ) : (
+                matchingNodes.map(node => (
+                  <div 
+                    key={node.id}
+                    onClick={() => handleSelect(node)}
+                    style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', borderBottom: '1px solid #f1f5f9', ':hover': { backgroundColor: '#f8fafc' } }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}>{node.data?.label || 'Node'}</span>
+                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>ID: {node.id}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+};
 
 const CanvasContent = ({
   nodes,
@@ -69,6 +139,24 @@ const CanvasContent = ({
 
   const [isPanMode, setIsPanMode] = useState(true);
 
+  // Listen for add node events from ToolPalette
+  useEffect(() => {
+    const handleAddNodeEvent = (e) => {
+      const type = e.detail.type;
+      if (reactFlowWrapper.current) {
+        const bounds = reactFlowWrapper.current.getBoundingClientRect();
+        // Place in top-center of visible canvas area
+        const position = screenToFlowPosition({
+          x: bounds.x + bounds.width / 2 - 50, // center horizontally minus node half-width
+          y: bounds.y + 100, // 100px from top
+        });
+        onAddNode(type, position);
+      }
+    };
+    window.addEventListener('vibe-add-node', handleAddNodeEvent);
+    return () => window.removeEventListener('vibe-add-node', handleAddNodeEvent);
+  }, [screenToFlowPosition, onAddNode]);
+
   return (
     <div
       ref={reactFlowWrapper}
@@ -120,6 +208,7 @@ const CanvasContent = ({
       >
         <Controls showInteractive={false} style={{ bottom: 15, left: 15 }} />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="rgba(0, 0, 0, 0.08)" />
+        <FindNodePanel nodes={nodes} onNodeSelect={onNodeSelect} />
       </ReactFlow>
     </div>
   );

@@ -1,5 +1,4 @@
 import os
-import numpy as np
 import polars as pl
 from typing import Dict, Any
 from app.tools.base import BaseNode
@@ -31,15 +30,29 @@ class ImageCaptionNode(BaseNode):
 
         try:
             from PIL import Image
+            import numpy as np
             import onnxruntime as ort
             from transformers import ViTImageProcessor, AutoTokenizer
         except ImportError:
-            err_msg = (
-                "Required CPU libraries are missing. Please install them by running:\n"
-                "pip install onnxruntime numpy pillow transformers huggingface_hub"
-            )
-            self.log(err_msg)
-            raise ImportError(err_msg)
+            self.log("Required ML libraries are missing. Downloading and installing them dynamically... This may take several minutes.")
+            import subprocess
+            import sys
+            try:
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", 
+                    "onnxruntime", "numpy", "transformers", "huggingface_hub", "pillow", "pytesseract"
+                ])
+                self.log("Successfully installed ML libraries. Continuing execution...")
+                
+                # Retry imports after installation
+                from PIL import Image
+                import numpy as np
+                import onnxruntime as ort
+                from transformers import ViTImageProcessor, AutoTokenizer
+            except subprocess.CalledProcessError as e:
+                err_msg = f"Failed to dynamically install libraries: {e}"
+                self.log(err_msg)
+                raise RuntimeError(err_msg)
 
         try:
             # We download the ONNX model files from Hugging Face Hub

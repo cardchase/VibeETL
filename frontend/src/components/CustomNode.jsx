@@ -44,6 +44,13 @@ const CustomNode = ({ id, data, selected, type }) => {
 
   const isCached = data?.parameters?.isCached || false;
 
+  const handleAnchorClick = (e, handleType, handleId) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('vibe-handle-click', { 
+      detail: { nodeId: id, handleType, handleId } 
+    }));
+  };
+
   return (
     <div className={`custom-node ${category} ${selected ? 'selected' : ''} ${isCached ? 'is-cached' : ''}`}>
       {/* Target port (Left) for all nodes except FileInput, DatabaseInput, and ImageCaption */}
@@ -56,6 +63,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             id="left"
             style={{ top: '30%' }}
             className="node-handle left-handle join-left-handle"
+            onClick={(e) => handleAnchorClick(e, 'target', 'left')}
           />
           <div className="join-port-label right-label">R</div>
           <Handle
@@ -64,6 +72,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             id="right"
             style={{ top: '70%' }}
             className="node-handle left-handle join-right-handle"
+            onClick={(e) => handleAnchorClick(e, 'target', 'right')}
           />
         </>
       ) : (type !== 'fileInput' && type !== 'databaseInput' && type !== 'imageCaption') ? (
@@ -72,6 +81,7 @@ const CustomNode = ({ id, data, selected, type }) => {
           position={Position.Left}
           id="input"
           className="node-handle left-handle"
+          onClick={(e) => handleAnchorClick(e, 'target', 'input')}
         />
       ) : null}
 
@@ -99,7 +109,12 @@ const CustomNode = ({ id, data, selected, type }) => {
 
       {/* Node Labels floating underneath the square box */}
       <div className="node-labels-container">
-        <div className="node-label-main">{data?.label || 'Node'}</div>
+        <div className="node-label-main" style={{ textAlign: 'center' }}>
+          {data?.label || 'Node'}
+        </div>
+        <div style={{ opacity: 0.5, fontSize: '0.7em', fontWeight: 'normal', color: 'var(--text-muted)', textAlign: 'center', marginTop: '2px' }}>
+          [{id}]
+        </div>
         {description && (
           <div className="node-label-sub" title={description}>
             {description}
@@ -117,6 +132,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             id="true"
             style={{ top: '30%' }}
             className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'true')}
           />
           <div className="filter-port-label false-label">F</div>
           <Handle
@@ -125,6 +141,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             id="false"
             style={{ top: '70%' }}
             className="node-handle right-handle false-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'false')}
           />
         </>
       ) : (type !== 'browse' && type !== 'fileOutput' && type !== 'databaseOutput') ? (
@@ -133,6 +150,7 @@ const CustomNode = ({ id, data, selected, type }) => {
           position={Position.Right}
           id="output"
           className="node-handle right-handle"
+          onClick={(e) => handleAnchorClick(e, 'source', 'output')}
         />
       ) : null}
     </div>

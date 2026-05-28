@@ -5,7 +5,7 @@ from app.tools.base import BaseNode
 class UnpivotNode(BaseNode):
     MANIFEST = {
         "id": "unpivot",
-        "name": "Unpivot (Melt)",
+        "name": "Unpivot",
         "category": "transform",
         "icon": "ArrowDownUp",
         "description": "Convert wide data to long data.",

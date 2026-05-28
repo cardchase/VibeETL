@@ -56,7 +56,7 @@
       }
     },
     {
-      "id": "node_5_true",
+      "id": "node_5",
       "type": "sort",
       "position": { "x": 1100, "y": 150 },
       "data": { 
@@ -67,7 +67,7 @@
       }
     },
     {
-      "id": "node_6_true",
+      "id": "node_6",
       "type": "visualization",
       "position": { "x": 1350, "y": 150 },
       "data": { 
@@ -78,7 +78,7 @@
       }
     },
     {
-      "id": "node_5_false",
+      "id": "node_7",
       "type": "summarize",
       "position": { "x": 1100, "y": 450 },
       "data": { 
@@ -94,7 +94,7 @@
       }
     },
     {
-      "id": "node_6_false",
+      "id": "node_8",
       "type": "sort",
       "position": { "x": 1350, "y": 450 },
       "data": { 
@@ -105,7 +105,7 @@
       }
     },
     {
-      "id": "node_7_false",
+      "id": "node_9",
       "type": "visualization",
       "position": { "x": 1600, "y": 450 },
       "data": { 
@@ -120,10 +120,10 @@
     { "id": "e1-2", "source": "node_1", "target": "node_2", "sourceHandle": "output", "targetHandle": "input" },
     { "id": "e2-3", "source": "node_2", "target": "node_3", "sourceHandle": "output", "targetHandle": "input" },
     { "id": "e3-4", "source": "node_3", "target": "node_4", "sourceHandle": "output", "targetHandle": "input" },
-    { "id": "e4-5t", "source": "node_4", "target": "node_5_true", "sourceHandle": "true", "targetHandle": "input" },
-    { "id": "e5t-6t", "source": "node_5_true", "target": "node_6_true", "sourceHandle": "output", "targetHandle": "input" },
-    { "id": "e4-5f", "source": "node_4", "target": "node_5_false", "sourceHandle": "false", "targetHandle": "input" },
-    { "id": "e5f-6f", "source": "node_5_false", "target": "node_6_false", "sourceHandle": "output", "targetHandle": "input" },
-    { "id": "e6f-7f", "source": "node_6_false", "target": "node_7_false", "sourceHandle": "output", "targetHandle": "input" }
+    { "id": "e4-5", "source": "node_4", "target": "node_5", "sourceHandle": "true", "targetHandle": "input" },
+    { "id": "e5-6", "source": "node_5", "target": "node_6", "sourceHandle": "output", "targetHandle": "input" },
+    { "id": "e4-7", "source": "node_4", "target": "node_7", "sourceHandle": "false", "targetHandle": "input" },
+    { "id": "e7-8", "source": "node_7", "target": "node_8", "sourceHandle": "output", "targetHandle": "input" },
+    { "id": "e8-9", "source": "node_8", "target": "node_9", "sourceHandle": "output", "targetHandle": "input" }
   ]
 }

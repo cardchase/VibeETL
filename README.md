@@ -49,6 +49,7 @@ VibeETL bridges the gap between complex code-based data preparation and heavy en
 - 🏗️ **Union & Deduplication**: Stack datasets seamlessly or isolate distinct entries.
 - 📊 **Interactive Web Visuals**: Dynamically generate rich, interactive Scatter, Line, Bar, and Box plots using the integrated `Plotly` HTML backend. Hover, zoom, and pan directly inside your results grid!
 - ✨ **Multimodal Generative AI**: Seamlessly process Text, Images, Video, and Audio using the integrated **Gemini AI** node! Throw files and prompts at the node and watch it dynamically extract data into a new column.
+- 🐍 **Advanced Python Scripting**: A built-in Python tool featuring a beautifully integrated **native syntax-aware IDE**, complete with column-aware autocompletion (just type `df["`). Contains pre-built templates for hitting external APIs or running custom LLMs directly inside your pipeline!
 - 🤖 **Agent-Ready Architecture**: Export your complex mathematical workflows into an ultra-clean, machine-readable YAML file in one click. Send this single file to any AI Agent or LLM to automate, improve, or instantly orchestrate your intelligence platform from scratch!
 - 💾 **Workflow Save/Load**: Never lose your progress. Export your complete ETL pipeline architecture to JSON and restore it at any time directly from the visual canvas.
 - 🤝 **Share & Collaborate**: Because workflows are saved as ultra-lightweight JSON files, you can instantly share them over Slack, Discord, or GitHub! The community can load your exact pipeline to help you debug errors, build custom visualizations, or extend your data models.
@@ -64,7 +65,8 @@ VibeETL brings the dense, hyper-productive feel of professional enterprise suite
 - 📊 **Alteryx-Inspired Configuration Panels**: We've replaced bulky forms with compact, spreadsheet-like tabular grids. Manage hundreds of columns in a single dense view using intuitive checkboxes, dropdowns, and text fields—all while maintaining a gorgeous glassmorphic aesthetic.
 - 🧠 **Semantic Type Profiling**: VibeETL's execution engine automatically profiles incoming data to detect logical semantic types (like `currency_usd`, `percentage`, `email`).
 - 💎 **Semantic Propagation**: When a semantic type is detected, the Engine maps it directly through the computational DAG! This metadata drives intelligent UI rendering—displaying `$` badges in your preview grid, formatting Plotly axes dynamically into currency layouts, and guiding users seamlessly.
-- ⭐ **Custom Tool Palettes**: Your most-used tools (File Input, Select, Formula) are pinned in an exclusive "Favorites" group, completely eliminating scrolling and searching when building standard workflows.
+- ⭐ **Dynamic Tool Favorites**: Fully customize your workspace! Pin any tool to your exclusive "Favorites" group by clicking its Star badge, completely eliminating scrolling and searching when building workflows. Your preferences are instantly saved to your browser's local storage and flawlessly restored across sessions!
+- 🔢 **True Sequential Numbering & Find**: Navigating massive workflows is incredibly easy with true, clean sequential Node IDs (`node_1`, `node_2`) that make hitting the "Find" bar extremely powerful and accurate.
 
 ---
 
@@ -89,10 +91,10 @@ VibeETL comes pre-loaded with an extensive suite of data engineering nodes, eleg
 | Category | Color | Included Tools |
 | :--- | :--- | :--- |
 | **In / Out** | Green 🟢 | `File Input`, `Database Input`, `Browse`, `File Output`, `Database Output`, `Image Ingest` |
-| **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Data Cleansing`, `Formula Compute`, `Unique`, `Regex Parser`, `Record ID` |
-| **Transform** | Orange 🟠 | `Select`, `Pivot`, `Unpivot (Melt)`, `Summarize` |
+| **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Cleanse`, `Formula Compute`, `Unique`, `Regex`, `Record ID` |
+| **Transform** | Orange 🟠 | `Select`, `Pivot`, `Unpivot`, `Summarize`, `Date Time` |
 | **Join** | Purple 🟣 | `Union`, `Join` |
-| **Analysis** | Pink 🦩 | `Gemini AI (Multimodal LLM)`, `Visualization` |
+| **Analysis** | Pink 🦩 | `Gemini AI (Multimodal LLM)`, `Visualization`, `Python Code` |
 
 > 🚀 **More Tools on the Horizon!**
 > We are continuously expanding the VibeETL ecosystem! As we develop more incredible tools, they will be dynamically baked right into our platform. Expect advanced integrations like Machine Learning predictors, Cloud Storage connectors (S3/GCS), and geospatial transformers very soon.
