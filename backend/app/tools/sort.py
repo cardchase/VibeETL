@@ -8,31 +8,45 @@ class SortNode(BaseNode):
         "name": "Sort",
         "category": "prep",
         "icon": "ArrowUpDown",
-        "description": "Sort rows by a column.",
-        "ui_schema": [
-            {"field": "column", "type": "column_select", "label": "Sort Column", "default": ""},
-            {"field": "descending", "type": "boolean", "label": "Sort Descending", "default": False}
-        ]
+        "description": "Multi-column sort.",
+        # UI is handled by custom ConfigWindow renderer
+        "ui_schema": []
     }
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Sort node requires an incoming data stream.")
 
-        column = self.parameters.get("column", "")
-        descending = self.parameters.get("descending", False)
+        rules = self.parameters.get("rules", [])
+        
+        # Legacy support
+        if not rules:
+            legacy_col = self.parameters.get("column", "")
+            legacy_desc = self.parameters.get("descending", False)
+            if legacy_col:
+                rules = [{"column": legacy_col, "order": "desc" if legacy_desc else "asc"}]
 
-        if not column:
-            self.log("No column specified for sorting. Passing input data unchanged.")
+        if not rules:
+            self.log("No columns specified for sorting. Passing input data unchanged.")
             return df
 
-        if column not in df.columns:
-            raise ValueError(f"Column '{column}' not found in input dataframe. Available columns: {df.columns}")
+        sort_cols = []
+        descending_flags = []
+        for rule in rules:
+            col = rule.get("column")
+            if not col or col not in df.columns:
+                self.log(f"Warning: Column '{col}' not found in dataframe. Skipping this sort rule.")
+                continue
+            
+            sort_cols.append(col)
+            descending_flags.append(rule.get("order", "asc") == "desc")
 
-        direction = "descending" if descending else "ascending"
-        self.log(f"Sorting by column '{column}' in {direction} order.")
+        if not sort_cols:
+            return df
+
+        self.log(f"Sorting by: {list(zip(sort_cols, descending_flags))}")
         
-        res_df = df.sort(column, descending=descending)
+        res_df = df.sort(sort_cols, descending=descending_flags)
         self.log(f"Successfully sorted {res_df.height} rows.")
         return res_df

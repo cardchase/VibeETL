@@ -20,7 +20,7 @@ class PivotNode(BaseNode):
     def execute(self, inputs: Dict[str, Any]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Pivot node requires an incoming data stream.")
 
         index = self.parameters.get("index", [])
         columns = self.parameters.get("columns", "")

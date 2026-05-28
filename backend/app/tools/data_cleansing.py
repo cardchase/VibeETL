@@ -24,7 +24,7 @@ class CleansingNode(BaseNode):
     def execute(self, inputs: Dict[str, Any]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: DataCleansing node requires an incoming data stream.")
 
         cols_to_clean = self.parameters.get("columns", [])
         if not cols_to_clean:

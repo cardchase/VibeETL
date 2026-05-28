@@ -20,7 +20,7 @@ class UnpivotNode(BaseNode):
     def execute(self, inputs: Dict[str, Any]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Unpivot node requires an incoming data stream.")
 
         id_vars = self.parameters.get("id_vars", [])
         value_vars = self.parameters.get("value_vars", [])

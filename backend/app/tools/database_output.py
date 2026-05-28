@@ -41,7 +41,7 @@ class DatabaseOutputExecutor(BaseNode):
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         if "input" not in inputs:
-            raise ValueError("DatabaseOutput node requires an input dataframe named 'input'.")
+            raise ValueError("Awaiting connection: DatabaseOutput node requires an incoming data stream.")
             
         df = inputs["input"]
         db_uri = self.parameters.get("db_uri", "").strip()

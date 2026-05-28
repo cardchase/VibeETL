@@ -121,6 +121,30 @@ async def get_node_schema(payload: Dict[str, Any] = Body(...)):
         "error": result.get("error")
     }
 
+from fastapi.responses import StreamingResponse
+import io
+
+@app.get("/api/download/csv")
+def download_node_csv(nodeId: str, portId: str = "output"):
+    """
+    Downloads the full DataFrame for a node's port as a CSV file.
+    """
+    df = cache.get_node_df(nodeId, portId)
+    if df is None:
+        raise HTTPException(status_code=404, detail="DataFrame not found in cache. Please run the node first.")
+        
+    # Write DataFrame to an in-memory buffer
+    buffer = io.BytesIO()
+    df.write_csv(buffer)
+    buffer.seek(0)
+    
+    filename = f"VibeETL_Export_{nodeId}_{portId}.csv"
+    headers = {
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    }
+    
+    return StreamingResponse(buffer, media_type="text/csv", headers=headers)
+
 @app.get("/api/excel/sheets")
 def get_excel_sheets(filePath: str):
     """

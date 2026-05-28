@@ -10,79 +10,105 @@ class SummarizeNode(BaseNode):
         "icon": "Sigma",
         "description": "Group by columns and apply aggregate functions (Sum, Count, Min, Max, Mean).",
         "ui_schema": [
-            {"field": "group_by", "type": "multi_column_select", "label": "Group By Column(s)", "default": []},
-            {"field": "agg_column", "type": "column_select", "label": "Aggregation Column", "default": ""},
-            {"field": "agg_function", "type": "select", "label": "Aggregation Function", "options": ["sum", "count", "min", "max", "mean"], "default": "sum"},
-            {"field": "output_name", "type": "string", "label": "Output Column Name", "default": "Aggregated"}
+            {"field": "actions", "type": "summarize_actions", "label": "Summarize Rules", "default": []}
         ]
     }
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Summarize node requires an incoming data stream.")
 
-        group_by_raw = self.parameters.get("group_by", [])
-        agg_column = self.parameters.get("agg_column", "")
-        agg_function = self.parameters.get("agg_function", "sum")
-        output_name = self.parameters.get("output_name", "Aggregated")
+        actions = self.parameters.get("actions", [])
+        
+        # Legacy support
+        if not actions:
+            group_by_raw = self.parameters.get("group_by", [])
+            agg_column = self.parameters.get("agg_column", "")
+            agg_function = self.parameters.get("agg_function", "sum")
+            output_name = self.parameters.get("output_name", "Aggregated")
+            
+            if isinstance(group_by_raw, str):
+                group_by_cols = [c.strip() for c in group_by_raw.split(",") if c.strip()]
+            elif isinstance(group_by_raw, list):
+                group_by_cols = [c.strip() for c in group_by_raw if isinstance(c, str) and c.strip()]
+            else:
+                group_by_cols = []
+                
+            for g in group_by_cols:
+                actions.append({"column": g, "action": "group_by", "output": g})
+            if agg_column:
+                actions.append({"column": agg_column, "action": agg_function, "output": output_name})
 
-        if not group_by_raw and not agg_column:
+        if not actions:
             self.log("No grouping or aggregation specified. Returning original dataframe.")
             return df
 
-        if isinstance(group_by_raw, str):
-            group_by_cols = [c.strip() for c in group_by_raw.split(",") if c.strip()]
-        elif isinstance(group_by_raw, list):
-            group_by_cols = [c.strip() for c in group_by_raw if isinstance(c, str) and c.strip()]
-        else:
-            group_by_cols = []
+        group_by_cols = []
+        agg_exprs = []
 
-        # Verify columns exist
         from app.tools.base import SchemaCompatibilityError
-        for col in group_by_cols:
-            if col and col not in df.columns:
-                raise SchemaCompatibilityError(f"Summarize error: Group by column '{col}' not found. Available: {df.columns}")
 
-        if agg_column and agg_column not in df.columns:
-             raise SchemaCompatibilityError(f"Summarize error: Aggregation column '{agg_column}' not found. Available: {df.columns}")
+        for rule in actions:
+            col = rule.get("column")
+            action = rule.get("action", "").lower()
+            out = rule.get("output") or f"{action}_{col}"
+            
+            if col not in df.columns:
+                raise SchemaCompatibilityError(f"Summarize error: Column '{col}' not found. Available: {df.columns}")
 
-        group_by_cols = [c for c in group_by_cols if c]
+            col_expr = pl.col(col)
+            
+            if action == "group_by":
+                group_by_cols.append(col)
+            elif action == "sum":
+                agg_exprs.append(col_expr.sum().alias(out))
+            elif action == "count":
+                agg_exprs.append(col_expr.count().alias(out))
+            elif action == "count_unique":
+                agg_exprs.append(col_expr.n_unique().alias(out))
+            elif action == "min":
+                agg_exprs.append(col_expr.min().alias(out))
+            elif action == "max":
+                agg_exprs.append(col_expr.max().alias(out))
+            elif action == "mean":
+                agg_exprs.append(col_expr.mean().alias(out))
+            elif action == "median":
+                agg_exprs.append(col_expr.median().alias(out))
+            elif action == "std":
+                agg_exprs.append(col_expr.std().alias(out))
+            elif action == "var":
+                agg_exprs.append(col_expr.var().alias(out))
+            elif action == "first":
+                agg_exprs.append(col_expr.first().alias(out))
+            elif action == "last":
+                agg_exprs.append(col_expr.last().alias(out))
+            elif action == "concat":
+                agg_exprs.append(col_expr.cast(pl.Utf8).str.join(", ").alias(out))
+            else:
+                raise ValueError(f"Unknown aggregation function: {action}")
 
-        self.log(f"Summarizing data. Group by: {group_by_cols}, Aggregation: {agg_function} on '{agg_column}'")
+        # Deduplicate group by columns to preserve order
+        seen = set()
+        group_by_cols = [x for x in group_by_cols if not (x in seen or seen.add(x))]
+
+        self.log(f"Summarizing data. Group by: {group_by_cols}, Aggregations: {len(agg_exprs)}")
 
         try:
-            # Build aggregation expression
-            agg_expr = None
-            if agg_column:
-                col_expr = pl.col(agg_column)
-                if agg_function == "sum":
-                    agg_expr = col_expr.sum().alias(output_name)
-                elif agg_function == "count":
-                    agg_expr = col_expr.count().alias(output_name)
-                elif agg_function == "min":
-                    agg_expr = col_expr.min().alias(output_name)
-                elif agg_function == "max":
-                    agg_expr = col_expr.max().alias(output_name)
-                elif agg_function == "mean":
-                    agg_expr = col_expr.mean().alias(output_name)
-                else:
-                    raise ValueError(f"Unknown aggregation function: {agg_function}")
-
             if group_by_cols:
-                grouped = df.group_by(group_by_cols)
-                if agg_expr is not None:
-                    res_df = grouped.agg(agg_expr)
+                grouped = df.group_by(group_by_cols, maintain_order=True)
+                if agg_exprs:
+                    res_df = grouped.agg(agg_exprs)
                 else:
-                    res_df = grouped.agg(pl.count().alias(output_name)) # Default to row count if no agg specified
+                    # If only group by is specified, essentially a unique/distinct operation
+                    res_df = df.select(group_by_cols).unique(maintain_order=True)
             else:
-                if agg_expr is not None:
-                     res_df = df.select(agg_expr)
+                if agg_exprs:
+                    res_df = df.select(agg_exprs)
                 else:
-                    self.log("No aggregation to perform.")
                     return df
 
-            self.log(f"Summarize successful. Result has {res_df.height} rows.")
+            self.log(f"Summarize successful. Result has {res_df.height} rows and {res_df.width} columns.")
             return res_df
         except Exception as e:
              self.log(f"Summarize failed: {str(e)}")

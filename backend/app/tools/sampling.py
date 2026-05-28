@@ -29,7 +29,7 @@ class SamplingNode(BaseNode):
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Sampling node requires an incoming data stream.")
 
         sample_type = self.parameters.get("sample_type", "first")
         n_records = int(self.parameters.get("n_records", 100))

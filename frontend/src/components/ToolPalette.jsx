@@ -10,7 +10,7 @@ const CATEGORY_TITLES = {
   'misc': 'Miscellaneous'
 };
 
-const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode }) => {
+const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode }) => {
   const fileInputRef = useRef(null);
   const dropdownRef = useRef(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -285,6 +285,20 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
           />
           <span>Auto-Run</span>
         </label>
+
+        <button
+          className="run-button"
+          style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5', marginLeft: '8px' }}
+          onClick={() => {
+            if (window.confirm("Are you sure you want to clear all cached nodes? This will un-cache everything on the canvas.")) {
+              onClearGlobalCache();
+            }
+          }}
+          title="Clear all cached nodes in the workflow"
+        >
+          <Icons.Trash2 size={16} />
+          <span>Clear All Cache</span>
+        </button>
 
         {selectedNode && (
           <button

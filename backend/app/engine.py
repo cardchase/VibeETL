@@ -27,6 +27,27 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
     cache.clear_except(list(cached_node_ids))
 
     # Map node_id to its full configuration
+    node_map_initial = {n["id"]: n for n in nodes_list}
+
+    def is_node_enabled(n_id):
+        curr_id = n_id
+        while curr_id:
+            n = node_map_initial.get(curr_id)
+            if not n:
+                break
+            if n.get("type") == "container" and n.get("data", {}).get("enabled") is False:
+                return False
+            curr_id = n.get("parentNode")
+        return True
+
+    enabled_nodes = []
+    for n in nodes_list:
+        if is_node_enabled(n["id"]):
+            enabled_nodes.append(n)
+        else:
+            cache.set_node_skipped(n["id"])
+            
+    nodes_list = enabled_nodes
     node_map = {n["id"]: n for n in nodes_list}
 
     # Build predecessors mapping for topological sort
@@ -88,6 +109,11 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
         if node_id not in cached_node_ids:
             cache.set_node_status(node_id, "waiting")
 
+    # Mark pruned nodes as skipped for UI feedback (bypassed by cache)
+    skipped_nodes = [n["id"] for n in nodes_list if n["id"] not in needed_nodes]
+    for node_id in skipped_nodes:
+        cache.set_node_skipped(node_id)
+
     # Execute nodes in topological order
     for node_id in execution_order:
         node_cfg = node_map.get(node_id)
@@ -96,6 +122,11 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
         node_type = node_cfg.get("type")
+        
+        if node_type == "container":
+            cache.set_node_status(node_id, "success")
+            continue
+            
         parameters = node_cfg.get("parameters", {})
         node_name = node_cfg.get("data", {}).get("label", f"{node_type}_{node_id}")
 

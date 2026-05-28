@@ -35,7 +35,7 @@ class FormulaNode(BaseNode):
     def execute(self, inputs: Dict[str, Any]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Formula node requires an incoming data stream.")
 
         output_column = self.parameters.get("output_column", "NewColumn")
         expression = self.parameters.get("expression", "")

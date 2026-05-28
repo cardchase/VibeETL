@@ -17,7 +17,7 @@ class SelectNode(BaseNode):
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Select node requires an incoming data stream.")
 
         # columns parameter format: list of dicts: [{"name": "ColA", "keep": True, "rename": "NewColA"}]
         columns_config = self.parameters.get("columns", [])

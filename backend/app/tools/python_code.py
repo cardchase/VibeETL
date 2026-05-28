@@ -43,7 +43,7 @@ df_out = df
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Awaiting connection: Python node requires an incoming data stream.")
+            raise ValueError("Awaiting connection: PythonCode node requires an incoming data stream.")
 
         code_string = self.parameters.get("code", "")
         if not code_string.strip():

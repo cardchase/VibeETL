@@ -71,10 +71,16 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
   };
 
   const handleCopyData = () => {
-    if (selectedRows.size === 0) return;
+    let sortedIndices = [];
+    if (selectedRows.size === 0) {
+      // Copy all visible rows if none selected
+      sortedIndices = Array.from({ length: previewData.length }, (_, i) => i);
+    } else {
+      // Sort selected indices
+      sortedIndices = Array.from(selectedRows).sort((a, b) => a - b);
+    }
     
-    // Sort selected indices
-    const sortedIndices = Array.from(selectedRows).sort((a, b) => a - b);
+    if (sortedIndices.length === 0) return;
     
     // Get headers
     const headers = schema.map(c => c.name).join('\t');
@@ -180,7 +186,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                 <p>Select a node on the canvas to inspect its output dataframe.</p>
               </div>
             ) : status === 'error' ? (
-              error?.toLowerCase().includes("input dataframe is missing") || error?.toLowerCase().includes("missing input") || error?.toLowerCase().includes("requires an input") ? (
+              error?.toLowerCase().includes("awaiting connection") || error?.toLowerCase().includes("input dataframe is missing") || error?.toLowerCase().includes("missing input") || error?.toLowerCase().includes("requires an input") ? (
                 <div className="no-node-selected" style={{ color: 'var(--text-secondary)', padding: 20 }}>
                   <span style={{ fontSize: '2.5rem', marginBottom: 10 }}>🔌</span>
                   <p style={{ fontWeight: 600, color: '#f59e0b' }}>Awaiting Connection</p>
@@ -249,12 +255,21 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                         Wrap Text
                       </label>
                     </div>
-                    {selectedRows.size > 0 && (
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button 
+                        className="copy-logs-btn" 
+                        onClick={() => {
+                          window.open(`http://localhost:8000/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}`, '_blank');
+                        }}
+                      >
+                        <FileText size={12} />
+                        Download CSV
+                      </button>
                       <button className="copy-logs-btn" onClick={handleCopyData}>
                         {dataCopied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
-                        {dataCopied ? "Copied Data" : "Copy Selected Rows"}
+                        {dataCopied ? "Copied Data" : (selectedRows.size > 0 ? "Copy Selected Rows" : "Copy Preview Data")}
                       </button>
-                    )}
+                    </div>
                   </div>
                   <div className="spreadsheet-container" style={{ flex: 1, overflow: 'auto' }}>
                     <table className="spreadsheet" style={{ tableLayout: 'auto' }}>

@@ -28,7 +28,7 @@ class VisualizationNode(BaseNode):
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         if "input" not in inputs:
-            raise ValueError("Visualization node requires an input dataframe named 'input'.")
+            raise ValueError("Awaiting connection: Visualization node requires an incoming data stream.")
             
         df = inputs["input"]
         chart_type = self.parameters.get("chartType", "scatter")

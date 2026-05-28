@@ -175,7 +175,7 @@ class FilterNode(BaseNode):
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> Dict[str, pl.DataFrame]:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Filter node requires an incoming data stream.")
 
         filter_type = self.parameters.get("filterType", "basic")
         

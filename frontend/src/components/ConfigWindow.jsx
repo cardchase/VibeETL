@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Upload, Check, AlertCircle, Database, Link } from 'lucide-react';
+import { Settings, Upload, Check, AlertCircle, Database, Link, X, Plus } from 'lucide-react';
 
 const getOperatorsForType = (type = '') => {
   const lowerType = type.toLowerCase();
@@ -71,6 +71,15 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   const [formulaSuggestion, setFormulaSuggestion] = useState(null);
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // Summarize rule state
+  const [sumColumn, setSumColumn] = useState('');
+  const [sumAction, setSumAction] = useState('group_by');
+  const [sumOutput, setSumOutput] = useState('');
+  
+  // Sort rule state
+  const [sortColumn, setSortColumn] = useState('');
+  const [sortOrder, setSortOrder] = useState('asc');
 
   const isValidNode = selectedNode && typeof selectedNode === 'object' && selectedNode.id;
   const id = isValidNode ? selectedNode.id : null;
@@ -567,52 +576,101 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   };
 
   const renderSortConfig = () => {
-    const column = parameters.column || '';
-    const descending = parameters.descending === true;
+    let rules = parameters.rules;
+    
+    // Legacy migration
+    if (!rules && parameters.column) {
+      rules = [{ column: parameters.column, order: parameters.descending ? 'desc' : 'asc' }];
+      setTimeout(() => onUpdateParams(id, { ...parameters, rules, column: undefined, descending: undefined }), 0);
+    }
+    
+    const currentRules = rules || [];
+    const schema = Array.isArray(upstreamSchema) ? upstreamSchema : [];
+
+    const handleAddRule = () => {
+      if (!sortColumn) return;
+      onUpdateParams(id, { ...parameters, rules: [...currentRules, { column: sortColumn, order: sortOrder }] });
+      setSortColumn('');
+      setSortOrder('asc');
+    };
 
     return (
-      <>
-        {!hasUpstreamColumns && (
-          <div className="glass-panel" style={{ padding: 10, borderRadius: 6, display: 'flex', gap: 8, background: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.2)', marginBottom: 10 }}>
-            <AlertCircle size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-              Connect this node's input and execute the workflow to automatically load column fields.
-            </span>
+      <div className="sort-config">
+        <div style={{ marginBottom: '16px' }}>
+          <label className="form-label">Sorting Rules (Order Matters)</label>
+          <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
+            {currentRules.length === 0 ? (
+              <div style={{ padding: '12px', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>No rules configured.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>
+                    <th style={{ padding: '8px', width: '30px' }}>#</th>
+                    <th style={{ padding: '8px' }}>Column</th>
+                    <th style={{ padding: '8px' }}>Order</th>
+                    <th style={{ padding: '8px', width: '30px' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentRules.map((rule, idx) => (
+                    <tr key={idx} style={{ borderBottom: idx < currentRules.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                      <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                      <td style={{ padding: '8px', color: 'var(--text-primary)' }}>{rule.column}</td>
+                      <td style={{ padding: '8px', color: 'var(--color-accent)', fontWeight: 600 }}>
+                        {rule.order === 'desc' ? 'Descending' : 'Ascending'}
+                      </td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                        <button 
+                          onClick={() => {
+                            const newRules = [...currentRules];
+                            newRules.splice(idx, 1);
+                            onUpdateParams(id, { ...parameters, rules: newRules });
+                          }}
+                          style={{ background: 'none', border: 'none', color: 'var(--color-error)', cursor: 'pointer' }}
+                          title="Remove Rule"
+                        >
+                          <X size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-        )}
+        </div>
 
-        <div className="form-group">
-          <label className="form-label">Sort By Column</label>
-          {hasUpstreamColumns ? (
-            <select value={column} onChange={(e) => handleParamChange('column', e.target.value)}>
+        <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+          <label className="form-label" style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Plus size={14} /> Add Sort Rule
+          </label>
+          <div className="form-group">
+            <select value={sortColumn} onChange={(e) => setSortColumn(e.target.value)} style={{ width: '100%', marginBottom: '8px' }}>
               <option value="">-- Select Column --</option>
-              {upstreamSchema.map((col) => (
-                <option key={col.name} value={col.name}>
-                  {col.name}
-                </option>
+              {schema.map(c => (
+                <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
               ))}
             </select>
-          ) : (
-            <input
-              type="text"
-              placeholder="Type column name"
-              value={column}
-              onChange={(e) => handleParamChange('column', e.target.value)}
-            />
-          )}
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Sort Direction</label>
-          <select
-            value={descending ? 'desc' : 'asc'}
-            onChange={(e) => handleParamChange('descending', e.target.value === 'desc')}
+          </div>
+          <div className="form-group" style={{ marginBottom: '12px' }}>
+            <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} style={{ width: '100%' }} disabled={!sortColumn}>
+              <option value="asc">Ascending (A-Z, 0-9)</option>
+              <option value="desc">Descending (Z-A, 9-0)</option>
+            </select>
+          </div>
+          <button 
+            onClick={handleAddRule}
+            disabled={!sortColumn}
+            style={{
+              width: '100%', padding: '8px', background: !sortColumn ? 'var(--bg-primary)' : 'var(--color-accent)',
+              color: !sortColumn ? 'var(--text-muted)' : 'white', border: '1px solid var(--border-color)',
+              borderRadius: '4px', cursor: !sortColumn ? 'not-allowed' : 'pointer', fontWeight: 600
+            }}
           >
-            <option value="asc">Ascending (A to Z, 0 to 9)</option>
-            <option value="desc">Descending (Z to A, 9 to 0)</option>
-          </select>
+            Add Rule
+          </button>
         </div>
-      </>
+      </div>
     );
   };
 
@@ -1768,6 +1826,158 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
     );
   };
 
+  const renderSummarizeConfig = () => {
+    let actions = parameters.actions;
+    
+    // Legacy migration
+    if (!actions) {
+      actions = [];
+      if (parameters.group_by) {
+        const gbs = Array.isArray(parameters.group_by) ? parameters.group_by : parameters.group_by.split(',');
+        gbs.forEach(g => {
+          if (typeof g === 'string' && g.trim()) {
+            actions.push({ column: g.trim(), action: 'group_by', output: g.trim() });
+          }
+        });
+      }
+      if (parameters.agg_column) {
+        actions.push({ column: parameters.agg_column, action: parameters.agg_function || 'sum', output: parameters.output_name || `Agg_${parameters.agg_column}` });
+      }
+      if (actions.length > 0) {
+        // Auto-migrate in background
+        setTimeout(() => onUpdateParams(id, { ...parameters, actions, group_by: undefined, agg_column: undefined, agg_function: undefined, output_name: undefined }), 0);
+      }
+    }
+
+    const currentActions = actions || [];
+    const schema = Array.isArray(upstreamSchema) ? upstreamSchema : [];
+
+    const getAvailableActions = (colName) => {
+      const colDef = schema.find(c => c.name === colName);
+      if (!colDef) return ['group_by', 'sum', 'mean', 'min', 'max', 'count', 'count_unique', 'concat', 'first', 'last'];
+      
+      const typeStr = (colDef.type || '').toLowerCase();
+      const isNum = typeStr.includes('int') || typeStr.includes('float') || typeStr.includes('double');
+      const isDate = typeStr.includes('date') || typeStr.includes('time');
+
+      if (isNum) return ['group_by', 'sum', 'mean', 'median', 'min', 'max', 'count', 'count_unique', 'std', 'var', 'first', 'last'];
+      if (isDate) return ['group_by', 'min', 'max', 'count', 'count_unique', 'first', 'last'];
+      return ['group_by', 'count', 'count_unique', 'min', 'max', 'first', 'last', 'concat'];
+    };
+
+    const handleColChange = (val) => {
+      setSumColumn(val);
+      const avail = getAvailableActions(val);
+      if (!avail.includes(sumAction)) {
+        setSumAction(avail[0]);
+      }
+      if (sumAction === 'group_by') setSumOutput(val);
+      else setSumOutput(`${sumAction}_${val}`);
+    };
+
+    const handleActionChange = (val) => {
+      setSumAction(val);
+      if (val === 'group_by') setSumOutput(sumColumn);
+      else setSumOutput(`${val}_${sumColumn}`);
+    };
+
+    const handleAddRule = () => {
+      if (!sumColumn) return;
+      const newAction = { column: sumColumn, action: sumAction, output: sumOutput || sumColumn };
+      onUpdateParams(id, { ...parameters, actions: [...currentActions, newAction] });
+      setSumColumn('');
+      setSumOutput('');
+    };
+
+    return (
+      <div className="summarize-config">
+        <div style={{ marginBottom: '16px' }}>
+          <label className="form-label">Configured Rules</label>
+          <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
+            {currentActions.length === 0 ? (
+              <div style={{ padding: '12px', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>No rules configured.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>Column</th>
+                    <th style={{ padding: '8px' }}>Action</th>
+                    <th style={{ padding: '8px' }}>Output</th>
+                    <th style={{ padding: '8px', width: '30px' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentActions.map((act, idx) => (
+                    <tr key={idx} style={{ borderBottom: idx < currentActions.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                      <td style={{ padding: '8px', color: 'var(--text-primary)' }}>{act.column}</td>
+                      <td style={{ padding: '8px', color: 'var(--color-accent)', fontWeight: 600 }}>{act.action}</td>
+                      <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{act.output}</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                        <button 
+                          onClick={() => {
+                            const newActs = [...currentActions];
+                            newActs.splice(idx, 1);
+                            onUpdateParams(id, { ...parameters, actions: newActs });
+                          }}
+                          style={{ background: 'none', border: 'none', color: 'var(--color-error)', cursor: 'pointer' }}
+                          title="Remove Rule"
+                        >
+                          <X size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+          <label className="form-label" style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Plus size={14} /> Add Summarize Rule
+          </label>
+          <div className="form-group">
+            <select value={sumColumn} onChange={(e) => handleColChange(e.target.value)} style={{ width: '100%', marginBottom: '8px' }}>
+              <option value="">-- Select Column --</option>
+              {schema.map(c => (
+                <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group" style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+            <select value={sumAction} onChange={(e) => handleActionChange(e.target.value)} style={{ flex: 1 }} disabled={!sumColumn}>
+              {getAvailableActions(sumColumn).map(a => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group" style={{ marginBottom: '12px' }}>
+            <input 
+              type="text" 
+              placeholder="Output Name" 
+              value={sumOutput} 
+              onChange={(e) => setSumOutput(e.target.value)} 
+              style={{ width: '100%' }}
+              disabled={!sumColumn}
+            />
+          </div>
+          <button 
+            onClick={handleAddRule}
+            disabled={!sumColumn || !sumOutput}
+            style={{
+              width: '100%', padding: '8px', background: (!sumColumn || !sumOutput) ? 'var(--bg-primary)' : 'var(--color-accent)',
+              color: (!sumColumn || !sumOutput) ? 'var(--text-muted)' : 'white', border: '1px solid var(--border-color)',
+              borderRadius: '4px', cursor: (!sumColumn || !sumOutput) ? 'not-allowed' : 'pointer', fontWeight: 600
+            }}
+          >
+            Add Rule
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderDynamicForm = (uiSchema) => {
     return uiSchema.map((fieldDef, idx) => {
       const val = parameters[fieldDef.field] !== undefined ? parameters[fieldDef.field] : fieldDef.default;
@@ -2078,6 +2288,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
          type === 'formula' ? renderFormulaConfig() :
          type === 'visualization' ? renderVisualizationConfig() :
          type === 'join' ? renderJoinConfig() :
+         type === 'summarize' ? renderSummarizeConfig() :
          (toolDef && toolDef.ui_schema) ? renderDynamicForm(toolDef.ui_schema) : null}
       </div>
     </div>

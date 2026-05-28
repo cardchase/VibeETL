@@ -27,7 +27,7 @@ class RecordIDNode(BaseNode):
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         if "input" not in inputs:
-            raise ValueError("Record ID node requires an input dataframe named 'input'.")
+            raise ValueError("Awaiting connection: RecordId node requires an incoming data stream.")
 
         df = inputs["input"]
         column_name = self.parameters.get("column_name", "RecordID")

@@ -959,7 +959,7 @@
 
 /* Selected edge styling */
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--color-accent) !important;
+  stroke: var(--color-error) !important;
   stroke-width: 3px !important;
 }
 

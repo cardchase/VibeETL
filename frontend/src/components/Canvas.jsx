@@ -9,9 +9,15 @@ import {
   SelectionMode,
   Panel
 } from '@xyflow/react';
-import { Hand, MousePointer, Search, X } from 'lucide-react';
+import { Hand, MousePointer, Search, X, Box } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
+import ContainerNode from './ContainerNode';
+
+const nodeTypes = {
+  vibeNode: CustomNode,
+  container: ContainerNode
+};
 
 const FindNodePanel = ({ nodes, onNodeSelect }) => {
   const [query, setQuery] = useState('');
@@ -128,7 +134,7 @@ const CanvasContent = ({
   }, [onNodeSelect, onEdgeSelect]);
 
   const onEdgeClick = useCallback((event, edge) => {
-    if (onEdgeSelect) onEdgeSelect(edge);
+    if (onEdgeSelect) onEdgeSelect(edge ? edge.id : null);
     onNodeSelect(null);
   }, [onEdgeSelect, onNodeSelect]);
 
@@ -145,17 +151,38 @@ const CanvasContent = ({
       const type = e.detail.type;
       if (reactFlowWrapper.current) {
         const bounds = reactFlowWrapper.current.getBoundingClientRect();
-        // Place in top-center of visible canvas area
-        const position = screenToFlowPosition({
-          x: bounds.x + bounds.width / 2 - 50, // center horizontally minus node half-width
+        // Place in the top-right box area so it isn't covered by the properties panel
+        let position = screenToFlowPosition({
+          x: bounds.x + bounds.width * 0.7 - 50, // further right horizontally
           y: bounds.y + 100, // 100px from top
         });
+        
+        // Prevent stacking
+        let conflict = true;
+        let offsetMultiplier = 0;
+        
+        while (conflict && offsetMultiplier < 20) {
+          // eslint-disable-next-line no-loop-func
+          conflict = nodes.some(n => 
+            Math.abs(n.position.x - position.x) < 30 && 
+            Math.abs(n.position.y - position.y) < 30
+          );
+          
+          if (conflict) {
+            offsetMultiplier++;
+            position = {
+              x: position.x + 30,
+              y: position.y + 30
+            };
+          }
+        }
+
         onAddNode(type, position);
       }
     };
     window.addEventListener('vibe-add-node', handleAddNodeEvent);
     return () => window.removeEventListener('vibe-add-node', handleAddNodeEvent);
-  }, [screenToFlowPosition, onAddNode]);
+  }, [screenToFlowPosition, onAddNode, nodes]);
 
   return (
     <div
@@ -183,6 +210,50 @@ const CanvasContent = ({
           <MousePointer size={14} />
           <span>Select Box</span>
         </button>
+
+        {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
+          <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
+        )}
+        {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
+          <button
+            className="mode-btn"
+            onClick={() => {
+              const selectedNodes = nodes.filter(n => n.selected && n.type !== 'container');
+              if (selectedNodes.length === 0) return;
+              
+              // Calculate bounding box
+              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+              selectedNodes.forEach(n => {
+                if (n.position.x < minX) minX = n.position.x;
+                if (n.position.y < minY) minY = n.position.y;
+                if (n.position.x + (n.width || 150) > maxX) maxX = n.position.x + (n.width || 150);
+                if (n.position.y + (n.height || 60) > maxY) maxY = n.position.y + (n.height || 60);
+              });
+
+              // Add padding
+              minX -= 40;
+              minY -= 60; // Extra for header
+              maxX += 40;
+              maxY += 40;
+
+              // Fire custom event to create container and group nodes
+              window.dispatchEvent(new CustomEvent('vibe-create-container', {
+                detail: {
+                  x: minX,
+                  y: minY,
+                  width: maxX - minX,
+                  height: maxY - minY,
+                  childIds: selectedNodes.map(n => n.id)
+                }
+              }));
+            }}
+            title="Group selected nodes into a Container"
+            style={{ color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.1)' }}
+          >
+            <Box size={14} />
+            <span>Put in Container</span>
+          </button>
+        )}
       </div>
 
       <ReactFlow
@@ -202,6 +273,7 @@ const CanvasContent = ({
         panOnDrag={isPanMode}
         selectionOnDrag={!isPanMode}
         selectionMode={SelectionMode.Partial}
+        connectionRadius={50}
         fitView
         fitViewOptions={{ maxZoom: 1.1, padding: 0.2 }}
         defaultViewport={{ x: 50, y: 50, zoom: 1.1 }}

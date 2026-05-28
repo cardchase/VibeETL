@@ -17,6 +17,6 @@ class BrowseNode(BaseNode):
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Awaiting connection: No incoming data stream detected.")
+            raise ValueError("Awaiting connection: Browse node requires an incoming data stream.")
         self.log(f"Browse node received dataframe: {df.height} rows, {df.width} columns.")
         return df

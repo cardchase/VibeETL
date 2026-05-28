@@ -239,6 +239,58 @@ function App() {
     return () => window.removeEventListener('vibe-handle-click', handleHandleClick);
   }, []);
 
+  useEffect(() => {
+    const handleCreateContainer = (e) => {
+      const { x, y, width, height, childIds } = e.detail;
+      const maxId = nodes.reduce((max, n) => {
+        const match = n.id.match(/^node_(\d+)$/);
+        return match && parseInt(match[1]) < 1000000 ? Math.max(max, parseInt(match[1])) : max;
+      }, 0);
+      
+      const containerId = `node_${maxId + 1}`;
+      const containerNode = {
+        id: containerId,
+        type: 'container',
+        position: { x, y },
+        style: { width, height },
+        data: { label: 'Tool Container', enabled: true },
+        zIndex: -1
+      };
+
+      setNodes(nds => {
+        const newNodes = nds.map(n => {
+          if (childIds.includes(n.id)) {
+            // Convert positions to relative for React Flow subflows
+            return {
+              ...n,
+              parentNode: containerId,
+              extent: 'parent',
+              position: { x: n.position.x - x, y: n.position.y - y }
+            };
+          }
+          return n;
+        });
+        return [...newNodes, containerNode];
+      });
+      setSelectedNodeId(containerId);
+    };
+
+    const handleToggleContainer = (e) => {
+      const { nodeId, enabled } = e.detail;
+      setNodes(nds => nds.map(n => 
+        n.id === nodeId ? { ...n, data: { ...n.data, enabled } } : n
+      ));
+    };
+
+    window.addEventListener('vibe-create-container', handleCreateContainer);
+    window.addEventListener('vibe-toggle-container', handleToggleContainer);
+    
+    return () => {
+      window.removeEventListener('vibe-create-container', handleCreateContainer);
+      window.removeEventListener('vibe-toggle-container', handleToggleContainer);
+    };
+  }, [nodes, setNodes]);
+
   // Pipeline execution state
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState(activeTab.results || {});
@@ -643,6 +695,20 @@ function App() {
   }, [nodes, edges, selectedNodeId, results]);
 
   // Executes the pipeline DAG by sending the graph schema JSON to the backend
+  const handleClearGlobalCache = () => {
+    setNodes((nds) => nds.map(node => ({
+      ...node,
+      data: {
+        ...node.data,
+        parameters: { ...node.data?.parameters, isCached: false },
+        status: 'idle',
+        resultSummary: null
+      }
+    })));
+    setResults({});
+    setGlobalLogs(["Global cache and all node locks cleared. Pipeline ready for fresh execution."]);
+  };
+
   const handleRunPipeline = async () => {
     if (isRunning) return;
     setIsRunning(true);
@@ -974,6 +1040,7 @@ function App() {
       {/* 1. Tool Palette (Top Panel) */}
       <ToolPalette 
         onRunPipeline={handleRunPipeline} 
+        onClearGlobalCache={handleClearGlobalCache}
         onSaveWorkflow={handleSaveWorkflow}
         onLoadWorkflow={handleLoadWorkflow}
         onExportYAML={handleExportYAML}

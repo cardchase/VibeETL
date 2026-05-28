@@ -28,7 +28,7 @@ class GeminiAINode(BaseNode):
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: GeminiAi node requires an incoming data stream.")
 
         if not HAS_GENAI:
             raise RuntimeError("The google-generativeai library is not installed on the server.")

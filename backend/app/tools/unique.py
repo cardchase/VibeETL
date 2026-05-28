@@ -36,7 +36,7 @@ class UniqueNode(BaseNode):
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         if not inputs:
-            raise ValueError(f"Unique tool {self.node_id} requires an input dataframe.")
+            raise ValueError("Awaiting connection: Unique node requires an incoming data stream.")
         
         df = list(inputs.values())[0]
         

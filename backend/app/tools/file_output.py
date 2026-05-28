@@ -29,7 +29,7 @@ class FileOutputNode(BaseNode):
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         if "input" not in inputs:
-            raise ValueError("FileOutput node requires an input dataframe named 'input'.")
+            raise ValueError("Awaiting connection: FileOutput node requires an incoming data stream.")
             
         df = inputs["input"]
         file_path = self.parameters.get("outputPath", "output.csv")

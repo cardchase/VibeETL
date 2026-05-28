@@ -35,7 +35,7 @@ class LLMChunkerNode(BaseNode):
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: LlmChunker node requires an incoming data stream.")
 
         chunk_size = int(self.parameters.get("chunk_size", 10))
         columns_to_chunk = self.parameters.get("columns_to_chunk", [])

@@ -51,8 +51,23 @@ const CustomNode = ({ id, data, selected, type }) => {
     }));
   };
 
+  const buildTooltip = () => {
+    let t = `${data?.label || type} Tool`;
+    if (data?.description) t += `\n${data.description}`;
+    t += `\nStatus: ${status}`;
+    if (data?.parameters && Object.keys(data.parameters).length > 0) {
+      t += `\nConfig: ${Object.keys(data.parameters).join(', ')}`;
+    }
+    if (status === 'skipped') t += `\n(Bypassed: Data is cached downstream)`;
+    return t;
+  };
+
   return (
-    <div className={`custom-node ${category} ${selected ? 'selected' : ''} ${isCached ? 'is-cached' : ''}`}>
+    <div 
+      className={`custom-node ${category} ${selected ? 'selected' : ''} ${isCached ? 'is-cached' : ''}`} 
+      style={status === 'skipped' ? { opacity: 0.55 } : {}}
+      title={buildTooltip()}
+    >
       {/* Target port (Left) for all nodes except FileInput, DatabaseInput, and ImageCaption */}
       {type === 'join' ? (
         <>
@@ -90,12 +105,20 @@ const CustomNode = ({ id, data, selected, type }) => {
         <IconComponent size={16} className="node-icon" />
         
         {/* Status indicator on the top corner */}
-        {status !== 'idle' && status !== 'waiting' && status !== 'running' && (
+        {status !== 'idle' && status !== 'waiting' && status !== 'running' && status !== 'skipped' && (
           <div className={`node-status-dot ${status}`} title={`Status: ${status}`} />
         )}
         {status === 'running' && (
           <div className="node-status-running" title="Processing...">
             <Icons.Loader2 size={12} className="animate-spin" style={{ color: '#3b82f6' }} />
+          </div>
+        )}
+        {status === 'skipped' && (
+          <div className="node-status-skipped" title="Bypassed: Data is cached downstream" style={{
+            position: 'absolute', top: -6, right: -6, background: '#f1f5f9', border: '1px solid #cbd5e1', 
+            borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10
+          }}>
+            <Icons.FastForward size={10} style={{ color: '#64748b' }} />
           </div>
         )}
         

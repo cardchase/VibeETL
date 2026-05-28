@@ -32,7 +32,7 @@ class PipelineCache:
                 ports_data = {}
                 for port, port_df in df.items():
                     if port_df is not None:
-                        preview_df = port_df.head(100)
+                        preview_df = port_df.head(1000)
                         schema = []
                         for name, dtype in port_df.schema.items():
                             col_meta = {"name": name, "type": str(dtype)}
@@ -68,7 +68,7 @@ class PipelineCache:
                 self._node_statuses[node_id] = "success"
             else:
                 # Single-port results
-                preview_df = df.head(100) if df is not None else pl.DataFrame()
+                preview_df = df.head(1000) if df is not None else pl.DataFrame()
                 schema = []
                 if df is not None:
                     for name, dtype in df.schema.items():
@@ -107,6 +107,22 @@ class PipelineCache:
                 "_df": None
             }
             self._node_statuses[node_id] = "error"
+
+    def set_node_skipped(self, node_id: str):
+        with self._lock:
+            self._cache[node_id] = {
+                "status": "skipped",
+                "schema": [],
+                "preview": [],
+                "row_count": 0,
+                "column_count": 0,
+                "duration_ms": 0,
+                "logs": ["Bypassed: Data is cached downstream."],
+                "error": None,
+                "semantic_metadata": {},
+                "_df": None
+            }
+            self._node_statuses[node_id] = "skipped"
 
     def get_node_df(self, node_id: str, port_id: str = "output") -> pl.DataFrame:
         with self._lock:

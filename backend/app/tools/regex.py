@@ -19,7 +19,7 @@ class RegexNode(BaseNode):
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Regex node requires an incoming data stream.")
 
         column = self.parameters.get("column", "")
         pattern = self.parameters.get("pattern", "")

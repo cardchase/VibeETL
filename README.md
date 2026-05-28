@@ -63,10 +63,13 @@ VibeETL bridges the gap between complex code-based data preparation and heavy en
 VibeETL brings the dense, hyper-productive feel of professional enterprise suites into the open-source era:
 
 - 📊 **Alteryx-Inspired Configuration Panels**: We've replaced bulky forms with compact, spreadsheet-like tabular grids. Manage hundreds of columns in a single dense view using intuitive checkboxes, dropdowns, and text fields—all while maintaining a gorgeous glassmorphic aesthetic.
+- 📦 **Tool Containers**: Seamlessly group workflows into bounded, resizable visual containers. Disable entire containers with a single click to instantly bypass massive chunks of logic during execution!
+- ⚡ **Multi-Rule Sorting & Summarization**: Build incredibly complex group-by chains and sequential sorting rules seamlessly. Our native Polars backend engine rips through multi-column aggregations instantly!
 - 🧠 **Semantic Type Profiling**: VibeETL's execution engine automatically profiles incoming data to detect logical semantic types (like `currency_usd`, `percentage`, `email`).
 - 💎 **Semantic Propagation**: When a semantic type is detected, the Engine maps it directly through the computational DAG! This metadata drives intelligent UI rendering—displaying `$` badges in your preview grid, formatting Plotly axes dynamically into currency layouts, and guiding users seamlessly.
 - ⭐ **Dynamic Tool Favorites**: Fully customize your workspace! Pin any tool to your exclusive "Favorites" group by clicking its Star badge, completely eliminating scrolling and searching when building workflows. Your preferences are instantly saved to your browser's local storage and flawlessly restored across sessions!
 - 🔢 **True Sequential Numbering & Find**: Navigating massive workflows is incredibly easy with true, clean sequential Node IDs (`node_1`, `node_2`) that make hitting the "Find" bar extremely powerful and accurate.
+- ✨ **Smart Canvas Mechanics**: Magnetic wire snapping, node-collision detection, cascading auto-drops, and a dedicated "Clear All Cache" tool keep the canvas incredibly responsive and visually flawless!
 
 ---
 

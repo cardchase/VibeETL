@@ -17,7 +17,7 @@ class UnionNode(BaseNode):
     def execute(self, inputs: Dict[str, Any]) -> pl.DataFrame:
         input_data = inputs.get("input")
         if input_data is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: Union node requires an incoming data stream.")
 
         if isinstance(input_data, list):
             dfs = input_data

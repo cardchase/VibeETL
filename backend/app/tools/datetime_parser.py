@@ -44,7 +44,7 @@ class DateTimeNode(BaseNode):
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
         if df is None:
-            raise ValueError("Input dataframe is missing.")
+            raise ValueError("Awaiting connection: DatetimeParser node requires an incoming data stream.")
 
         column = self.parameters.get("column", "")
         action = self.parameters.get("action", "String to Date/Time")

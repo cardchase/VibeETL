@@ -22,14 +22,14 @@ class JoinNode(BaseNode):
         # However, to be robust, let's grab the first two inputs.
         keys = list(inputs.keys())
         if len(keys) < 2:
-            raise ValueError(f"Join node requires exactly two inputs (left and right). Received: {keys}")
+            raise ValueError("Awaiting connection: Join node requires exactly two inputs (left and right).")
 
         # Determine left and right based on common port naming, or just order
         left_df = inputs.get("left", inputs.get(keys[0]))
         right_df = inputs.get("right", inputs.get(keys[1]))
 
         if left_df is None or right_df is None:
-            raise ValueError("Join node missing left or right input dataframe.")
+            raise ValueError("Awaiting connection: Join node requires both left and right incoming data streams.")
 
         left_keys = self.parameters.get("left_keys", [])
         right_keys = self.parameters.get("right_keys", [])
