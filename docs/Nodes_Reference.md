@@ -208,6 +208,7 @@ To guide your development, here is a detailed breakdown of how each standard nod
 *   **Parameters**:
     *   `code` (Textarea): Multiline Python code string. The incoming dataframe is available as `df` and Polars as `pl`.
 *   **Schema Output**: Outputs whatever Polars dataframe is assigned to the `df_out` variable in the script.
+*   **Note**: This is an extremely powerful "catch-all" node! Users can write custom Python code from scratch to generate brand new dataframes, hit external LLM APIs (like OpenAI or Anthropic), call any external REST APIs, or apply incredibly complex logic that standard nodes do not support.
 
 #### 24. Sample Records Node (`sampling`)
 *   **Purpose**: Extract a subset of records (First N, Last N, or Random).
