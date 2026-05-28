@@ -21,6 +21,10 @@ from app.tools.database_output import DatabaseOutputExecutor
 from app.tools.record_id import RecordIDNode
 
 from app.tools.gemini_ai import GeminiAINode
+from app.tools.datetime_parser import DateTimeNode
+from app.tools.python_code import PythonCodeNode
+from app.tools.sampling import SamplingNode
+from app.tools.llm_chunker import LLMChunkerNode
 
 NODE_CLASSES = {
     "fileInput": FileInputNode,
@@ -43,5 +47,9 @@ NODE_CLASSES = {
     "unique": UniqueNode,
     "visualization": VisualizationNode,
     "record_id": RecordIDNode,
-    "gemini_ai": GeminiAINode
+    "gemini_ai": GeminiAINode,
+    "datetime": DateTimeNode,
+    "python_code": PythonCodeNode,
+    "sampling": SamplingNode,
+    "llm_chunker": LLMChunkerNode
 }

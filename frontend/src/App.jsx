@@ -228,6 +228,16 @@ function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeTab.edges || []);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+  const [selectedHandle, setSelectedHandle] = useState(null);
+
+  useEffect(() => {
+    const handleHandleClick = (e) => {
+      setSelectedHandle(e.detail);
+      setSelectedNodeId(e.detail.nodeId);
+    };
+    window.addEventListener('vibe-handle-click', handleHandleClick);
+    return () => window.removeEventListener('vibe-handle-click', handleHandleClick);
+  }, []);
 
   // Pipeline execution state
   const [isRunning, setIsRunning] = useState(false);
@@ -499,10 +509,15 @@ function App() {
         icon = 'Columns';
         defaultParams = { columns: [] };
       } else if (type === 'regex') {
-        label = 'Regex Parser';
+        label = 'Regex';
         category = 'transform';
         icon = 'Brackets';
         defaultParams = { column: '', pattern: '', outputColumns: [] };
+      } else if (type === 'datetime') {
+        label = 'Date Time';
+        category = 'transform';
+        icon = 'CalendarClock';
+        defaultParams = { column: '', action: 'String to Date/Time', format: 'Auto-Infer', custom_format: '', output_column: '' };
       } else if (type === 'browse') {
         label = 'Browse';
         category = 'inout';
@@ -519,7 +534,7 @@ function App() {
         icon = 'ArrowLeftRight';
         defaultParams = { index: [], columns: '', values: '', aggregate_function: 'sum' };
       } else if (type === 'unpivot') {
-        label = 'Unpivot (Melt)';
+        label = 'Unpivot';
         category = 'transform';
         icon = 'ArrowDownUp';
         defaultParams = { id_vars: [], value_vars: [], variable_name: 'name', value_name: 'value' };
@@ -529,7 +544,7 @@ function App() {
         icon = 'Layers';
         defaultParams = { how: 'diagonal' };
       } else if (type === 'data_cleansing') {
-        label = 'Data Cleansing';
+        label = 'Cleanse';
         category = 'prep';
         icon = 'Sparkles';
         defaultParams = { columns: [], replace_nulls_string: false, replace_nulls_numeric: false, trim_whitespace: false, remove_punctuation: false };
@@ -556,7 +571,18 @@ function App() {
       }
     }
 
-    const newNodeId = `node_${Date.now()}`;
+    const maxId = nodes.reduce((max, n) => {
+      const match = n.id.match(/^node_(\d+)$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num < 1000000) { // Ignore huge legacy timestamp IDs
+          return Math.max(max, num);
+        }
+      }
+      return max;
+    }, 0);
+    const newNodeId = `node_${maxId + 1}`;
+
     const newNode = {
       id: newNodeId,
       type,
@@ -573,7 +599,7 @@ function App() {
 
     setNodes((nds) => nds.concat(newNode));
     setSelectedNodeId(newNodeId);
-  }, [setNodes, availableTools]);
+  }, [setNodes, availableTools, nodes]);
 
   // Clean state when nodes are deleted
   const onNodesDelete = useCallback((deleted) => {
@@ -928,6 +954,21 @@ function App() {
     event.target.value = ''; // reset input
   };
 
+  const getInspectedNode = () => {
+    const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+    if (!selectedNode) return null;
+    if (selectedHandle?.nodeId === selectedNode.id && selectedHandle?.handleType === 'target') {
+      const handleId = selectedHandle.handleId;
+      const edge = edges.find((e) => e.target === selectedNode.id && (e.targetHandle === handleId || !e.targetHandle));
+      if (edge) {
+        return nodes.find((n) => n.id === edge.source) || selectedNode;
+      }
+    }
+    return selectedNode;
+  };
+
+  const inspectedNode = getInspectedNode();
+
   return (
     <div className="app-container">
       {/* 1. Tool Palette (Top Panel) */}
@@ -942,12 +983,6 @@ function App() {
         availableTools={availableTools}
         selectedNode={selectedNode}
         onUpdateParams={handleUpdateParams}
-        onAddNode={(type) => {
-          // Find the highest X coordinate of existing nodes to place the new node to the right
-          const maxX = nodes.length > 0 ? Math.max(...nodes.map(n => n.position.x)) : 50;
-          // Keep Y roughly near the top of the canvas (100) so it's instantly visible
-          handleAddNode(type, { x: maxX + 250, y: 100 });
-        }}
       />
 
       {/* Workspace Area */}
@@ -1011,7 +1046,10 @@ function App() {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
-                onNodeSelect={handleNodeSelect}
+                onNodeSelect={(node) => {
+                  setSelectedNodeId(node?.id || null);
+                  setSelectedHandle(null);
+                }}
                 onEdgeSelect={setSelectedEdgeId}
                 onAddNode={handleAddNode}
                 onNodesDelete={onNodesDelete}
@@ -1023,7 +1061,8 @@ function App() {
           <div className="results-resizer" onMouseDown={startResizingResults} />
           <ErrorBoundary>
             <ResultsWindow
-              selectedNode={selectedNode}
+              selectedNode={inspectedNode}
+              originalNode={nodes.find(n => n.id === selectedNodeId)}
               results={results}
               globalLogs={globalLogs}
               style={{ height: `${resultsHeight}px` }}

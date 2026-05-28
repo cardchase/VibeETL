@@ -1,0 +1,48 @@
+Tool Name: Date Time
+Description: Parses string fields into DateTime format or formats DateTime objects back into strings. It supports auto-inferencing of common dates, predefined standard formats, as well as highly customized strptime/strftime patterns.
+
+Parameters:
+- `column` (string): The target column in the upstream dataframe to parse or format.
+- `action` (string): Defines the operation direction. Either `"String to Date/Time"` or `"Date/Time to String"`.
+- `format` (string): Predefined preset formats (e.g. `"yyyy-MM-dd"`, `"dd/MM/yyyy"`, `"yyyy-MM-dd HH:mm:ss"`). Use `"Auto-Infer"` if the data format is unknown (only supported for `"String to Date/Time"`), or `"Custom"` to specify your own exact parsing format.
+- `custom_format` (string): The `strptime` format string (e.g., `"%Y-%m-%dT%H:%M:%S"`) to use when `format` is set to `"Custom"`.
+- `output_column` (string): The name of the new column to append. If left blank, it will overwrite the original `column` in-place.
+
+Required Input Schema:
+- The upstream schema MUST contain the column defined in the `column` parameter. If it is missing, a SchemaCompatibilityError will be thrown.
+
+Output Schema:
+- Returns the full upstream schema, but modifies the `output_column` (or the original `column` if no output is specified) to be of type `Datetime` (when parsing) or `String` (when formatting).
+
+Developer Examples:
+
+1. Auto-Infer Strings in-place:
+```json
+{
+  "column": "TransactionDate",
+  "action": "String to Date/Time",
+  "format": "Auto-Infer",
+  "output_column": ""
+}
+```
+
+2. Parse Custom Log Timestamps to a new column:
+```json
+{
+  "column": "RawLogTime",
+  "action": "String to Date/Time",
+  "format": "Custom",
+  "custom_format": "%Y/%m/%d-%H|%M|%S",
+  "output_column": "ParsedLogTime"
+}
+```
+
+3. Format an existing DateTime object to a String:
+```json
+{
+  "column": "BirthDate",
+  "action": "Date/Time to String",
+  "format": "dd/MM/yyyy",
+  "output_column": "BirthDateFormatted"
+}
+```

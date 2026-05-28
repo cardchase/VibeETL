@@ -26,6 +26,8 @@ To guide your development, here is a detailed breakdown of how each standard nod
         *   `Dimensions` (String)
         *   `Format` (String)
 
+
+
 #### 3. Filter Node (`filter`)
 *   **Purpose**: Filter the rows of the dataset using a conditional predicate.
 *   **Category**: Prep (`prep`)
@@ -70,7 +72,7 @@ To guide your development, here is a detailed breakdown of how each standard nod
     *   `aggregate_function` (String): `"sum"`, `"mean"`, `"max"`, `"min"`, `"first"`, etc.
 *   **Schema Output**: Returns index columns plus dynamic columns determined by the data.
 
-#### 8. Unpivot (Melt) Node (`unpivot`)
+#### 8. Unpivot Node (`unpivot`)
 *   **Purpose**: Reshapes data from wide to long format (melting).
 *   **Category**: Transform (`transform`)
 *   **Parameters**:
@@ -87,7 +89,7 @@ To guide your development, here is a detailed breakdown of how each standard nod
     *   `how` (String): Alignment method (`"vertical"`, `"diagonal"`).
 *   **Schema Output**: Takes the union of all connected incoming schemas. Note: The `input` port supports an infinite number of edges!
 
-#### 10. Data Cleansing Node (`data_cleansing`)
+#### 10. Cleanse Node (`data_cleansing`)
 *   **Purpose**: Sanitizes text and null values in datasets.
 *   **Category**: Prep (`prep`)
 *   **Parameters**:
@@ -148,7 +150,7 @@ To guide your development, here is a detailed breakdown of how each standard nod
     *   `start_value` (Integer): Starting index.
 *   **Schema Output**: Appends the new integer ID column.
 
-#### 17. Regex Parser Node (`regex`)
+#### 17. Regex Node (`regex`)
 *   **Purpose**: Parse strings using Regular Expressions.
 *   **Category**: Prep (`prep`)
 *   **Parameters**:
@@ -191,3 +193,35 @@ To guide your development, here is a detailed breakdown of how each standard nod
     *   `target_column` (String): Column to process.
     *   `output_column` (String): Name of the generated output.
 *   **Schema Output**: Appends the AI response column.
+
+#### 22. Date Time Node (`datetime_parser`)
+*   **Purpose**: Parse string columns containing dates/times into strict Datetime objects.
+*   **Category**: Transform (`transform`)
+*   **Parameters**:
+    *   `column` (String): The column to parse.
+    *   `format` (String): Optional explicit format string (e.g. `%Y-%m-%d`), or `auto` for inference.
+*   **Schema Output**: Modifies the selected column in place to Datetime type.
+
+#### 23. Python Code Node (`python_code`)
+*   **Purpose**: Execute custom Python scripts in-memory against the pipeline data.
+*   **Category**: Analysis (`analysis`)
+*   **Parameters**:
+    *   `code` (Textarea): Multiline Python code string. The incoming dataframe is available as `df` and Polars as `pl`.
+*   **Schema Output**: Outputs whatever Polars dataframe is assigned to the `df_out` variable in the script.
+
+#### 24. Sample Records Node (`sampling`)
+*   **Purpose**: Extract a subset of records (First N, Last N, or Random).
+*   **Category**: Prep (`prep`)
+*   **Parameters**:
+    *   `sample_type` (String): Extraction method (`first`, `last`, `random`).
+    *   `n_records` (Integer): The number of records to extract.
+*   **Schema Output**: Passes the incoming upstream schema through unchanged, just reducing the row count.
+
+#### 25. LLM Chunker Node (`llm_chunker`)
+*   **Purpose**: Batch sequential rows of text into large prompt chunks for LLMs.
+*   **Category**: Analysis (`analysis`)
+*   **Parameters**:
+    *   `chunk_size` (Integer): The number of sequential rows to group together.
+    *   `columns_to_chunk` (Array): Text column(s) to aggregate.
+    *   `row_separator` (String): Joining character (e.g., `\n`, `, `).
+*   **Schema Output**: Outputs a highly aggregated dataframe with chunk IDs. Each selected column is independently aggregated and retains its original name.

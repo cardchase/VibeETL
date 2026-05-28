@@ -1785,6 +1785,19 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         );
       }
 
+      if (fieldDef.type === 'number') {
+        return (
+          <div key={idx} className="form-group">
+            <label className="form-label">{fieldDef.label}</label>
+            <input
+              type="number"
+              value={val}
+              onChange={(e) => handleParamChange(fieldDef.field, Number(e.target.value))}
+            />
+          </div>
+        );
+      }
+
       if (fieldDef.type === 'column_creatable') {
         const listId = `datalist-${id}-${fieldDef.field}`;
         return (
@@ -1811,18 +1824,25 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         );
       }
 
-      if (fieldDef.type === 'textarea') {
+      if (fieldDef.type === 'code' || fieldDef.type === 'textarea') {
         const handleTextareaChange = (e) => {
           const newVal = e.target.value;
           const cursor = e.target.selectionStart;
           handleParamChange(fieldDef.field, newVal);
 
-          const lastOpen = newVal.lastIndexOf('[', cursor - 1);
-          const lastClose = newVal.lastIndexOf(']', cursor - 1);
+          // Check for autocomplete trigger (e.g. df[" or pl.col(")
+          const lastOpen = Math.max(newVal.lastIndexOf('["', cursor - 1), newVal.lastIndexOf("['", cursor - 1));
+          
+          if (lastOpen !== -1 && cursor > lastOpen + 1) {
+            const partial = newVal.substring(lastOpen + 2, cursor).toLowerCase();
+            // Don't show if they already closed the bracket/quote
+            const closedQuoteIndex = Math.max(newVal.indexOf('"]', lastOpen), newVal.indexOf("']", lastOpen));
+            if (closedQuoteIndex !== -1 && closedQuoteIndex < cursor) {
+                setFormulaSuggestion(null);
+                return;
+            }
 
-          if (lastOpen !== -1 && lastOpen > lastClose) {
-            const partial = newVal.substring(lastOpen + 1, cursor).toLowerCase();
-            const options = upstreamSchema
+            const options = (upstreamSchema || [])
               .map(c => c.name)
               .filter(name => name.toLowerCase().includes(partial));
             
@@ -1841,26 +1861,20 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           const exp = val;
           const before = exp.substring(0, formulaSuggestion.startIndex);
           const after = exp.substring(formulaSuggestion.cursorIndex);
-          const newExp = before + '[' + colName + ']' + after;
+          const quote = exp.substring(formulaSuggestion.startIndex + 1, formulaSuggestion.startIndex + 2); // ' or "
+          
+          // Complete the syntax automatically
+          const newExp = before + '[' + quote + colName + quote + ']' + after;
           handleParamChange(fieldDef.field, newExp);
           setFormulaSuggestion(null);
+          
           if (textareaRef.current) {
              setTimeout(() => {
                 textareaRef.current.focus();
-                const newCursor = before.length + colName.length + 2;
+                // move cursor after the closing bracket
+                const newCursor = before.length + colName.length + 5;
                 textareaRef.current.setSelectionRange(newCursor, newCursor);
              }, 0);
-          }
-        };
-
-        const handleTextareaKeyDown = (e) => {
-          if (formulaSuggestion && formulaSuggestion.options.length > 0 && formulaSuggestion.field === fieldDef.field) {
-            if (e.key === 'Tab' || e.key === 'Enter') {
-              e.preventDefault();
-              applySug(formulaSuggestion.options[0]);
-            } else if (e.key === 'Escape') {
-              setFormulaSuggestion(null);
-            }
           }
         };
 
@@ -1871,21 +1885,66 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
               ref={textareaRef}
               value={val}
               onChange={handleTextareaChange}
-              onKeyDown={handleTextareaKeyDown}
-              placeholder="e.g. [ColumnName] + 10"
-              style={{ fontFamily: 'var(--font-mono)', minHeight: '80px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', fontSize: '0.75rem', width: '100%', resize: 'vertical' }}
+              onKeyDown={(e) => {
+                 if (e.key === 'Tab') {
+                   e.preventDefault();
+                   const start = e.target.selectionStart;
+                   const end = e.target.selectionEnd;
+                   const newVal = val.substring(0, start) + "    " + val.substring(end);
+                   handleParamChange(fieldDef.field, newVal);
+                   setTimeout(() => {
+                     textareaRef.current.setSelectionRange(start + 4, start + 4);
+                   }, 0);
+                 }
+              }}
+              style={{ 
+                fontFamily: 'monospace', 
+                whiteSpace: 'pre', 
+                minHeight: fieldDef.type === 'code' ? '300px' : '80px',
+                background: fieldDef.type === 'code' ? '#1e1e1e' : undefined,
+                color: fieldDef.type === 'code' ? '#d4d4d4' : undefined,
+                padding: '12px'
+              }}
             />
             {formulaSuggestion && formulaSuggestion.field === fieldDef.field && (
-              <div className="autocomplete-suggestions" style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px', zIndex: 10, maxHeight: '150px', overflowY: 'auto' }}>
-                {formulaSuggestion.options.map((opt, i) => (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                zIndex: 100,
+                maxHeight: '150px',
+                overflowY: 'auto',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              }}>
+                <div style={{ padding: '4px 8px', fontSize: '0.65rem', background: 'var(--bg-primary)', borderBottom: '1px solid var(--border-color)', fontWeight: 'bold' }}>
+                  Select Column
+                </div>
+                {formulaSuggestion.options.map(opt => (
                   <div 
-                    key={opt} 
-                    style={{ padding: '6px 10px', fontSize: '0.8rem', cursor: 'pointer', background: i === 0 ? 'var(--color-primary-alpha)' : 'transparent', color: 'var(--text-primary)' }}
+                    key={opt}
                     onClick={() => applySug(opt)}
+                    style={{
+                      padding: '6px 12px',
+                      cursor: 'pointer',
+                      fontSize: '0.75rem',
+                      fontFamily: 'monospace'
+                    }}
+                    onMouseEnter={(e) => e.target.style.background = 'var(--color-primary)'}
+                    onMouseLeave={(e) => e.target.style.background = 'transparent'}
                   >
                     {opt}
                   </div>
                 ))}
+              </div>
+            )}
+            {fieldDef.type === 'code' && (
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: '1.4' }}>
+                <div><strong>Tip:</strong> Type <code>df["</code> to see column autocompletions. Tab key inserts spaces.</div>
+                <div style={{ marginTop: '2px' }}><strong>Advanced:</strong> Want to connect to an external API or custom LLM? See the commented template above for the syntax on how to <code>import requests</code> and run external AI models over your dataset!</div>
               </div>
             )}
           </div>

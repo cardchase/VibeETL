@@ -5,7 +5,7 @@ from app.tools.base import BaseNode
 class CleansingNode(BaseNode):
     MANIFEST = {
         "id": "data_cleansing",
-        "name": "Data Cleansing",
+        "name": "Cleanse",
         "category": "prep",
         "icon": "Sparkles",
         "description": "Cleanse data by trimming whitespace, replacing nulls, etc.",

@@ -5,7 +5,7 @@ from app.tools.base import BaseNode
 class RegexNode(BaseNode):
     MANIFEST = {
         "id": "regex",
-        "name": "Regex Parser",
+        "name": "Regex",
         "category": "transform",
         "icon": "Brackets",
         "description": "Extract substrings using Regular Expressions.",
