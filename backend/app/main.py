@@ -205,3 +205,134 @@ async def autosave_workflow(pipeline: Dict[str, Any] = Body(...)):
         return {"status": "success", "message": f"Saved to {os.path.basename(filepath)}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Autosave failed: {str(e)}")
+
+
+# --- Google Sheets Authentication Endpoints ---
+GOOGLE_AUTH_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.vibe', 'google_auth'))
+os.makedirs(GOOGLE_AUTH_DIR, exist_ok=True)
+
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials as UserCredentials
+except ImportError:
+    gspread = None
+
+@app.get('/api/google/auth/status')
+def get_google_auth_status():
+    if not gspread:
+        return {'status': 'missing_dependencies'}
+        
+    token_path = os.path.join(GOOGLE_AUTH_DIR, 'token.json')
+    client_secret_path = os.path.join(GOOGLE_AUTH_DIR, 'client_secret.json')
+    service_account_path = os.path.join(GOOGLE_AUTH_DIR, 'service_account.json')
+    
+    if os.path.exists(service_account_path):
+        return {'status': 'authenticated', 'method': 'service_account'}
+        
+    if os.path.exists(token_path):
+        try:
+            scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly', 'https://www.googleapis.com/auth/drive.readonly']
+            creds = UserCredentials.from_authorized_user_file(token_path, scopes)
+            if creds and creds.valid:
+                return {'status': 'authenticated', 'method': 'oauth'}
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                with open(token_path, 'w') as f:
+                    f.write(creds.to_json())
+                return {'status': 'authenticated', 'method': 'oauth'}
+        except Exception:
+            pass
+            
+    if os.path.exists(client_secret_path):
+        return {'status': 'needs_login'}
+        
+    return {'status': 'needs_setup'}
+
+@app.post('/api/google/auth/setup')
+async def setup_google_auth(file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        json_data = json.loads(content)
+        
+        if 'type' in json_data and json_data['type'] == 'service_account':
+            path = os.path.join(GOOGLE_AUTH_DIR, 'service_account.json')
+            method = 'service_account'
+        elif 'installed' in json_data or 'web' in json_data:
+            path = os.path.join(GOOGLE_AUTH_DIR, 'client_secret.json')
+            method = 'oauth'
+        else:
+            raise ValueError('Invalid Google Credentials JSON format. Must be Service Account or OAuth Client Secret.')
+            
+        with open(path, 'wb') as f:
+            f.write(content)
+            
+        return {'status': 'success', 'method': method}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post('/api/google/auth/login')
+async def login_google_oauth():
+    client_secret_path = os.path.join(GOOGLE_AUTH_DIR, 'client_secret.json')
+    token_path = os.path.join(GOOGLE_AUTH_DIR, 'token.json')
+    
+    if not os.path.exists(client_secret_path):
+        raise HTTPException(status_code=400, detail='Client secret missing.')
+        
+    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly', 'https://www.googleapis.com/auth/drive.readonly']
+    
+    def run_flow():
+        flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, scopes)
+        creds = flow.run_local_server(port=8080)
+        with open(token_path, 'w') as f:
+            f.write(creds.to_json())
+            
+    try:
+        await run_in_threadpool(run_flow)
+        return {'status': 'success'}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/api/google/sheets/worksheets')
+def get_google_worksheets(url: str):
+    if not gspread:
+        raise HTTPException(status_code=500, detail='Missing dependencies.')
+        
+    if not url:
+        return {'worksheets': []}
+        
+    spreadsheet_id = url
+    if 'docs.google.com/spreadsheets/d/' in url:
+        spreadsheet_id = url.split('/d/')[1].split('/')[0]
+        
+    token_path = os.path.join(GOOGLE_AUTH_DIR, 'token.json')
+    service_account_path = os.path.join(GOOGLE_AUTH_DIR, 'service_account.json')
+    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly', 'https://www.googleapis.com/auth/drive.readonly']
+    
+    creds = None
+    try:
+        if os.path.exists(service_account_path):
+            creds = ServiceAccountCredentials.from_service_account_file(service_account_path, scopes=scopes)
+        elif os.path.exists(token_path):
+            creds = UserCredentials.from_authorized_user_file(token_path, scopes)
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                with open(token_path, 'w') as f:
+                    f.write(creds.to_json())
+                    
+        client = gspread.authorize(creds) if creds else gspread.client.Client(auth=None)
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        worksheets = [ws.title for ws in spreadsheet.worksheets()]
+        return {'worksheets': worksheets}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post('/api/google/auth/logout')
+def logout_google_auth():
+    for filename in ['token.json', 'client_secret.json', 'service_account.json']:
+        path = os.path.join(GOOGLE_AUTH_DIR, filename)
+        if os.path.exists(path):
+            os.remove(path)
+    return {'status': 'success'}

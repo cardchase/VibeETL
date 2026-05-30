@@ -84,6 +84,7 @@
 .category-title.prep { color: var(--color-prep); }
 .category-title.join { color: var(--color-join); }
 .category-title.transform { color: var(--color-transform); }
+.category-title.cloud { color: var(--color-cloud); }
 
 .category-items {
   display: flex;
@@ -184,6 +185,17 @@
   background: rgba(230, 81, 0, 0.15);
   border-color: rgba(230, 81, 0, 0.3);
   box-shadow: 0 2px 4px rgba(230, 81, 0, 0.1);
+}
+
+.tool-item.cloud {
+  background: rgba(2, 132, 199, 0.05);
+  border-color: rgba(2, 132, 199, 0.1);
+  color: var(--color-cloud);
+}
+.tool-item.cloud:hover {
+  background: rgba(2, 132, 199, 0.15);
+  border-color: rgba(2, 132, 199, 0.3);
+  box-shadow: 0 2px 4px rgba(2, 132, 199, 0.1);
 }
 
 /* Copy Logs Button */
@@ -602,6 +614,12 @@
   border-color: var(--color-transform);
   background: var(--color-transform-glow);
   color: var(--color-transform);
+}
+
+.node-icon-box.cloud {
+  border-color: var(--color-cloud);
+  background: var(--color-cloud-glow);
+  color: var(--color-cloud);
 }
 
 /* Selected state highlight (Thin blue border glow) */

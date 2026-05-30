@@ -1,4 +1,5 @@
 import time
+import polars as pl
 from graphlib import TopologicalSorter
 from typing import Dict, Any, List, Set
 from app.cache import cache
@@ -16,16 +17,6 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
     nodes_list = pipeline_data.get("nodes", [])
     edges_list = pipeline_data.get("edges", [])
 
-    # Identify nodes explicitly marked as cached by the user that ALREADY have a successful result
-    cached_node_ids = set()
-    for n in nodes_list:
-        if n.get("parameters", {}).get("isCached", False):
-            existing_result = cache.get_node_result_payload(n["id"])
-            if existing_result and existing_result.get("status") == "success":
-                cached_node_ids.add(n["id"])
-
-    cache.clear_except(list(cached_node_ids))
-
     # Map node_id to its full configuration
     node_map_initial = {n["id"]: n for n in nodes_list}
 
@@ -37,15 +28,28 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
                 break
             if n.get("type") == "container" and n.get("data", {}).get("enabled") is False:
                 return False
-            curr_id = n.get("parentNode")
+            curr_id = n.get("parentId")
         return True
+
+    # Identify nodes explicitly marked as cached or in disabled containers that ALREADY have a successful result
+    cached_node_ids = set()
+    for n in nodes_list:
+        is_disabled_container = not is_node_enabled(n["id"])
+        is_user_cached = n.get("parameters", {}).get("isCached", False)
+        
+        if is_disabled_container or is_user_cached:
+            existing_result = cache.get_node_result_payload(n["id"])
+            if existing_result and existing_result.get("status") in ["success", "skipped"]:
+                cached_node_ids.add(n["id"])
+
+    cache.clear_except(list(cached_node_ids))
 
     enabled_nodes = []
     for n in nodes_list:
         if is_node_enabled(n["id"]):
             enabled_nodes.append(n)
         else:
-            cache.set_node_skipped(n["id"])
+            cache.set_node_skipped(n["id"], retain_cache=True)
             
     nodes_list = enabled_nodes
     node_map = {n["id"]: n for n in nodes_list}
@@ -208,9 +212,18 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             all_logs = node_logs + executor.logs
             duration = (time.time() - start_time) * 1000
             
-            # Save output to cache
-            cache.set_node_result(node_id, res_df, duration, all_logs, node_semantic_metadata)
-            if isinstance(res_df, dict):
+            # Check if the node exposes an untruncated full dataframe for the background pipeline
+            full_df = getattr(executor, "get_full_dataframe", lambda: res_df)()
+            
+            is_safeguard_active = False
+            if isinstance(full_df, pl.DataFrame) and isinstance(res_df, pl.DataFrame):
+                if full_df.height > 0 and full_df.height != res_df.height:
+                    is_safeguard_active = True
+                    cache.add_global_log(f"Node '{node_name}' activated Intelligent Safeguard. Passing full {full_df.height} rows downstream, but previewing top {res_df.height}.")
+
+            # Save full output to cache for downstream nodes to use (frontend payload truncation is handled by the cache)
+            cache.set_node_result(node_id, full_df, duration, all_logs, node_semantic_metadata, ui_payload=res_df)
+            if isinstance(full_df, dict):
                 row_counts = ", ".join([f"{port}: {df.height} rows" for port, df in res_df.items() if df is not None])
                 cache.add_global_log(f"Node '{node_name}' executed successfully in {duration:.1f}ms. Output: {row_counts}")
             else:

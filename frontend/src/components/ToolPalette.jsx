@@ -1,12 +1,13 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import * as Icons from 'lucide-react';
-import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star } from 'lucide-react';
+import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize } from 'lucide-react';
 
 const CATEGORY_TITLES = {
   'favorites': '⭐ Favorites',
   'inout': 'In / Out',
   'prep': 'Preparation',
   'transform': 'Transform',
+  'cloud': '☁️ Cloud Connectors',
   'misc': 'Miscellaneous'
 };
 
@@ -15,6 +16,25 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
   const dropdownRef = useRef(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   // Favorites State
   const [favoriteToolIds, setFavoriteToolIds] = useState(() => {
@@ -342,6 +362,15 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
               <span>Run</span>
             </>
           )}
+        </button>
+
+        <button
+          className="run-button"
+          style={{ background: 'var(--panel-bg)', color: 'var(--text-color)', border: '1px solid var(--border-color)', marginLeft: '8px' }}
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+        >
+          {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
         </button>
       </div>
     </div>

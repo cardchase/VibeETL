@@ -25,6 +25,10 @@ from app.tools.datetime_parser import DateTimeNode
 from app.tools.python_code import PythonCodeNode
 from app.tools.sampling import SamplingNode
 from app.tools.llm_chunker import LLMChunkerNode
+from app.tools.gcs_input import GCSInputNode
+from app.tools.gcs_output import GCSOutputNode
+from app.tools.google_sheets_input import GoogleSheetsInputNode
+from app.tools.google_sheets_output import GoogleSheetsOutputNode
 
 NODE_CLASSES = {
     "fileInput": FileInputNode,
@@ -51,5 +55,9 @@ NODE_CLASSES = {
     "datetime": DateTimeNode,
     "python_code": PythonCodeNode,
     "sampling": SamplingNode,
-    "llm_chunker": LLMChunkerNode
+    "llm_chunker": LLMChunkerNode,
+    "gcs_in": GCSInputNode,
+    "gcs_out": GCSOutputNode,
+    "google_sheets_in": GoogleSheetsInputNode,
+    "google_sheets_out": GoogleSheetsOutputNode
 }

@@ -41,7 +41,6 @@ class CleansingNode(BaseNode):
         remove_letters = self.parameters.get("remove_letters", False)
         string_case = self.parameters.get("string_case", "None")
 
-        res_df = df.clone()
         expressions = []
 
         for col in cols_to_clean:
@@ -74,8 +73,11 @@ class CleansingNode(BaseNode):
                     expr = expr.fill_null(0)
                 expressions.append(expr)
 
-        if expressions:
-            res_df = res_df.with_columns(expressions)
-            self.log(f"Cleansed columns: {cols_to_clean}")
-
-        return res_df
+        try:
+            if expressions:
+                df = df.with_columns(expressions)
+                self.log(f"Cleansed columns: {cols_to_clean}")
+            return df
+        except Exception as e:
+            self.log(f"Cleansing failed: {str(e)}")
+            raise ValueError(f"Data Cleansing Error: {str(e)}")

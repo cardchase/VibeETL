@@ -1,7 +1,26 @@
 import re
 import polars as pl
 from typing import Dict, Any
-from app.tools.base import BaseNode
+from app.tools.base import BaseNode, SecurityError
+
+def verify_safe_filter_expression(polars_str: str) -> None:
+    """
+    Scans the compiled Polars expression to block malicious system calls, 
+    module lookups, or file escapes before evaluation.
+    """
+    # Explicit blocklist of dangerous keywords
+    forbidden_calls = {'eval', 'exec', 'open', 'system', 'subprocess', 'getattr', '__import__', 'os', 'shutil', 'requests'}
+    
+    import ast
+    try:
+        tree = ast.parse(polars_str)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in forbidden_calls:
+                raise SecurityError(f"Restricted execution keyword intercepted: '{node.id}'")
+            if isinstance(node, ast.Attribute) and node.attr in forbidden_calls:
+                raise SecurityError(f"Restricted attribute call intercepted: '{node.attr}'")
+    except SyntaxError:
+        raise ValueError("Security Intercept: Malformed custom expression syntax geometry. This may indicate an obfuscated injection attempt.")
 
 def parse_to_polars_str(expr_str: str, schema: Dict[str, Any]) -> str:
     token_specification = [
@@ -190,7 +209,11 @@ class FilterNode(BaseNode):
                 polars_expr_str = parse_to_polars_str(expr_str, df.schema)
                 self.log(f"Compiled Polars expression: {polars_expr_str}")
                 
-                expr = eval(polars_expr_str, {"pl": pl})
+                # AST Safety Check
+                verify_safe_filter_expression(polars_expr_str)
+                
+                # Lock down execution environment context
+                expr = eval(polars_expr_str, {"pl": pl, "__builtins__": {}})
                 true_expr_clean = expr.fill_null(False)
                 
                 true_df = df.filter(true_expr_clean)
@@ -198,6 +221,9 @@ class FilterNode(BaseNode):
                 
                 self.log(f"Custom filter applied. True branch: {true_df.height} rows, False branch: {false_df.height} rows.")
                 return {"true": true_df, "false": false_df}
+            except SecurityError as se:
+                self.log(f"Security Intervention: {se}")
+                raise ValueError(f"Security Alert: Malicious custom expression blocked. {se}")
             except Exception as e:
                 self.log(f"Error evaluating custom expression '{expr_str}': {e}")
                 raise ValueError(f"Invalid custom expression: {expr_str}. Error: {e}")

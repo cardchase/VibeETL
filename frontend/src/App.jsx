@@ -6,7 +6,63 @@ import ConfigWindow from './components/ConfigWindow';
 import ResultsWindow from './components/ResultsWindow';
 import ErrorBoundary from './components/ErrorBoundary';
 import CustomNode from './components/CustomNode';
+import CommentNode from './components/CommentNode';
+import ContainerNode from './components/ContainerNode';
 import './App.css';
+const getLayoutedElements = (nodes, edges) => {
+  // Identify connected nodes
+  const connectedNodeIds = new Set();
+  edges.forEach((edge) => {
+    connectedNodeIds.add(edge.source);
+    connectedNodeIds.add(edge.target);
+  });
+
+  const connectedNodes = nodes.filter(n => connectedNodeIds.has(n.id) && n.type !== 'container');
+  const disconnectedNodes = nodes.filter(n => !connectedNodeIds.has(n.id) || n.type === 'container');
+
+  if (connectedNodes.length === 0) return nodes;
+
+  // Simple topological layout (bfs)
+  let roots = connectedNodes.filter(n => !edges.some(e => e.target === n.id));
+  if (roots.length === 0) roots = [connectedNodes[0]]; // fallback for cycles
+  
+  const visited = new Set();
+  const nodeLevels = {}; // Map of nodeId -> level (x coordinate depth)
+  
+  const queue = [...roots];
+  queue.forEach(q => { if (q) nodeLevels[q.id] = 0; });
+  
+  while(queue.length > 0) {
+    const node = queue.shift();
+    if(!node || visited.has(node.id)) continue;
+    visited.add(node.id);
+    
+    const outgoingEdges = edges.filter(e => e.source === node.id);
+    outgoingEdges.forEach(e => {
+      nodeLevels[e.target] = Math.max(nodeLevels[e.target] || 0, nodeLevels[node.id] + 1);
+      const targetNode = connectedNodes.find(n => n.id === e.target);
+      if (targetNode) queue.push(targetNode);
+    });
+  }
+
+  // Group nodes by level to calculate Y positions
+  const levelCounts = {};
+  const layoutedNodes = connectedNodes.map(node => {
+    const level = nodeLevels[node.id] || 0;
+    levelCounts[level] = (levelCounts[level] || 0) + 1;
+    const yIndex = levelCounts[level] - 1;
+    
+    return {
+      ...node,
+      position: {
+        x: 20 + level * 90, // 20px start, 90px interval (44px node + 46px right padding)
+        y: 50 + yIndex * 120 // Vertical spacing
+      }
+    };
+  });
+
+  return [...layoutedNodes, ...disconnectedNodes];
+};
 
 // Dynamic API Base URL from environment variables
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
@@ -224,11 +280,179 @@ function App() {
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
   
-  const [nodes, setNodes, onNodesChange] = useNodesState(activeTab.nodes || []);
+  const [nodes, setNodes, onNodesChangeCore] = useNodesState(activeTab.nodes || []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeTab.edges || []);
+  const [isRunning, setIsRunning] = useState(false);
+  const [results, setResults] = useState(activeTab.results || {});
+  const [globalLogs, setGlobalLogs] = useState(activeTab.globalLogs || []);
+  const [isDirty, setIsDirty] = useState(activeTab.isDirty || false);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [selectedHandle, setSelectedHandle] = useState(null);
+
+  // Tab-Canvas Synchronization Hook
+  useEffect(() => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (tab) {
+      setNodes(tab.nodes || []);
+      setEdges(tab.edges || []);
+      setResults(tab.results || {});
+      setGlobalLogs(tab.globalLogs || []);
+      setIsDirty(tab.isDirty || false);
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+    }
+  }, [activeTabId, setNodes, setEdges]); // Explicitly omitted 'tabs' to prevent recursive rendering loops
+
+  const isDraggingNode = React.useRef(false);
+
+  const onNodesChange = useCallback((changes) => {
+    onNodesChangeCore(changes);
+    const isDrag = changes.some(c => c.type === 'position' || c.type === 'dimensions');
+    if (isDrag) {
+      isDraggingNode.current = true;
+    }
+  }, [onNodesChangeCore]);
+  const [isWebSocketConnected, setIsWebSocketConnected] = useState(false);
+
+  // Listen for snap layout event
+  useEffect(() => {
+    const handleSnapLayout = () => {
+      try {
+        setNodes((nds) => {
+          const layouted = getLayoutedElements(nds, edges);
+          setTimeout(() => window.dispatchEvent(new CustomEvent('vibe-fit-view')), 100);
+          return layouted;
+        });
+      } catch (err) {
+        alert("Snap Layout Error: " + err.message);
+        console.error(err);
+      }
+    };
+    window.addEventListener('vibe-snap-layout', handleSnapLayout);
+    return () => window.removeEventListener('vibe-snap-layout', handleSnapLayout);
+  }, [edges, setNodes]);
+  // State hooks moved above the sync hook
+
+  const [past, setPast] = useState([]);
+  const [future, setFuture] = useState([]);
+  const lastSavedState = React.useRef({ nodes: [], edges: [] });
+  const isRestoring = React.useRef(false);
+
+  // Clear history on tab change
+  useEffect(() => {
+    setPast([]);
+    setFuture([]);
+    lastSavedState.current = { nodes, edges };
+  }, [activeTabId]);
+
+  // Debounced history tracker
+  useEffect(() => {
+    if (isRestoring.current) {
+      isRestoring.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      // Remove deep ui states that trigger constantly without structure change
+      const stripUI = (nds, eds) => ({
+        nodes: nds.map(n => ({ ...n, selected: false, dragging: false, positionAbsolute: undefined })),
+        edges: eds.map(e => ({ ...e, selected: false }))
+      });
+      
+      const current = stripUI(nodes, edges);
+      const last = stripUI(lastSavedState.current.nodes || [], lastSavedState.current.edges || []);
+      
+      const currentStr = JSON.stringify(current);
+      const lastStr = JSON.stringify(last);
+      
+      if (currentStr !== lastStr) {
+        setPast(p => {
+           setFuture([]);
+           // Make deep copies before pushing
+           const stateCopy = { 
+             nodes: (lastSavedState.current.nodes || []).map(n => ({...n})), 
+             edges: (lastSavedState.current.edges || []).map(e => ({...e}))
+           };
+           return [...p.slice(-49), stateCopy]; // Max 50 states
+        });
+        lastSavedState.current = { 
+           nodes: nodes.map(n => ({...n})), 
+           edges: edges.map(e => ({...e})) 
+        };
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    const handleUndo = () => {
+      setPast(p => {
+        if (p.length === 0) return p;
+        isRestoring.current = true;
+        const previous = p[p.length - 1];
+        
+        setFuture(f => {
+          const currentCopy = {
+            nodes: lastSavedState.current.nodes.map(n => ({...n})),
+            edges: lastSavedState.current.edges.map(e => ({...e}))
+          };
+          return [currentCopy, ...f];
+        });
+        
+        const restoredNodes = previous.nodes.map(n => ({...n}));
+        const restoredEdges = previous.edges.map(e => ({...e}));
+        
+        setNodes(restoredNodes);
+        setEdges(restoredEdges);
+        lastSavedState.current = { nodes: restoredNodes, edges: restoredEdges };
+        
+        // Notify canvas to disable selection temporarily to avoid ghost selections
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        
+        return p.slice(0, -1);
+      });
+    };
+
+    const handleRedo = () => {
+      setFuture(f => {
+        if (f.length === 0) return f;
+        isRestoring.current = true;
+        const next = f[0];
+        
+        setPast(p => {
+          const currentCopy = {
+            nodes: lastSavedState.current.nodes.map(n => ({...n})),
+            edges: lastSavedState.current.edges.map(e => ({...e}))
+          };
+          return [...p, currentCopy];
+        });
+        
+        const restoredNodes = next.nodes.map(n => ({...n}));
+        const restoredEdges = next.edges.map(e => ({...e}));
+        
+        setNodes(restoredNodes);
+        setEdges(restoredEdges);
+        lastSavedState.current = { nodes: restoredNodes, edges: restoredEdges };
+        
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        
+        return f.slice(1);
+      });
+    };
+
+    window.addEventListener('vibe-undo', handleUndo);
+    window.addEventListener('vibe-redo', handleRedo);
+    
+    // Pass availability to a custom event if we want buttons to react, but for now we'll just check global length
+    window.dispatchEvent(new CustomEvent('vibe-history-update', { detail: { canUndo: past.length > 0, canRedo: future.length > 0 } }));
+
+    return () => {
+      window.removeEventListener('vibe-undo', handleUndo);
+      window.removeEventListener('vibe-redo', handleRedo);
+    };
+  }, [setNodes, setEdges, past.length, future.length]);
 
   useEffect(() => {
     const handleHandleClick = (e) => {
@@ -253,24 +477,32 @@ function App() {
         type: 'container',
         position: { x, y },
         style: { width, height },
-        data: { label: 'Tool Container', enabled: true },
-        zIndex: -1
+        data: { label: 'Tool Container', enabled: true }
       };
 
       setNodes(nds => {
-        const newNodes = nds.map(n => {
+        let resultNodes = [];
+        let modifiedChildren = [];
+        
+        nds.forEach(n => {
           if (childIds.includes(n.id)) {
-            // Convert positions to relative for React Flow subflows
-            return {
-              ...n,
-              parentNode: containerId,
-              extent: 'parent',
-              position: { x: n.position.x - x, y: n.position.y - y }
-            };
+            // It's a child. Adjust to relative position and set parent
+            const { positionAbsolute, ...restNode } = n;
+            modifiedChildren.push({
+              ...restNode,
+              parentId: containerId,
+              position: { 
+                x: (n.positionAbsolute?.x || n.position.x) - x, 
+                y: (n.positionAbsolute?.y || n.position.y) - y 
+              }
+            });
+          } else {
+            resultNodes.push(n);
           }
-          return n;
         });
-        return [...newNodes, containerNode];
+        
+        // Put the container first, then the children, to satisfy React Flow's z-index rules
+        return [...resultNodes, containerNode, ...modifiedChildren];
       });
       setSelectedNodeId(containerId);
     };
@@ -282,20 +514,321 @@ function App() {
       ));
     };
 
+    const handleToggleMinimizeContainer = (e) => {
+      const { nodeId, minimized } = e.detail;
+      
+      setNodes(nds => {
+        let newNodes = [...nds];
+        
+        // Find container
+        const containerIndex = newNodes.findIndex(n => n.id === nodeId);
+        if (containerIndex === -1) return newNodes;
+        
+        const container = newNodes[containerIndex];
+        let newContainerStyle = { ...container.style };
+        let newData = { ...container.data, minimized };
+        
+        if (minimized) {
+          // Save previous size
+          newData.previousWidth = container.style?.width || container.width || 300;
+          newData.previousHeight = container.style?.height || container.height || 200;
+          
+          // Shrink container dynamically based on label length
+          const label = container.data?.parameters?.label || container.data?.label || 'Tool Container';
+          const calculatedWidth = Math.max(250, label.length * 8 + 80);
+          
+          newContainerStyle.width = calculatedWidth;
+          newContainerStyle.height = 60;
+          
+          // Hide all children
+          newNodes = newNodes.map(n => {
+            if (n.parentId === nodeId) {
+              return { ...n, hidden: true };
+            }
+            return n;
+          });
+        } else {
+          // Restore previous size
+          newContainerStyle.width = newData.previousWidth || 300;
+          newContainerStyle.height = newData.previousHeight || 200;
+          
+          // Show all children
+          newNodes = newNodes.map(n => {
+            if (n.parentId === nodeId) {
+              return { ...n, hidden: false };
+            }
+            return n;
+          });
+        }
+        
+        newNodes[containerIndex] = {
+          ...container,
+          style: newContainerStyle,
+          data: newData
+        };
+        
+        return newNodes;
+      });
+
+      // Reroute edges to/from the container when minimized
+      const childIds = nodes.filter(n => n.parentId === nodeId).map(n => n.id);
+      if (childIds.length > 0) {
+        setEdges(eds => eds.map(edge => {
+          const sourceIsChild = childIds.includes(edge.source);
+          const targetIsChild = childIds.includes(edge.target);
+          
+          if (minimized) {
+            if (sourceIsChild && targetIsChild) {
+              return { ...edge, hidden: true };
+            }
+            if (sourceIsChild && !targetIsChild) {
+              return { ...edge, originalSource: edge.source, originalSourceHandle: edge.sourceHandle, source: nodeId, sourceHandle: 'output' };
+            }
+            if (targetIsChild && !sourceIsChild) {
+              return { ...edge, originalTarget: edge.target, originalTargetHandle: edge.targetHandle, target: nodeId, targetHandle: 'input' };
+            }
+          } else {
+            // Restore edges when expanded
+            let newEdge = { ...edge };
+            if (edge.source === nodeId && edge.originalSource) {
+              newEdge.source = edge.originalSource;
+              newEdge.sourceHandle = edge.originalSourceHandle;
+              delete newEdge.originalSource;
+              delete newEdge.originalSourceHandle;
+            }
+            if (edge.target === nodeId && edge.originalTarget) {
+              newEdge.target = edge.originalTarget;
+              newEdge.targetHandle = edge.originalTargetHandle;
+              delete newEdge.originalTarget;
+              delete newEdge.originalTargetHandle;
+            }
+            if (sourceIsChild && targetIsChild) {
+              newEdge.hidden = false;
+            }
+            return newEdge;
+          }
+          return edge;
+        }));
+      }
+    };
+
+    const handleUngroupContainer = (e) => {
+      const { nodeId } = e.detail;
+      setNodes(nds => {
+        const container = nds.find(n => n.id === nodeId);
+        if (!container) return nds;
+        
+        const cx = container.positionAbsolute?.x || container.position.x;
+        const cy = container.positionAbsolute?.y || container.position.y;
+        
+        let newNodes = [];
+        
+        nds.forEach(n => {
+          if (n.id === nodeId) {
+            // Drop the container
+            return;
+          }
+          if (n.parentId === nodeId) {
+            // Restore absolute positioning and remove parent
+            newNodes.push({
+              ...n,
+              parentId: undefined,
+              extent: undefined,
+              position: {
+                x: cx + n.position.x,
+                y: cy + n.position.y
+              },
+              hidden: false // Ensure it's not hidden if container was minimized
+            });
+          } else {
+            newNodes.push(n);
+          }
+        });
+        
+        return newNodes;
+      });
+      
+      setEdges(eds => eds.map(edge => {
+        let newEdge = { ...edge };
+        if (edge.source === nodeId && edge.originalSource) {
+          newEdge.source = edge.originalSource;
+          newEdge.sourceHandle = edge.originalSourceHandle;
+          delete newEdge.originalSource;
+          delete newEdge.originalSourceHandle;
+        }
+        if (edge.target === nodeId && edge.originalTarget) {
+          newEdge.target = edge.originalTarget;
+          newEdge.targetHandle = edge.originalTargetHandle;
+          delete newEdge.originalTarget;
+          delete newEdge.originalTargetHandle;
+        }
+        if (newEdge.hidden) {
+          newEdge.hidden = false;
+        }
+        return newEdge;
+      }));
+      
+      setSelectedNodeId(null);
+    };
+
+    const handleNodeDragStop = (e) => {
+      const { nodeId, containerId, positionAbsolute, width, height } = e.detail;
+      
+      setNodes(nds => {
+        const node = nds.find(n => n.id === nodeId);
+        if (!node) return nds;
+
+        // If a CONTAINER was dropped, check if it absorbed any tools
+        if (node.type === 'container') {
+          const containerX = positionAbsolute.x;
+          const containerY = positionAbsolute.y;
+          const containerW = width;
+          const containerH = height;
+
+          const childrenToAbsorb = nds.filter(n => {
+            if (n.type === 'container') return false; // Don't absorb other containers
+            if (n.parentId === nodeId) return false; // Already a child
+            
+            const nX = n.positionAbsolute?.x || n.position.x;
+            const nY = n.positionAbsolute?.y || n.position.y;
+            const nW = n.measured?.width || n.width || n.style?.width || 150;
+            const nH = n.measured?.height || n.height || n.style?.height || 60;
+            
+            // If the tool's center is inside the container, absorb it
+            const nCenterX = nX + nW / 2;
+            const nCenterY = nY + nH / 2;
+            
+            return nCenterX >= containerX && nCenterY >= containerY && 
+                   nCenterX <= (containerX + containerW) && 
+                   nCenterY <= (containerY + containerH);
+          });
+
+          if (childrenToAbsorb.length === 0) return nds;
+
+          const childIds = childrenToAbsorb.map(n => n.id);
+          
+          let resultNodes = nds.map(n => {
+            if (childIds.includes(n.id)) {
+              const { positionAbsolute: pa, ...rest } = n;
+              return {
+                ...rest,
+                parentId: nodeId,
+                position: {
+                  x: (n.positionAbsolute?.x || n.position.x) - containerX,
+                  y: (n.positionAbsolute?.y || n.position.y) - containerY
+                }
+              };
+            }
+            return n;
+          });
+          
+          // Reorder: container must be before children in array
+          const containerObj = resultNodes.find(n => n.id === nodeId);
+          resultNodes = resultNodes.filter(n => n.id !== nodeId);
+          resultNodes.unshift(containerObj); // Put container at the very beginning
+          
+          return resultNodes;
+        }
+
+        // If a TOOL was dropped
+        let targetContainerId = containerId;
+
+        if (targetContainerId) {
+          const container = nds.find(n => n.id === targetContainerId);
+          if (container && node.parentId !== targetContainerId) {
+            // New container! Make it relative to the container
+            let resultNodes = nds.map(n => {
+              if (n.id === nodeId) {
+                const { positionAbsolute: pa, ...rest } = n;
+                return {
+                  ...rest,
+                  parentId: targetContainerId,
+                  position: { 
+                    x: positionAbsolute.x - (container.positionAbsolute?.x || container.position.x), 
+                    y: positionAbsolute.y - (container.positionAbsolute?.y || container.position.y) 
+                  }
+                };
+              }
+              return n;
+            });
+
+            // React Flow requires parent nodes to appear before their children in the array
+            const containerIdx = resultNodes.findIndex(n => n.id === targetContainerId);
+            const nodeIdx = resultNodes.findIndex(n => n.id === nodeId);
+            
+            if (nodeIdx < containerIdx) {
+               const nodeObj = resultNodes[nodeIdx];
+               resultNodes.splice(nodeIdx, 1);
+               const newContainerIdx = resultNodes.findIndex(n => n.id === targetContainerId);
+               resultNodes.splice(newContainerIdx + 1, 0, nodeObj);
+            }
+            return resultNodes;
+          }
+        } else {
+          // If it was dropped outside, and previously had a parent, remove it
+          if (node.parentId) {
+            return nds.map(n => 
+              n.id === nodeId ? {
+                ...n,
+                parentId: undefined,
+                extent: undefined,
+                position: positionAbsolute // Restore absolute coordinates
+              } : n
+            );
+          }
+        }
+        return nds;
+      });
+    };
+
+    const handleCreateComment = (e) => {
+      const { x, y } = e.detail;
+      const maxId = nodes.reduce((max, n) => {
+        const match = n.id.match(/^node_(\d+)$/);
+        return match && parseInt(match[1]) < 1000000 ? Math.max(max, parseInt(match[1])) : max;
+      }, 0);
+      
+      const commentId = `node_${maxId + 1}`;
+      const commentNode = {
+        id: commentId,
+        type: 'comment',
+        position: { x, y },
+        style: { width: 250, height: 150 },
+        data: { label: 'Comment', parameters: {} },
+        zIndex: -1
+      };
+
+      setNodes(nds => [...nds, commentNode]);
+      setSelectedNodeId(commentId);
+    };
+
+    const handleUpdateComment = (e) => {
+      const { nodeId, text } = e.detail;
+      setNodes(nds => nds.map(n => 
+        n.id === nodeId ? { ...n, data: { ...n.data, parameters: { ...(n.data.parameters || {}), text } } } : n
+      ));
+    };
+
     window.addEventListener('vibe-create-container', handleCreateContainer);
     window.addEventListener('vibe-toggle-container', handleToggleContainer);
+    window.addEventListener('vibe-toggle-minimize-container', handleToggleMinimizeContainer);
+    window.addEventListener('vibe-ungroup-container', handleUngroupContainer);
+    window.addEventListener('vibe-node-drag-stop', handleNodeDragStop);
+    window.addEventListener('vibe-create-comment', handleCreateComment);
+    window.addEventListener('vibe-update-comment', handleUpdateComment);
     
     return () => {
       window.removeEventListener('vibe-create-container', handleCreateContainer);
       window.removeEventListener('vibe-toggle-container', handleToggleContainer);
+      window.removeEventListener('vibe-toggle-minimize-container', handleToggleMinimizeContainer);
+      window.removeEventListener('vibe-ungroup-container', handleUngroupContainer);
+      window.removeEventListener('vibe-node-drag-stop', handleNodeDragStop);
+      window.removeEventListener('vibe-create-comment', handleCreateComment);
+      window.removeEventListener('vibe-update-comment', handleUpdateComment);
     };
   }, [nodes, setNodes]);
 
-  // Pipeline execution state
-  const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState(activeTab.results || {});
-  const [globalLogs, setGlobalLogs] = useState(activeTab.globalLogs || []);
-  const [isDirty, setIsDirty] = useState(activeTab.isDirty || false);
+  // Pipeline execution state moved above sync hook
 
   const handleTabChange = useCallback((newTabId) => {
     if (newTabId === activeTabId) return;
@@ -305,35 +838,18 @@ function App() {
       }
       return t;
     }));
-    const incoming = tabs.find(t => t.id === newTabId);
-    if (incoming) {
-      setNodes(incoming.nodes || []);
-      setEdges(incoming.edges || []);
-      setResults(incoming.results || {});
-      setGlobalLogs(incoming.globalLogs || []);
-      setIsDirty(incoming.isDirty || false);
-      setSelectedNodeId(null);
-      setSelectedEdgeId(null);
-      setActiveTabId(newTabId);
-    }
-  }, [activeTabId, nodes, edges, results, globalLogs, isDirty, tabs, setNodes, setEdges]);
+    setActiveTabId(newTabId);
+  }, [activeTabId, nodes, edges, results, globalLogs, isDirty]);
 
   const handleAddTab = useCallback(() => {
     setTabs(prev => {
       const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty } : t);
       const newTabId = `tab-${Date.now()}`;
       const newTab = { id: newTabId, name: `Workflow ${currentSaved.length + 1}`, nodes: [], edges: [], results: {}, globalLogs: [], isDirty: false };
-      setNodes([]);
-      setEdges([]);
-      setResults({});
-      setGlobalLogs([]);
-      setIsDirty(false);
-      setSelectedNodeId(null);
-      setSelectedEdgeId(null);
       setActiveTabId(newTabId);
       return [...currentSaved, newTab];
     });
-  }, [activeTabId, nodes, edges, results, globalLogs, isDirty, setNodes, setEdges]);
+  }, [activeTabId, nodes, edges, results, globalLogs, isDirty]);
 
   const handleCloseTab = useCallback((idToClose) => {
     setTabs(prev => {
@@ -341,25 +857,19 @@ function App() {
       if (newTabs.length === 0) return prev; // Don't close the last tab
       if (idToClose === activeTabId) {
         const incoming = newTabs[newTabs.length - 1];
-        setNodes(incoming.nodes || []);
-        setEdges(incoming.edges || []);
-        setResults(incoming.results || {});
-        setGlobalLogs(incoming.globalLogs || []);
-        setIsDirty(incoming.isDirty || false);
-        setSelectedNodeId(null);
-        setSelectedEdgeId(null);
         setActiveTabId(incoming.id);
       }
       return newTabs;
     });
-  }, [activeTabId, setNodes, setEdges]);
+  }, [activeTabId]);
 
-  // Global keydown event listener to delete selected node or edge
+  // Global keydown event listener to handle Delete and Copy/Paste
   React.useEffect(() => {
     const handleKeyDown = (e) => {
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'SELECT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        const activeTag = document.activeElement?.tagName;
-        if (activeTag === 'INPUT' || activeTag === 'SELECT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
         if (selectedNodeId) {
           e.preventDefault();
           setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
@@ -370,11 +880,73 @@ function App() {
           setEdges((eds) => eds.filter((edge) => edge.id !== selectedEdgeId));
           setSelectedEdgeId(null);
         }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        const selectedNodes = nodes.filter(n => n.selected || n.id === selectedNodeId);
+        
+        // Include children if a container is selected
+        const children = nodes.filter(n => selectedNodes.some(sn => sn.id === n.parentId && !selectedNodes.includes(n)));
+        const nodesToCopy = [...selectedNodes, ...children];
+        
+        const selectedNodeIds = nodesToCopy.map(n => n.id);
+        const edgesToCopy = edges.filter(e => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target));
+        
+        if (nodesToCopy.length > 0) {
+          localStorage.setItem('vibeetl_clipboard', JSON.stringify({ nodes: nodesToCopy, edges: edgesToCopy }));
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        const clipboard = localStorage.getItem('vibeetl_clipboard');
+        if (clipboard) {
+          try {
+            const parsed = JSON.parse(clipboard);
+            const pastedNodes = parsed.nodes || [];
+            const pastedEdges = parsed.edges || [];
+            
+            const idMap = {};
+            const currentMaxId = nodes.reduce((max, n) => {
+              const match = n.id.match(/^node_(\d+)$/);
+              return match && parseInt(match[1]) < 1000000 ? Math.max(max, parseInt(match[1])) : max;
+            }, 0);
+            
+            let idCounter = currentMaxId + 1;
+            
+            const newNodes = pastedNodes.map(n => {
+              const newId = `node_${idCounter++}`;
+              idMap[n.id] = newId;
+              return {
+                ...n,
+                id: newId,
+                position: { x: n.position.x + 50, y: n.position.y + 50 },
+                selected: true
+              };
+            });
+            
+            newNodes.forEach(n => {
+              if (n.parentId && idMap[n.parentId]) {
+                n.parentId = idMap[n.parentId];
+              }
+            });
+            
+            const newEdges = pastedEdges.map(e => ({
+              ...e,
+              id: `edge_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+              source: idMap[e.source] || e.source,
+              target: idMap[e.target] || e.target,
+              selected: true
+            }));
+            
+            setNodes(nds => nds.map(n => ({...n, selected: false})).concat(newNodes));
+            setEdges(eds => eds.map(e => ({...e, selected: false})).concat(newEdges));
+          } catch (err) {
+            console.error("Paste failed", err);
+          }
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeId, selectedEdgeId, setNodes, setEdges]);
+  }, [nodes, edges, selectedNodeId, selectedEdgeId, setNodes, setEdges]);
   const isFirstRender = React.useRef(true);
 
   // Auto-save & Dirty Tracking
@@ -383,8 +955,25 @@ function App() {
       isFirstRender.current = false;
       return;
     }
+    
+    // Decouple node drag coordinate noise from deep state cloning
+    if (isDraggingNode.current) {
+      return;
+    }
+
     setIsDirty(true);
+    
+    // Save the active workflow (legacy fallback)
     localStorage.setItem('vibeetl_autosave_workflow', JSON.stringify({ nodes, edges }));
+    
+    // Critcal Fix: Synchronize the active canvas state into the tabs array before saving!
+    const syncedTabs = tabs.map(t => {
+      if (t.id === activeTabId) {
+        return { ...t, nodes, edges, isDirty: true };
+      }
+      return t;
+    });
+    localStorage.setItem('vibeetl_autosave_workflow_tabs', JSON.stringify(syncedTabs));
 
     const timer = setTimeout(() => {
       fetch(`${API_BASE}/api/autosave`, {
@@ -395,7 +984,7 @@ function App() {
     }, 2000);
     
     return () => clearTimeout(timer);
-  }, [nodes, edges]);
+  }, [nodes, edges, tabs, activeTabId]);
 
   // Unsaved changes protection
   React.useEffect(() => {
@@ -620,6 +1209,16 @@ function App() {
         category = 'prep';
         icon = 'Hash';
         defaultParams = { column_name: 'RecordID', starting_value: 1 };
+      } else if (type === 'gcs_in') {
+        label = 'GCS Input';
+        category = 'cloud';
+        icon = 'Cloud';
+        defaultParams = { bucket: '', path: '', file_format: 'csv', service_account_json: '' };
+      } else if (type === 'gcs_out') {
+        label = 'GCS Output';
+        category = 'cloud';
+        icon = 'CloudUpload';
+        defaultParams = { bucket: '', path: '', file_format: 'csv', service_account_json: '' };
       }
     }
 
@@ -718,18 +1317,19 @@ function App() {
     setNodes((nds) =>
       nds.map((node) => ({
         ...node,
-        data: { ...node.data, status: 'waiting' }
+        data: { ...node.data, status: node.type === 'comment' ? 'idle' : 'waiting' }
       }))
     );
 
     // Build DAG JSON payload for FastAPI
     // We only need id, type, parameters for nodes, and connection ports for edges
     const dagPayload = {
-      nodes: nodes.map((n) => ({
+      nodes: nodes.filter(n => n.type !== 'comment').map((n) => ({
         id: n.id,
         type: n.type,
+        parentId: n.parentId,
         parameters: n.data.parameters || {},
-        data: { label: n.data.label }
+        data: { label: n.data.label, enabled: n.data.enabled !== false }
       })),
       edges: edges.map((e) => ({
         id: e.id,
@@ -917,7 +1517,7 @@ function App() {
   }, [nodes, setEdges]);
 
   const nodeTypes = useMemo(() => {
-    const types = { custom: CustomNode };
+    const types = { custom: CustomNode, comment: CommentNode, container: ContainerNode };
     availableTools.forEach(tool => {
       types[tool.id] = CustomNode;
     });
@@ -999,13 +1599,6 @@ function App() {
             const newTabId = `tab-${Date.now()}`;
             const newTabName = file.name.replace('.json', '');
             const newTab = { id: newTabId, name: newTabName, nodes: loaded.nodes, edges: loaded.edges, results: {}, globalLogs: ['Workflow loaded successfully.'], isDirty: false };
-            setNodes(newTab.nodes);
-            setEdges(newTab.edges);
-            setResults({});
-            setGlobalLogs(newTab.globalLogs);
-            setIsDirty(false);
-            setSelectedNodeId(null);
-            setSelectedEdgeId(null);
             setActiveTabId(newTabId);
             return [...currentSaved, newTab];
           });
@@ -1120,6 +1713,11 @@ function App() {
                 onEdgeSelect={setSelectedEdgeId}
                 onAddNode={handleAddNode}
                 onNodesDelete={onNodesDelete}
+                onNodeDragStop={(e, node) => {
+                  isDraggingNode.current = false;
+                  // Force a tabs sync to capture the new coordinates
+                  setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, isDirty: true } : t));
+                }}
               />
             </ErrorBoundary>
           </div>

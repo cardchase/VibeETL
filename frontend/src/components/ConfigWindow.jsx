@@ -1,6 +1,83 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Upload, Check, AlertCircle, Database, Link, X, Plus } from 'lucide-react';
 
+
+const SafeInput = ({ value, checked, onChange, onBlur, type, ...props }) => {
+  const isCheck = type === 'checkbox' || type === 'radio' || type === 'file';
+  const [localValue, setLocalValue] = React.useState(isCheck ? checked : (value ?? ''));
+  
+  React.useEffect(() => { 
+    setLocalValue(isCheck ? checked : (value ?? ''));
+  }, [value, checked, isCheck]);
+  
+  const handleBlur = (e) => {
+    if (onChange && localValue !== (isCheck ? checked : value)) {
+      onChange({ target: { value: localValue, checked: localValue } });
+    }
+    if (onBlur) onBlur(e);
+  };
+  
+  const handleKeyDown = (e) => {
+    if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Escape') {
+      e.stopPropagation();
+    }
+    if (e.key === 'Enter') {
+      if (onChange && localValue !== (isCheck ? checked : value)) {
+        onChange({ target: { value: localValue, checked: localValue } });
+      }
+    }
+    if (props.onKeyDown) props.onKeyDown(e);
+  };
+
+  const handleChange = (e) => {
+    const v = isCheck ? (type === 'file' ? e.target.files : e.target.checked) : e.target.value;
+    setLocalValue(v);
+    if (isCheck && onChange) {
+      if (type === 'file') {
+        onChange(e); // Pass the original event for files
+      } else {
+        onChange({ target: { value: v, checked: v } });
+      }
+    }
+  };
+
+  if (type === 'file') {
+     return <input type={type} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown} {...props} />;
+  }
+
+  return <input type={type} value={isCheck ? undefined : localValue} checked={isCheck ? localValue : undefined} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown} {...props} />;
+};
+
+const SafeTextarea = ({ value, onChange, onBlur, ...props }) => {
+  const [localValue, setLocalValue] = React.useState(value ?? '');
+  React.useEffect(() => { setLocalValue(value ?? '') }, [value]);
+  
+  const handleBlur = (e) => {
+    if (onChange && localValue !== value) onChange({ target: { value: localValue } });
+    if (onBlur) onBlur(e);
+  };
+  
+  const handleKeyDown = (e) => {
+    if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Escape') {
+      e.stopPropagation();
+    }
+    if (props.onKeyDown) props.onKeyDown(e);
+  };
+
+  return <textarea value={localValue} onChange={e => setLocalValue(e.target.value)} onBlur={handleBlur} onKeyDown={handleKeyDown} {...props} />;
+};
+
+const SafeSelect = ({ onKeyDown, ...props }) => {
+  const handleKeyDown = (e) => {
+    if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Escape') {
+      e.stopPropagation();
+    }
+    if (onKeyDown) onKeyDown(e);
+  };
+  return <select onKeyDown={handleKeyDown} {...props} />;
+};
+
+
 const getOperatorsForType = (type = '') => {
   const lowerType = type.toLowerCase();
   
@@ -260,7 +337,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 'Click or drag file here (CSV, XLSX, PDF)'
               )}
             </div>
-            <input
+            <SafeInput
               ref={fileInputRef}
               type="file"
               style={{ display: 'none' }}
@@ -276,7 +353,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Or Local Absolute Path</label>
-          <input
+          <SafeInput
             type="text"
             placeholder="C:/data/file.csv"
             value={filePath}
@@ -286,20 +363,20 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">File Type</label>
-          <select value={fileType} onChange={(e) => handleParamChange('fileType', e.target.value)}>
+          <SafeSelect value={fileType} onChange={(e) => handleParamChange('fileType', e.target.value)}>
             <option value="auto">Auto-detect</option>
             <option value="csv">CSV (Comma-Separated)</option>
             <option value="excel">Excel Spreadsheet</option>
             <option value="pdf">PDF Document (Tables)</option>
             <option value="image">Image (OCR Text)</option>
-          </select>
+          </SafeSelect>
         </div>
 
         {fileType === 'csv' || (fileType === 'auto' && filePath.endsWith('.csv')) ? (
           <>
             <div className="form-group">
               <label className="form-label">CSV Delimiter</label>
-              <select
+              <SafeSelect
                 value={csvDelimiter}
                 onChange={(e) => handleParamChange('csvDelimiter', e.target.value)}
               >
@@ -307,10 +384,10 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 <option value="&#9;">Tab (\t)</option>
                 <option value=";">Semicolon (;)</option>
                 <option value="|">Pipe (|)</option>
-              </select>
+              </SafeSelect>
             </div>
             <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <input
+              <SafeInput
                 id="csvHeaderCheck"
                 type="checkbox"
                 checked={csvHeader}
@@ -327,7 +404,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           <div className="form-group">
             <label className="form-label">Sheet Name</label>
             {excelSheets.length > 0 ? (
-              <select
+              <SafeSelect
                 value={excelSheet}
                 onChange={(e) => handleParamChange('excelSheet', e.target.value)}
               >
@@ -337,9 +414,9 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                     {sheet}
                   </option>
                 ))}
-              </select>
+              </SafeSelect>
             ) : (
-              <input
+              <SafeInput
                 type="text"
                 placeholder="Leave empty for first sheet"
                 value={excelSheet}
@@ -352,13 +429,13 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         {fileType === 'pdf' || (fileType === 'auto' && filePath.endsWith('.pdf')) ? (
           <div className="form-group">
             <label className="form-label">PDF Extraction Mode</label>
-            <select
+            <SafeSelect
               value={parameters.pdfExtractionMode || 'text'}
               onChange={(e) => handleParamChange('pdfExtractionMode', e.target.value)}
             >
               <option value="text">Text Mode</option>
               <option value="ocr">OCR (Image to Text)</option>
-            </select>
+            </SafeSelect>
           </div>
         ) : null}
       </>
@@ -494,16 +571,16 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Filter Type</label>
-          <select value={filterType} onChange={(e) => handleParamChange('filterType', e.target.value)}>
+          <SafeSelect value={filterType} onChange={(e) => handleParamChange('filterType', e.target.value)}>
             <option value="basic">Basic Condition</option>
             <option value="custom">Custom Expression</option>
-          </select>
+          </SafeSelect>
         </div>
 
         {filterType === 'custom' ? (
           <div className="form-group" style={{ position: 'relative' }}>
             <label className="form-label">Custom Expression</label>
-            <textarea
+            <SafeTextarea
               ref={textareaRef}
               className="custom-expression-input"
               style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', resize: 'vertical' }}
@@ -535,20 +612,20 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <div className="form-group">
               <label className="form-label">Column</label>
               {hasUpstreamColumns ? (
-                <select value={column} onChange={e => handleColumnChange(e.target.value)}>
+                <SafeSelect value={column} onChange={e => handleColumnChange(e.target.value)}>
                   <option value="">-- Select Column --</option>
                   {upstreamSchema.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
+                </SafeSelect>
               ) : (
-                <input type="text" value={column} onChange={e => handleColumnChange(e.target.value)} placeholder="Column name" />
+                <SafeInput type="text" value={column} onChange={e => handleColumnChange(e.target.value)} placeholder="Column name" />
               )}
             </div>
 
             <div className="form-group">
               <label className="form-label">Operator</label>
-              <select value={operator} onChange={(e) => handleParamChange('operator', e.target.value)}>
+              <SafeSelect value={operator} onChange={(e) => handleParamChange('operator', e.target.value)}>
                 {validOperators?.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
-              </select>
+              </SafeSelect>
             </div>
 
             <div className="form-group">
@@ -556,12 +633,12 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
               {operator === 'is_null' || operator === 'is_not_null' ? (
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Not applicable</span>
               ) : colType === 'Boolean' ? (
-                <select value={value} onChange={(e) => handleParamChange('value', e.target.value)}>
+                <SafeSelect value={value} onChange={(e) => handleParamChange('value', e.target.value)}>
                   <option value="true">True</option>
                   <option value="false">False</option>
-                </select>
+                </SafeSelect>
               ) : (
-                <input
+                <SafeInput
                   type={lowerType.includes('date') ? 'date' : 'text'}
                   placeholder="Enter value"
                   value={value}
@@ -645,18 +722,18 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <Plus size={14} /> Add Sort Rule
           </label>
           <div className="form-group">
-            <select value={sortColumn} onChange={(e) => setSortColumn(e.target.value)} style={{ width: '100%', marginBottom: '8px' }}>
+            <SafeSelect value={sortColumn} onChange={(e) => setSortColumn(e.target.value)} style={{ width: '100%', marginBottom: '8px' }}>
               <option value="">-- Select Column --</option>
               {schema.map(c => (
                 <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
               ))}
-            </select>
+            </SafeSelect>
           </div>
           <div className="form-group" style={{ marginBottom: '12px' }}>
-            <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} style={{ width: '100%' }} disabled={!sortColumn}>
+            <SafeSelect value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} style={{ width: '100%' }} disabled={!sortColumn}>
               <option value="asc">Ascending (A-Z, 0-9)</option>
               <option value="desc">Descending (Z-A, 9-0)</option>
-            </select>
+            </SafeSelect>
           </div>
           <button 
             onClick={handleAddRule}
@@ -705,7 +782,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
                     <th style={{ padding: '6px 8px', width: '30px', textAlign: 'center' }}>
-                       <input 
+                       <SafeInput 
                          type="checkbox" 
                          title="Select/Deselect All"
                          checked={columns.length > 0 && columns.every(c => c.keep)}
@@ -725,7 +802,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                   {columns.map((col, idx) => (
                     <tr key={col.name} style={{ borderBottom: '1px dotted var(--border-color)', opacity: col.keep ? 1 : 0.5, transition: 'opacity 0.2s', background: col.keep ? 'transparent' : 'rgba(0,0,0,0.02)' }}>
                       <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                        <input
+                        <SafeInput
                           type="checkbox"
                           checked={col.keep}
                           onChange={(e) => handleColumnToggle(idx, 'keep', e.target.checked)}
@@ -734,7 +811,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                       </td>
                       <td style={{ padding: '6px 8px', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px' }} title={col.name}>{col.name}</td>
                       <td style={{ padding: '4px 8px' }}>
-                        <select
+                        <SafeSelect
                           style={{ width: '85px', fontSize: '0.65rem', padding: '2px 4px', background: 'transparent', border: '1px solid transparent', borderRadius: '4px', color: 'var(--text-secondary)', outline: 'none', cursor: col.keep ? 'pointer' : 'not-allowed' }}
                           value={col.type || ''}
                           onChange={(e) => handleColumnToggle(idx, 'type', e.target.value)}
@@ -745,10 +822,10 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                           <option value="Int64">Int64</option>
                           <option value="Float64">Float64</option>
                           <option value="Boolean">Boolean</option>
-                        </select>
+                        </SafeSelect>
                       </td>
                       <td style={{ padding: '4px 8px' }}>
-                        <input
+                        <SafeInput
                           type="text"
                           style={{ width: '100%', fontSize: '0.65rem', padding: '4px 6px', background: col.keep ? 'var(--bg-primary)' : 'transparent', border: col.keep ? '1px solid var(--border-color)' : '1px solid transparent', borderRadius: '4px', color: 'var(--text-primary)', outline: 'none' }}
                           placeholder="Rename..."
@@ -845,7 +922,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 'Click or drag photo here (PNG, JPG, JPEG)'
               )}
             </div>
-            <input
+            <SafeInput
               ref={fileInputRef}
               type="file"
               accept="image/*"
@@ -862,7 +939,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Or Local Absolute Path</label>
-          <input
+          <SafeInput
             type="text"
             placeholder="C:/data/photo.jpg"
             value={imagePath}
@@ -895,7 +972,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         )}
 
         <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: '12px', background: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-          <input
+          <SafeInput
             id="saveFileCheck"
             type="checkbox"
             checked={saveFile}
@@ -913,7 +990,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Output Path / File Name</label>
-          <input
+          <SafeInput
             type="text"
             placeholder="output.csv or C:/data/output.csv"
             value={outputPath}
@@ -923,10 +1000,10 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Output Format</label>
-          <select value={outputFormat} onChange={(e) => handleParamChange('outputFormat', e.target.value)}>
+          <SafeSelect value={outputFormat} onChange={(e) => handleParamChange('outputFormat', e.target.value)}>
             <option value="csv">CSV (Comma-Separated)</option>
             <option value="html">HTML (Interactive)</option>
-          </select>
+          </SafeSelect>
         </div>
       </>
     );
@@ -989,7 +1066,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '4px' }}>
               {upstreamSchema.map((col) => (
                 <label key={col.name} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  <input
+                  <SafeInput
                     type="checkbox"
                     checked={columns.includes(col.name)}
                     onChange={() => toggleColumn(col.name)}
@@ -1006,37 +1083,37 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            <input type="checkbox" checked={replaceString} onChange={(e) => handleParamChange('replace_nulls_string', e.target.checked)} />
+            <SafeInput type="checkbox" checked={replaceString} onChange={(e) => handleParamChange('replace_nulls_string', e.target.checked)} />
             Replace Nulls with Blank String
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            <input type="checkbox" checked={replaceNumeric} onChange={(e) => handleParamChange('replace_nulls_numeric', e.target.checked)} />
+            <SafeInput type="checkbox" checked={replaceNumeric} onChange={(e) => handleParamChange('replace_nulls_numeric', e.target.checked)} />
             Replace Nulls with 0 (Numeric cols)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            <input type="checkbox" checked={trimWhite} onChange={(e) => handleParamChange('trim_whitespace', e.target.checked)} />
+            <SafeInput type="checkbox" checked={trimWhite} onChange={(e) => handleParamChange('trim_whitespace', e.target.checked)} />
             Trim Leading/Trailing Whitespace
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            <input type="checkbox" checked={removePunct} onChange={(e) => handleParamChange('remove_punctuation', e.target.checked)} />
+            <SafeInput type="checkbox" checked={removePunct} onChange={(e) => handleParamChange('remove_punctuation', e.target.checked)} />
             Remove Punctuation
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            <input type="checkbox" checked={removeNumbers} onChange={(e) => handleParamChange('remove_numbers', e.target.checked)} />
+            <SafeInput type="checkbox" checked={removeNumbers} onChange={(e) => handleParamChange('remove_numbers', e.target.checked)} />
             Remove Numbers
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            <input type="checkbox" checked={removeLetters} onChange={(e) => handleParamChange('remove_letters', e.target.checked)} />
+            <SafeInput type="checkbox" checked={removeLetters} onChange={(e) => handleParamChange('remove_letters', e.target.checked)} />
             Remove Letters
           </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
             <span>Modify Case:</span>
-            <select value={stringCase} onChange={(e) => handleParamChange('string_case', e.target.value)} style={{ padding: '2px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+            <SafeSelect value={stringCase} onChange={(e) => handleParamChange('string_case', e.target.value)} style={{ padding: '2px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
               <option value="None">None</option>
               <option value="Titlecase">Title Case</option>
               <option value="Uppercase">UPPERCASE</option>
               <option value="Lowercase">lowercase</option>
-            </select>
+            </SafeSelect>
           </div>
         </div>
 
@@ -1176,7 +1253,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Output Column Name</label>
-          <input
+          <SafeInput
             type="text"
             placeholder="E.g., FullName or TotalCost"
             value={output_column}
@@ -1186,7 +1263,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group" style={{ position: 'relative' }}>
           <label className="form-label">Formula Expression</label>
-          <textarea
+          <SafeTextarea
             ref={textareaRef}
             placeholder="Type formula here..."
             value={expression}
@@ -1282,16 +1359,16 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         <div className="form-group">
           <label className="form-label">Column to Parse</label>
           {hasUpstreamColumns ? (
-            <select value={column} onChange={(e) => handleParamChange('column', e.target.value)}>
+            <SafeSelect value={column} onChange={(e) => handleParamChange('column', e.target.value)}>
               <option value="">-- Select Target Column --</option>
               {upstreamSchema.map((col) => (
                 <option key={col.name} value={col.name}>
                   {col.name} ({col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'})
                 </option>
               ))}
-            </select>
+            </SafeSelect>
           ) : (
-            <input
+            <SafeInput
               type="text"
               placeholder="Target column name"
               value={column}
@@ -1314,7 +1391,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Regular Expression Pattern</label>
-          <input
+          <SafeInput
             type="text"
             placeholder="e.g. (?P<area>\d{3})-(?P<num>\d{4})"
             value={pattern}
@@ -1332,14 +1409,14 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             {outputColumns.map((outCol, idx) => (
               <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--color-accent)', width: '20px' }}>${idx+1}</span>
-                <input
+                <SafeInput
                   type="text"
                   placeholder="Column Name"
                   value={outCol.name}
                   onChange={(e) => handleOutputColumnChange(idx, 'name', e.target.value)}
                   style={{ flex: 1, padding: '4px 6px', fontSize: '0.75rem' }}
                 />
-                <select
+                <SafeSelect
                   value={outCol.type || 'String'}
                   onChange={(e) => handleOutputColumnChange(idx, 'type', e.target.value)}
                   style={{ width: '85px', padding: '4px', fontSize: '0.75rem', background: 'var(--bg-secondary)' }}
@@ -1348,7 +1425,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                   <option value="Int64">Int64</option>
                   <option value="Float64">Float64</option>
                   <option value="Boolean">Boolean</option>
-                </select>
+                </SafeSelect>
                 <button
                   onClick={() => removeOutputColumn(idx)}
                   style={{ background: 'none', border: 'none', color: 'var(--color-error)', cursor: 'pointer', padding: '4px' }}
@@ -1597,7 +1674,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Chart Type</label>
-          <select value={chartType} onChange={(e) => handleParamChange('chartType', e.target.value)}>
+          <SafeSelect value={chartType} onChange={(e) => handleParamChange('chartType', e.target.value)}>
             <option value="scatter">Scatter Plot</option>
             <option value="line">Line Chart</option>
             <option value="bar">Bar Chart</option>
@@ -1610,7 +1687,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <option value="funnel">Funnel Chart</option>
             <option value="sankey">Sankey Diagram</option>
             <option value="scatter_3d">3D Scatter</option>
-          </select>
+          </SafeSelect>
         </div>
         <div style={{ marginBottom: 16, fontSize: '0.7rem', padding: '12px', background: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
           <div style={{ width: '90px', height: '54px', background: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, padding: '4px' }}>
@@ -1662,7 +1739,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         <div className="form-group">
           <label className="form-label">X-Axis Column</label>
           {hasUpstreamColumns ? (
-            <select value={xAxis} onChange={(e) => handleAxisChange('xAxis', e.target.value)}>
+            <SafeSelect value={xAxis} onChange={(e) => handleAxisChange('xAxis', e.target.value)}>
               <option value="">-- Select X-Axis --</option>
               {upstreamSchema.map((col) => {
                 const isNumeric = col.type.toLowerCase().includes('int') || col.type.toLowerCase().includes('float');
@@ -1672,9 +1749,9 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                   </option>
                 );
               })}
-            </select>
+            </SafeSelect>
           ) : (
-            <input type="text" placeholder="Type X-Axis column" value={xAxis} onChange={(e) => handleAxisChange('xAxis', e.target.value)} />
+            <SafeInput type="text" placeholder="Type X-Axis column" value={xAxis} onChange={(e) => handleAxisChange('xAxis', e.target.value)} />
           )}
           {xWarning && <div style={{ fontSize: '0.65rem', color: 'var(--color-warning)', marginTop: '4px' }}>{xWarning}</div>}
         </div>
@@ -1682,7 +1759,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         <div className="form-group">
           <label className="form-label">Y-Axis Column</label>
           {hasUpstreamColumns ? (
-            <select value={yAxis} onChange={(e) => handleAxisChange('yAxis', e.target.value)}>
+            <SafeSelect value={yAxis} onChange={(e) => handleAxisChange('yAxis', e.target.value)}>
               <option value="">-- Select Y-Axis --</option>
               {upstreamSchema.map((col) => {
                 const isNumeric = col.type.toLowerCase().includes('int') || col.type.toLowerCase().includes('float');
@@ -1693,16 +1770,16 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                   </option>
                 );
               })}
-            </select>
+            </SafeSelect>
           ) : (
-            <input type="text" placeholder="Type Y-Axis column" value={yAxis} onChange={(e) => handleAxisChange('yAxis', e.target.value)} />
+            <SafeInput type="text" placeholder="Type Y-Axis column" value={yAxis} onChange={(e) => handleAxisChange('yAxis', e.target.value)} />
           )}
           {yWarning && <div style={{ fontSize: '0.65rem', color: 'var(--color-warning)', marginTop: '4px' }}>{yWarning}</div>}
         </div>
 
         <div className="form-group">
           <label className="form-label">Chart Title (Optional)</label>
-          <input type="text" placeholder="Enter title" value={title} onChange={(e) => handleParamChange('title', e.target.value)} />
+          <SafeInput type="text" placeholder="Enter title" value={title} onChange={(e) => handleParamChange('title', e.target.value)} />
         </div>
       </>
     );
@@ -1764,12 +1841,12 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           <div className="schema-panel left-panel">
             <div className="panel-header">Left Input (L)</div>
             <div className="form-group">
-              <select value={leftOn} onChange={(e) => handleParamChange('left_on', e.target.value)} className="key-select">
+              <SafeSelect value={leftOn} onChange={(e) => handleParamChange('left_on', e.target.value)} className="key-select">
                 <option value="">-- Select Key --</option>
                 {leftSchema.map((col) => (
                   <option key={col.name} value={col.name}>{col.name}</option>
                 ))}
-              </select>
+              </SafeSelect>
             </div>
             <div className="schema-list">
               {leftSchema.length === 0 ? (
@@ -1797,12 +1874,12 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           <div className="schema-panel right-panel">
             <div className="panel-header">Right Input (R)</div>
             <div className="form-group">
-              <select value={rightOn} onChange={(e) => handleParamChange('right_on', e.target.value)} className="key-select">
+              <SafeSelect value={rightOn} onChange={(e) => handleParamChange('right_on', e.target.value)} className="key-select">
                 <option value="">-- Select Key --</option>
                 {rightSchema.map((col) => (
                   <option key={col.name} value={col.name}>{col.name}</option>
                 ))}
-              </select>
+              </SafeSelect>
             </div>
             <div className="schema-list">
               {rightSchema.length === 0 ? (
@@ -1938,22 +2015,22 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <Plus size={14} /> Add Summarize Rule
           </label>
           <div className="form-group">
-            <select value={sumColumn} onChange={(e) => handleColChange(e.target.value)} style={{ width: '100%', marginBottom: '8px' }}>
+            <SafeSelect value={sumColumn} onChange={(e) => handleColChange(e.target.value)} style={{ width: '100%', marginBottom: '8px' }}>
               <option value="">-- Select Column --</option>
               {schema.map(c => (
                 <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
               ))}
-            </select>
+            </SafeSelect>
           </div>
           <div className="form-group" style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-            <select value={sumAction} onChange={(e) => handleActionChange(e.target.value)} style={{ flex: 1 }} disabled={!sumColumn}>
+            <SafeSelect value={sumAction} onChange={(e) => handleActionChange(e.target.value)} style={{ flex: 1 }} disabled={!sumColumn}>
               {getAvailableActions(sumColumn).map(a => (
                 <option key={a} value={a}>{a}</option>
               ))}
-            </select>
+            </SafeSelect>
           </div>
           <div className="form-group" style={{ marginBottom: '12px' }}>
-            <input 
+            <SafeInput 
               type="text" 
               placeholder="Output Name" 
               value={sumOutput} 
@@ -1986,7 +2063,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         return (
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
-            <input
+            <SafeInput
               type="text"
               value={val}
               onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
@@ -1999,7 +2076,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         return (
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
-            <input
+            <SafeInput
               type="number"
               value={val}
               onChange={(e) => handleParamChange(fieldDef.field, Number(e.target.value))}
@@ -2013,7 +2090,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         return (
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
-            <input
+            <SafeInput
               type="text"
               list={listId}
               value={val}
@@ -2091,7 +2168,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         return (
           <div key={idx} className="form-group" style={{ position: 'relative' }}>
             <label className="form-label">{fieldDef.label}</label>
-            <textarea
+            <SafeTextarea
               ref={textareaRef}
               value={val}
               onChange={handleTextareaChange}
@@ -2165,7 +2242,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         return (
           <div key={idx} className="form-group">
             <label className="form-label checkbox-label">
-              <input
+              <SafeInput
                 type="checkbox"
                 checked={!!val}
                 onChange={(e) => handleParamChange(fieldDef.field, e.target.checked)}
@@ -2180,11 +2257,11 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         return (
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
-            <select value={val} onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}>
+            <SafeSelect value={val} onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}>
               {fieldDef.options?.map(opt => (
                 <option key={opt} value={opt}>{opt}</option>
               ))}
-            </select>
+            </SafeSelect>
           </div>
         );
       }
@@ -2194,16 +2271,16 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
             {hasUpstreamColumns ? (
-              <select value={val} onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}>
+              <SafeSelect value={val} onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}>
                 <option value="">-- Select Target Column --</option>
                 {upstreamSchema.map((col) => (
                   <option key={col.name} value={col.name}>
                     {col.name}
                   </option>
                 ))}
-              </select>
+              </SafeSelect>
             ) : (
-              <input
+              <SafeInput
                 type="text"
                 placeholder="Target column name"
                 value={val}
@@ -2232,7 +2309,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
               <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '4px' }}>
                 {upstreamSchema.map((col) => (
                   <label key={col.name} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    <input
+                    <SafeInput
                       type="checkbox"
                       checked={currentList.includes(col.name)}
                       onChange={() => toggleColumn(col.name)}

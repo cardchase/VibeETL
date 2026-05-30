@@ -139,8 +139,9 @@ To guide your development, here is a detailed breakdown of how each standard nod
 *   **Parameters**:
     *   `saveFile` (Boolean): Toggle to actually write to disk.
     *   `outputPath` (String): File path.
-    *   `outputFormat` (String): Format (`csv`, `excel`, `parquet`, `json`, `html`).
+    *   `outputFormat` (String): Format (`csv`, `excel`, `parquet`, `json`, `jsonl`, `avro`, `html`).
 *   **Schema Output**: Passes incoming schema through unchanged.
+*   **Note on PDF Export**: VibeETL avoids installing heavy local PDF binaries. If you need a beautiful PDF report, select **HTML (Interactive)** as your output format. Open the generated `.html` file in your web browser (Chrome/Edge) and simply use `Ctrl+P` -> **Save as PDF**!
 
 #### 16. Record ID Node (`recordId`)
 *   **Purpose**: Appends a sequential integer identifier.
@@ -209,6 +210,11 @@ To guide your development, here is a detailed breakdown of how each standard nod
     *   `code` (Textarea): Multiline Python code string. The incoming dataframe is available as `df` and Polars as `pl`.
 *   **Schema Output**: Outputs whatever Polars dataframe is assigned to the `df_out` variable in the script.
 *   **Note**: This is an extremely powerful "catch-all" node! Users can write custom Python code from scratch to generate brand new dataframes, hit external LLM APIs (like OpenAI or Anthropic), call any external REST APIs, or apply incredibly complex logic that standard nodes do not support.
+*   **Capabilities & Limitations**:
+    *   **Output MUST be Tabular**: While your code can download images, fetch APIs, or generate videos, the final object returned (`df_out`) MUST be a Polars DataFrame. You cannot output raw images to the canvas; instead, you must output a dataframe that contains the file paths or URLs to those images.
+    *   **Third-Party Libraries**: The code runs securely within the VibeETL backend environment. You have access to built-in packages (`json`, `os`, `requests`, `polars`). If you wish to use external libraries (like `cv2` or `transformers`), you must first manually `pip install` them in your backend virtual environment.
+    *   **Execution Blocking**: A heavily intensive script (like 4K video processing or a 10-minute ML model training) will block downstream nodes from running until it has fully finished. VibeETL will patiently wait for the script to complete before passing `df_out` to the next node.
+    *   **Visual Quirk (The Input Port)**: Because this node can act as both a Transformer (requiring input) and a Generator (requiring no input), its left-side input port will ALWAYS remain visible on the canvas. If you are using it purely as a standalone generator, you can simply ignore the input dot!
 
 #### 24. Sample Records Node (`sampling`)
 *   **Purpose**: Extract a subset of records (First N, Last N, or Random).
@@ -226,3 +232,140 @@ To guide your development, here is a detailed breakdown of how each standard nod
     *   `columns_to_chunk` (Array): Text column(s) to aggregate.
     *   `row_separator` (String): Joining character (e.g., `\n`, `, `).
 *   **Schema Output**: Outputs a highly aggregated dataframe with chunk IDs. Each selected column is independently aggregated and retains its original name.
+
+#### 26. GCS Input Node (`gcs_in`)
+*   **Purpose**: Read datasets directly from Google Cloud Storage buckets.
+*   **Category**: Cloud Connectors (`cloud`)
+*   **Parameters**:
+    *   `bucket` (String): GCS Bucket Name.
+    *   `path` (String): File Path in Bucket.
+    *   `file_format` (String): `csv`, `parquet`, or `json`.
+    *   `service_account_path` (String): Service Account Key File Path for authentication.
+*   **Schema Output**: Dynamically read from the file structure (e.g. `[{"name": "ColA", "type": "String"}, ...]`).
+
+#### 27. GCS Output Node (`gcs_out`)
+*   **Purpose**: Write datasets directly to Google Cloud Storage buckets.
+*   **Category**: Cloud Connectors (`cloud`)
+*   **Parameters**:
+    *   `bucket` (String): GCS Bucket Name.
+    *   `path` (String): File Path in Bucket.
+    *   `file_format` (String): `csv`, `parquet`, or `json`.
+    *   `service_account_path` (String): Service Account Key File Path for authentication.
+*   **Schema Output**: Passes incoming schema through unchanged.
+
+#### 28. Google Sheets Input Node (`google_sheets_in`)
+*   **Purpose**: Read datasets directly from Google Sheets.
+*   **Category**: Cloud Connectors (`cloud`)
+*   **Parameters**:
+    *   `spreadsheet_id_or_url` (String): The full URL or Spreadsheet ID.
+    *   `worksheet_name` (String): The tab to read (defaults to the first tab).
+    *   `auth_method` (String): `Service Account` or `OAuth 2.0 (Desktop Login)`.
+    *   `credentials_path` (String): Path to your `service_account.json` or `client_secret.json`.
+*   **Schema Output**: Dynamically read from the Google Sheet.
+
+#### 29. Google Sheets Output Node (`google_sheets_out`)
+*   **Purpose**: Write datasets directly to Google Sheets.
+*   **Category**: Cloud Connectors (`cloud`)
+*   **Parameters**:
+    *   `spreadsheet_id_or_url` (String): The full URL or Spreadsheet ID.
+    *   `worksheet_name` (String): The tab to write to.
+    *   `write_mode` (String): `Overwrite` or `Append`.
+    *   `auth_method` (String): `Service Account` or `OAuth 2.0 (Desktop Login)`.
+    *   `credentials_path` (String): Path to your `service_account.json` or `client_secret.json`.
+*   **Schema Output**: Passes incoming schema through unchanged.
+
+## Google Sheets Input Authentication Notes
+
+**Why is there a cumbersome one-time setup?**
+To securely connect to your private Google Sheets, VibeETL requires authentication. Since VibeETL is a local, privacy-first, open-source tool, it does not route your data through a central commercial cloud server (like Zapier or commercial Alteryx). Therefore, it needs its own set of Google Cloud API keys (a client_secret.json or service_account.json) to act on your behalf.
+
+**How to get a Client Secret / Service Account JSON?**
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a New Project.
+3. Enable the **Google Sheets API** and **Google Drive API**.
+4. Go to **Credentials** -> **Create Credentials**.
+   - Choose **OAuth client ID**. 
+   - **CRITICAL:** You MUST select **Desktop app** as the Application type! Do NOT select Web application.
+   - OR Choose **Service Account** to get an automated headless key.
+5. Download the .json key file.
+
+**Managing your Accounts:**
+Once uploaded in VibeETL, you can simply click 'Login' to securely fetch your spreadsheets. VibeETL securely remembers your tokens locally.
+If you uploaded the wrong JSON file, or want to switch accounts, just click the **Trash** icon next to the "Your Client Secret is saved" text to clear your credentials and start over.
+
+---
+
+## Appendix: Python Node Recipes
+
+Because the Python Code node allows you to run pure Python in the backend, it acts as the ultimate "Catch-all" node. If VibeETL doesn't have a native node for something, you can just script it! Here are some copy-paste recipes for common use cases.
+
+### Recipe 1: Reading Local Files (CSV & Excel)
+You can use the Python node as a standalone generator to ingest files from your hard drive that aren't natively supported (like Excel files). Note: Reading Excel requires the `fastexcel` or `openpyxl` library to be installed in your backend environment!
+
+**Reading an Excel File:**
+```python
+# Make sure to use raw strings (r"") for Windows paths to avoid \u unicode errors!
+excel_path = r"G:\My Drive\Projects\VibeETL\backend\uploads\my_data.xlsx"
+
+# Use Polars to read the Excel file directly!
+df_out = pl.read_excel(excel_path)
+```
+
+**Reading a CSV File:**
+```python
+csv_path = r"G:\My Drive\Projects\VibeETL\backend\uploads\data_historical.csv"
+df_out = pl.read_csv(csv_path)
+```
+
+### Recipe 2: The HTML Payload Trick (Multimodal Image Viewer)
+If you output a dataframe with a single column named exactly `__vibe_html_payload__`, the VibeETL Data Preview pane will magically render it as a website instead of a table! You can use this to render local images directly in the UI.
+
+```python
+import base64
+
+# 1. Grab a local image file path
+image_path = r"G:\My Drive\Projects\VibeETL\backend\uploads\Viha 1st bday.JPG"
+
+# 2. Convert it to Base64 so the browser can render it securely
+try:
+    with open(image_path, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+        
+    # 3. Create a beautiful HTML payload with your image!
+    html_string = f\"\"\"
+    <div style="text-align: center; padding: 20px; font-family: sans-serif;">
+        <h2>📸 Multimodal Media Viewer</h2>
+        <img src="data:image/jpeg;base64,{encoded_string}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);" />
+        <p>Successfully loaded from your local drive!</p>
+    </div>
+    \"\"\"
+except Exception as e:
+    html_string = f"<h2>❌ Failed to load image: {e}</h2>"
+
+# 4. Output the HTML string in the secret `__vibe_html_payload__` column
+df_out = pl.DataFrame({"__vibe_html_payload__": [html_string]})
+```
+
+### Recipe 3: Executive KPI Dashboard (HTML Payload)
+You can aggregate your incoming data and output a gorgeous CSS-styled dashboard instead of a boring grid.
+
+```python
+# Assuming you have an incoming `df` connected
+total_rows = df.height if df is not None else 15420
+revenue = "$1.4M"
+status = "Optimal 🟢"
+
+html_string = f\"\"\"
+<div style="font-family: sans-serif; display: flex; gap: 20px; justify-content: center; padding: 40px; background-color: #f8fafc;">
+    <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; width: 200px;">
+        <h3 style="color: #64748b; margin: 0; font-size: 14px; text-transform: uppercase;">Total Processed</h3>
+        <p style="color: #0f172a; font-size: 32px; font-weight: bold; margin: 10px 0 0 0;">{total_rows:,}</p>
+    </div>
+    <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; width: 200px;">
+        <h3 style="color: #64748b; margin: 0; font-size: 14px; text-transform: uppercase;">Total Revenue</h3>
+        <p style="color: #10b981; font-size: 32px; font-weight: bold; margin: 10px 0 0 0;">{revenue}</p>
+    </div>
+</div>
+\"\"\"
+df_out = pl.DataFrame({"__vibe_html_payload__": [html_string]})
+```

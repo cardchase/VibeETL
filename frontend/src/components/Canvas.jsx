@@ -9,7 +9,7 @@ import {
   SelectionMode,
   Panel
 } from '@xyflow/react';
-import { Hand, MousePointer, Search, X, Box } from 'lucide-react';
+import { Hand, MousePointer, Search, X, Box, Wand } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
 import ContainerNode from './ContainerNode';
@@ -100,9 +100,18 @@ const CanvasContent = ({
   onAddNode,
   onNodesDelete,
   onEdgesDelete,
+  onNodeDragStop,
 }) => {
   const reactFlowWrapper = useRef(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
+
+  useEffect(() => {
+    const handleFitView = () => {
+      fitView({ padding: 0.2, duration: 800 });
+    };
+    window.addEventListener('vibe-fit-view', handleFitView);
+    return () => window.removeEventListener('vibe-fit-view', handleFitView);
+  }, [fitView]);
 
   const onDragOver = useCallback((event) => {
     event.preventDefault();
@@ -150,12 +159,28 @@ const CanvasContent = ({
     const handleAddNodeEvent = (e) => {
       const type = e.detail.type;
       if (reactFlowWrapper.current) {
-        const bounds = reactFlowWrapper.current.getBoundingClientRect();
-        // Place in the top-right box area so it isn't covered by the properties panel
-        let position = screenToFlowPosition({
-          x: bounds.x + bounds.width * 0.7 - 50, // further right horizontally
-          y: bounds.y + 100, // 100px from top
-        });
+        let position;
+        
+        if (nodes.length > 0) {
+          // Find selected node, or fallback to the rightmost node
+          const selectedNodes = nodes.filter(n => n.selected);
+          const refNode = selectedNodes.length > 0 
+            ? selectedNodes[selectedNodes.length - 1] 
+            : nodes.reduce((prev, current) => (prev.position.x > current.position.x) ? prev : current);
+          
+          // Place to the right of the reference node
+          position = {
+            x: refNode.position.x + 250,
+            y: refNode.position.y
+          };
+        } else {
+          // Fallback for empty canvas: center it relative to the viewport
+          const bounds = reactFlowWrapper.current.getBoundingClientRect();
+          position = screenToFlowPosition({
+            x: bounds.x + bounds.width / 2 - 100,
+            y: bounds.y + bounds.height / 2 - 50,
+          });
+        }
         
         // Prevent stacking
         let conflict = true;
@@ -209,6 +234,16 @@ const CanvasContent = ({
         >
           <MousePointer size={14} />
           <span>Select Box</span>
+        </button>
+        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
+        <button
+          className="mode-btn"
+          onClick={() => window.dispatchEvent(new CustomEvent('vibe-snap-layout'))}
+          title="Snap Layout (Auto-arrange connected nodes)"
+          style={{ color: '#8b5cf6', fontWeight: 600, background: 'rgba(139, 92, 246, 0.1)' }}
+        >
+          <Wand size={14} />
+          <span>Snap</span>
         </button>
 
         {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
@@ -266,7 +301,14 @@ const CanvasContent = ({
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
-        onNodesDelete={onNodesDelete}
+        onNodeDragStop={onNodeDragStop}
+        onNodesDelete={(nodes) => {
+          const activeTag = document.activeElement?.tagName;
+          if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
+            return;
+          }
+          if (onNodesDelete) onNodesDelete(nodes);
+        }}
         onEdgesDelete={onEdgesDelete}
         snapToGrid={true}
         snapGrid={[16, 16]}

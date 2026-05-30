@@ -5,6 +5,10 @@ class SchemaCompatibilityError(ValueError):
     """Raised when a node receives an upstream schema that lacks required columns."""
     pass
 
+class SecurityError(Exception):
+    """Raised when an expression or script contains unauthorized or dangerous keywords/calls."""
+    pass
+
 class BaseNode:
     MANIFEST: Dict[str, Any] = {}
     

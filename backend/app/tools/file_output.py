@@ -3,6 +3,27 @@ import polars as pl
 from typing import Dict, Any, Callable
 from app.tools.base import BaseNode
 
+def verify_safe_file_path(file_path: str) -> None:
+    """
+    Validates the output path against directory traversal attacks and restricts
+    writing strictly to the permitted workspace environment.
+    """
+    import os
+    from app.tools.base import SecurityError
+    
+    abs_path = os.path.abspath(file_path)
+    workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    
+    # Prevent escaping the permitted workspace boundary
+    if not abs_path.startswith(workspace_root):
+        raise SecurityError(f"Path escape blocked: Target path '{abs_path}' is outside the permitted workspace '{workspace_root}'")
+        
+    # Prevent dangerous OS folders just in case the workspace is placed insecurely
+    dangerous_dirs = ["C:\\Windows", "C:\\Program Files", "C:\\ProgramData", "/etc", "/var", "/bin", "/usr", "/root"]
+    for d in dangerous_dirs:
+        if abs_path.lower().startswith(d.lower()):
+            raise SecurityError(f"System folder blocked: Attempted to write to restricted OS directory '{d}'")
+
 class FileOutputNode(BaseNode):
     """
     FileOutputNode writes downstream dataframes to the local filesystem.
@@ -22,7 +43,7 @@ class FileOutputNode(BaseNode):
         "ui_schema": [
             {"field": "saveFile", "type": "boolean", "label": "Write to Disk", "default": False},
             {"field": "outputPath", "type": "string", "label": "Output Path / File Name", "default": "output.csv"},
-            {"field": "outputFormat", "type": "select", "label": "Output Format", "options": ["csv", "excel", "parquet", "json", "html"], "default": "csv"},
+            {"field": "outputFormat", "type": "select", "label": "Output Format", "options": ["csv", "excel", "parquet", "json", "jsonl", "avro", "html"], "default": "csv"},
             {"field": "sheetName", "type": "string", "label": "Sheet Name (Excel Only)", "default": "Sheet1"}
         ]
     }
@@ -41,6 +62,9 @@ class FileOutputNode(BaseNode):
             os.makedirs(outputs_dir, exist_ok=True)
             file_path = os.path.join(outputs_dir, file_path)
 
+        # Environment Path Jail Guard
+        verify_safe_file_path(file_path)
+
         self.log(f"Starting file write for path: {file_path}")
 
         # Only write to disk if the user explicitly enables it, to prevent Auto-Run thrashing
@@ -52,11 +76,18 @@ class FileOutputNode(BaseNode):
             if output_format not in registry:
                 raise ValueError(f"Unsupported output format: {output_format}. Supported formats: {list(registry.keys())}")
 
-            # Execute writer
-            writer_func = registry[output_format]
-            writer_func(df, file_path)
-            
-            self.log(f"Successfully wrote {df.height} rows and {df.width} columns to {file_path}")
+            # Execute writer with a comprehensive error capture envelope
+            try:
+                writer_func = registry[output_format]
+                writer_func(df, file_path)
+                self.log(f"Successfully wrote {df.height} rows and {df.width} columns to {file_path}")
+            except Exception as e:
+                from app.tools.base import SecurityError
+                if isinstance(e, SecurityError):
+                    self.log(f"Security Intervention: {str(e)}")
+                else:
+                    self.log(f"File System Write Error: Failed to write {output_format.upper()} to {file_path}. Details: {str(e)}")
+                raise ValueError(f"File output failed: {str(e)}")
         else:
             self.log(f"Disk writing is currently DISABLED. Enable 'Write to Disk' in the configuration to save to {file_path}.")
         
@@ -70,6 +101,8 @@ class FileOutputNode(BaseNode):
             "excel": self._write_excel,
             "parquet": self._write_parquet,
             "json": self._write_json,
+            "jsonl": self._write_jsonl,
+            "avro": self._write_avro,
             "html": self._write_html_payload
         }
 
@@ -112,6 +145,18 @@ class FileOutputNode(BaseNode):
             raise ValueError("Attempted to write an HTML payload as a JSON file. Please change the Output Format to HTML.")
         self.log(f"Writing JSON file to {file_path}")
         df.write_json(file_path)
+
+    def _write_jsonl(self, df: pl.DataFrame, file_path: str) -> None:
+        if "__vibe_html_payload__" in df.columns:
+            raise ValueError("Attempted to write an HTML payload as a JSONL file. Please change the Output Format to HTML.")
+        self.log(f"Writing JSONL (Newline Delimited JSON) file to {file_path}")
+        df.write_ndjson(file_path)
+
+    def _write_avro(self, df: pl.DataFrame, file_path: str) -> None:
+        if "__vibe_html_payload__" in df.columns:
+            raise ValueError("Attempted to write an HTML payload as an Avro file. Please change the Output Format to HTML.")
+        self.log(f"Writing Avro file to {file_path}")
+        df.write_avro(file_path)
 
     def _write_html_payload(self, df: pl.DataFrame, file_path: str) -> None:
         if "__vibe_html_payload__" not in df.columns:

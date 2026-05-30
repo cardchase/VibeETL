@@ -32,6 +32,9 @@
   --color-transform: #e65100;   /* Alteryx Orange */
   --color-transform-glow: rgba(230, 81, 0, 0.08);
 
+  --color-cloud: #0284c7;       /* Cloud Blue */
+  --color-cloud-glow: rgba(2, 132, 199, 0.08);
+
   --color-accent: #2563eb;      /* Pure Blue Accent */
   --color-accent-glow: rgba(37, 99, 235, 0.1);
   --color-success: #16a34a;

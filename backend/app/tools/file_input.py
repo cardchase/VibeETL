@@ -25,7 +25,8 @@ class FileInputNode(BaseNode):
         "ui_schema": [
             {"field": "filePath", "type": "string", "label": "File Path / Name", "default": ""},
             {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "pdf", "image", "multimodal"], "default": "auto"},
-            {"field": "process_local", "type": "boolean", "label": "Process Media Locally (OCR/Parse vs AI Pass-through)", "default": True}
+            {"field": "process_local", "type": "boolean", "label": "Process Media Locally (OCR/Parse vs AI Pass-through)", "default": True},
+            {"field": "unleash_hardware", "type": "boolean", "label": "🚀 Unleash Maximum Local Memory (Bypass Frontend Safeguards)", "default": False}
         ]
     }
 
@@ -106,7 +107,20 @@ class FileInputNode(BaseNode):
         # Store metadata in self so it can be picked up by the execution engine
         self._semantic_metadata = semantic_meta
         
+        # Store the complete, accurate dataset so the background pipeline isn't truncated
+        self._full_processed_dataframe = final_df
+
+        # Intelligent Frontend Guard Layer: Apply truncation strictly to the returned UI payload
+        unleash_hardware = self.parameters.get("unleash_hardware", False)
+        if final_df.height > 1000 and not unleash_hardware:
+            self.log("⚠️ FRONTEND SAFEGUARD ACTIVE: Restricting preview streaming payload to top 1000 rows for UI rendering stability. Full dataset remains fully intact in-memory via Polars.")
+            return final_df.head(1000)
+        
         return final_df
+
+    def get_full_dataframe(self) -> pl.DataFrame:
+        """Returns the fully processed background dataframe, untruncated."""
+        return getattr(self, "_full_processed_dataframe", pl.DataFrame())
 
     def _get_parser_registry(self) -> Dict[str, Callable[[str], pl.DataFrame]]:
         """Registry mapping file type identifiers to their parsing strategies."""

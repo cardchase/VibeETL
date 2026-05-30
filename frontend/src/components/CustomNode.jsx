@@ -90,7 +90,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             onClick={(e) => handleAnchorClick(e, 'target', 'right')}
           />
         </>
-      ) : (type !== 'fileInput' && type !== 'databaseInput' && type !== 'imageCaption') ? (
+      ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'image_caption', 'imageCaption', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn'].includes(type)) ? (
         <Handle
           type="target"
           position={Position.Left}
@@ -167,7 +167,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             onClick={(e) => handleAnchorClick(e, 'source', 'false')}
           />
         </>
-      ) : (type !== 'browse' && type !== 'fileOutput' && type !== 'databaseOutput') ? (
+      ) : (!['browse', 'file_output', 'fileOutput', 'database_output', 'databaseOutput', 'gcs_out', 'gcsOut', 'google_sheets_out', 'googleSheetsOut'].includes(type)) ? (
         <Handle
           type="source"
           position={Position.Right}

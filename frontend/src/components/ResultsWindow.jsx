@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Terminal, Database, FileText, Copy, Check } from 'lucide-react';
 
 const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style = {} }) => {
@@ -9,6 +9,8 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
   const [dataCopied, setDataCopied] = useState(false);
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [wrapText, setWrapText] = useState(false);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [scrollTop, setScrollTop] = useState(0);
 
   const nodeId = selectedNode?.id;
   const isInspectingUpstream = originalNode && selectedNode && originalNode.id !== selectedNode.id;
@@ -18,6 +20,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
     setPrevNodeId(nodeId);
     setSelectedPort(null);
     setSelectedRows(new Set());
+    setSortConfig({ key: null, direction: 'asc' });
   }
 
   const nodeResult = nodeId ? results?.[nodeId] : null;
@@ -30,8 +33,24 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
 
   // Extract preview data and columns
   const schema = activePortData ? (activePortData.schema || []) : (nodeResult?.schema || []);
-  const previewData = activePortData ? (activePortData.preview || []) : (nodeResult?.preview || []);
+  const rawPreviewData = activePortData ? (activePortData.preview || []) : (nodeResult?.preview || []);
   const rowCount = activePortData ? (activePortData.row_count || 0) : (nodeResult?.row_count || 0);
+  
+  // Sort data
+  const previewData = useMemo(() => {
+    if (!sortConfig.key) return rawPreviewData;
+    const sorted = [...rawPreviewData];
+    sorted.sort((a, b) => {
+      let aVal = a[sortConfig.key];
+      let bVal = b[sortConfig.key];
+      if (aVal === null || aVal === undefined) aVal = '';
+      if (bVal === null || bVal === undefined) bVal = '';
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [rawPreviewData, sortConfig]);
   const colCount = activePortData ? (activePortData.column_count || 0) : (nodeResult?.column_count || 0);
   const duration = nodeResult?.duration_ms || 0;
   const error = nodeResult?.error;
@@ -68,6 +87,14 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
       newSelection.add(rowIdx);
     }
     setSelectedRows(newSelection);
+  };
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
   };
 
   const handleCopyData = () => {
@@ -192,6 +219,12 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                   <p style={{ fontWeight: 600, color: '#f59e0b' }}>Awaiting Connection</p>
                   <p style={{ fontSize: '0.85rem', marginTop: 5, maxWidth: '500px' }}>Connect an incoming data stream to this tool to begin processing data.</p>
                 </div>
+              ) : error?.toLowerCase().includes("pending configuration") ? (
+                <div className="no-node-selected" style={{ color: 'var(--text-secondary)', padding: 20 }}>
+                  <span style={{ fontSize: '2.5rem', marginBottom: 10 }}>⚙️</span>
+                  <p style={{ fontWeight: 600, color: '#f59e0b' }}>Pending Configuration</p>
+                  <p style={{ fontSize: '0.85rem', marginTop: 5, maxWidth: '500px' }}>{error.replace("Pending Configuration: ", "")}</p>
+                </div>
               ) : (
                 <div className="no-node-selected" style={{ color: 'var(--color-error)', padding: 20 }}>
                   <span style={{ fontSize: '2.5rem', marginBottom: 10 }}>&otimes;</span>
@@ -271,51 +304,97 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                       </button>
                     </div>
                   </div>
-                  <div className="spreadsheet-container" style={{ flex: 1, overflow: 'auto' }}>
+                  <div 
+                    className="spreadsheet-container" 
+                    style={{ flex: 1, overflow: 'auto' }}
+                    onScroll={(e) => setScrollTop(e.target.scrollTop)}
+                  >
                     <table className="spreadsheet" style={{ tableLayout: 'auto' }}>
                       <thead>
                         <tr>
                           <th style={{ width: '40px', minWidth: '40px', textAlign: 'center', background: 'var(--bg-secondary)' }}>#</th>
                           {schema.map((col) => (
-                            <th key={col.name} style={{ resize: 'horizontal', overflow: 'hidden', minWidth: '80px', position: 'relative' }}>
-                              {col.name}
-                              {col.semantic_type === 'currency_usd' && (
-                                <span title="Currency" style={{ marginLeft: '6px', color: 'var(--color-success)', fontWeight: 800 }}>$</span>
-                              )}
-                              {col.semantic_type === 'percentage' && (
-                                <span title="Percentage" style={{ marginLeft: '6px', color: 'var(--color-accent)', fontWeight: 800 }}>%</span>
-                              )}
-                              <span className="col-header-type" style={{ marginLeft: '6px' }}>
-                                {col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'}
-                              </span>
+                            <th 
+                              key={col.name} 
+                              onClick={() => handleSort(col.name)}
+                              style={{ resize: 'horizontal', overflow: 'hidden', minWidth: '80px', position: 'relative', cursor: 'pointer', userSelect: 'none' }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div>
+                                  {col.name}
+                                  {col.semantic_type === 'currency_usd' && (
+                                    <span title="Currency" style={{ marginLeft: '6px', color: 'var(--color-success)', fontWeight: 800 }}>$</span>
+                                  )}
+                                  {col.semantic_type === 'percentage' && (
+                                    <span title="Percentage" style={{ marginLeft: '6px', color: 'var(--color-accent)', fontWeight: 800 }}>%</span>
+                                  )}
+                                  <span className="col-header-type" style={{ marginLeft: '6px' }}>
+                                    {col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'}
+                                  </span>
+                                </div>
+                                {sortConfig.key === col.name && (
+                                  <span style={{ fontSize: '0.7rem', color: 'var(--color-accent)' }}>
+                                    {sortConfig.direction === 'asc' ? '▲' : '▼'}
+                                  </span>
+                                )}
+                              </div>
                             </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {previewData.map((row, rowIdx) => (
-                          <tr 
-                            key={rowIdx} 
-                            onClick={() => toggleRowSelection(rowIdx)}
-                            style={{ 
-                              cursor: 'pointer',
-                              backgroundColor: selectedRows.has(rowIdx) ? 'rgba(59, 130, 246, 0.1)' : undefined
-                            }}
-                          >
-                            <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 600, background: 'var(--bg-secondary)' }}>
-                              {rowIdx + 1}
-                            </td>
-                            {schema.map((col) => (
-                              <td 
-                                key={col.name} 
-                                title={String(row[col.name] ?? '')}
-                                style={wrapText ? { whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: '300px', lineHeight: '1.4', verticalAlign: 'top' } : {}}
-                              >
-                                {row[col.name] !== null && row[col.name] !== undefined ? String(row[col.name]) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>null</span>}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
+                        {(() => {
+                          const ROW_HEIGHT = 32;
+                          const buffer = 10;
+                          const viewportRows = Math.ceil(800 / ROW_HEIGHT);
+                          const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - buffer);
+                          const endIndex = Math.min(previewData.length, startIndex + viewportRows + (buffer * 2));
+                          const visibleRows = previewData.slice(startIndex, endIndex);
+                          const topSpacerHeight = startIndex * ROW_HEIGHT;
+                          const bottomSpacerHeight = Math.max(0, (previewData.length - endIndex) * ROW_HEIGHT);
+
+                          return (
+                            <>
+                              {topSpacerHeight > 0 && (
+                                <tr style={{ height: topSpacerHeight }}>
+                                  <td colSpan={schema.length + 1} style={{ padding: 0, border: 'none' }}></td>
+                                </tr>
+                              )}
+                              {visibleRows.map((row, relativeIdx) => {
+                                const rowIdx = startIndex + relativeIdx;
+                                return (
+                                  <tr 
+                                    key={rowIdx} 
+                                    onClick={() => toggleRowSelection(rowIdx)}
+                                    style={{ 
+                                      cursor: 'pointer',
+                                      backgroundColor: selectedRows.has(rowIdx) ? 'rgba(59, 130, 246, 0.1)' : undefined,
+                                      height: ROW_HEIGHT
+                                    }}
+                                  >
+                                    <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 600, background: 'var(--bg-secondary)', height: ROW_HEIGHT, padding: '0 8px' }}>
+                                      {rowIdx + 1}
+                                    </td>
+                                    {schema.map((col) => (
+                                      <td 
+                                        key={col.name} 
+                                        title={String(row[col.name] ?? '')}
+                                        style={wrapText ? { whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: '300px', lineHeight: '1.4', verticalAlign: 'top', padding: '0 8px' } : { height: ROW_HEIGHT, padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '300px' }}
+                                      >
+                                        {row[col.name] !== null && row[col.name] !== undefined ? String(row[col.name]) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>null</span>}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                );
+                              })}
+                              {bottomSpacerHeight > 0 && (
+                                <tr style={{ height: bottomSpacerHeight }}>
+                                  <td colSpan={schema.length + 1} style={{ padding: 0, border: 'none' }}></td>
+                                </tr>
+                              )}
+                            </>
+                          );
+                        })()}
                       </tbody>
                     </table>
                   </div>

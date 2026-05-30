@@ -24,7 +24,7 @@ class PipelineCache:
                     del self._node_statuses[k]
             self._global_logs.clear()
 
-    def set_node_result(self, node_id: str, df: Any, duration_ms: float, logs: List[str], semantic_metadata: Dict[str, str] = None):
+    def set_node_result(self, node_id: str, df: Any, duration_ms: float, logs: List[str], semantic_metadata: Dict[str, str] = None, ui_payload: Any = None):
         with self._lock:
             import polars as pl
             if isinstance(df, dict):
@@ -68,15 +68,18 @@ class PipelineCache:
                 self._node_statuses[node_id] = "success"
             else:
                 # Single-port results
-                preview_df = df.head(1000) if df is not None else pl.DataFrame()
+                # Use ui_payload for the frontend preview if provided, otherwise use the full df
+                serialization_df = ui_payload if ui_payload is not None else df
+                
+                preview_df = serialization_df.head(1000) if serialization_df is not None else pl.DataFrame()
                 schema = []
-                if df is not None:
-                    for name, dtype in df.schema.items():
+                if serialization_df is not None:
+                    for name, dtype in serialization_df.schema.items():
                         col_meta = {"name": name, "type": str(dtype)}
                         if semantic_metadata and name in semantic_metadata:
                             col_meta["semantic_type"] = semantic_metadata[name]
                         schema.append(col_meta)
-                preview_rows = preview_df.to_dicts() if df is not None else []
+                preview_rows = preview_df.to_dicts() if serialization_df is not None else []
 
                 self._cache[node_id] = {
                     "status": "success",
@@ -108,20 +111,27 @@ class PipelineCache:
             }
             self._node_statuses[node_id] = "error"
 
-    def set_node_skipped(self, node_id: str):
+    def set_node_skipped(self, node_id: str, retain_cache: bool = False):
         with self._lock:
-            self._cache[node_id] = {
-                "status": "skipped",
-                "schema": [],
-                "preview": [],
-                "row_count": 0,
-                "column_count": 0,
-                "duration_ms": 0,
-                "logs": ["Bypassed: Data is cached downstream."],
-                "error": None,
-                "semantic_metadata": {},
-                "_df": None
-            }
+            if retain_cache and node_id in self._cache and self._cache[node_id].get("status") in ["success", "skipped"]:
+                # Preserve the cached data but ensure status is skipped
+                self._cache[node_id]["status"] = "skipped"
+                if "logs" not in self._cache[node_id]:
+                    self._cache[node_id]["logs"] = []
+                self._cache[node_id]["logs"].append("Bypassed: Using previously cached data from disabled container.")
+            else:
+                self._cache[node_id] = {
+                    "status": "skipped",
+                    "schema": [],
+                    "preview": [],
+                    "row_count": 0,
+                    "column_count": 0,
+                    "duration_ms": 0,
+                    "logs": ["Bypassed: Data is cached downstream."],
+                    "error": None,
+                    "semantic_metadata": {},
+                    "_df": None
+                }
             self._node_statuses[node_id] = "skipped"
 
     def get_node_df(self, node_id: str, port_id: str = "output") -> pl.DataFrame:

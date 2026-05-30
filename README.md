@@ -94,13 +94,14 @@ VibeETL comes pre-loaded with an extensive suite of data engineering nodes, eleg
 | Category | Color | Included Tools |
 | :--- | :--- | :--- |
 | **In / Out** | Green 🟢 | `File Input`, `Database Input`, `Browse`, `File Output`, `Database Output`, `Image Ingest` |
+| **Cloud** | Cyan 🩵 | `Google Sheets In`, `Google Sheets Out`, `GCS Input`, `GCS Output` |
 | **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Cleanse`, `Formula Compute`, `Unique`, `Regex`, `Record ID`, `Sample Records` |
 | **Transform** | Orange 🟠 | `Select`, `Pivot`, `Unpivot`, `Summarize`, `Date Time` |
 | **Join** | Purple 🟣 | `Union`, `Join` |
 | **Analysis** | Pink 🦩 | `Gemini AI (Multimodal LLM)`, `Visualization`, `Python Code`, `LLM Chunker` |
 
 > 🚀 **More Tools on the Horizon!**
-> We are continuously expanding the VibeETL ecosystem! As we develop more incredible tools, they will be dynamically baked right into our platform. Expect advanced integrations like Machine Learning predictors, Cloud Storage connectors (S3/GCS), and geospatial transformers very soon.
+> We are continuously expanding the VibeETL ecosystem! We have recently launched the **Cloud Connectors** suite, meaning `Google Sheets` and `Google Cloud Storage (GCS)` nodes are now partially ready for community use and testing! Expect more advanced integrations like Machine Learning predictors and geospatial transformers very soon.
 > 
 > 🌍 **We invite you to build with us!** 
 > VibeETL is built by and for the community. If you have an idea for a custom data tool, use our Zero-Code SDK to build it and submit a Pull Request! Help us complete the platform and make it the ultimate open-source intelligence powerhouse. Let's build the future together! 🤝

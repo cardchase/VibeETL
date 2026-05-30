@@ -1,3 +1,10 @@
-backend/app/__pycache__
-backend/app/tools/__pycache__
+backend/app/__pycache__/
+backend/app/tools/__pycache__/
+backend/app/utils/__pycache__/
+backend/.autosaves/
+backend/.vibe/
+backend/uploads/
+backend/venv/
+frontend/node_modules/
+scratch/
 *.log

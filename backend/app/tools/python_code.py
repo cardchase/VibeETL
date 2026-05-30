@@ -14,27 +14,24 @@ class PythonCodeNode(BaseNode):
                 "field": "code",
                 "type": "code",
                 "label": "Python Script",
-                "default": """# The incoming Polars DataFrame is available as `df`
-# The polars library is imported as `pl`
+                "default": """# The polars library is always imported for you as `pl`
+# The incoming Polars DataFrame (if connected) is available as `df`
 
-# --- Example 1: Basic Transformation ---
+# --- MODE 1: Standalone Generator (No incoming connection needed!) ---
+# You can use the Python node as a starting point to load files or create data.
+# Example:
+# csv_path = r"C:/Users/name/Downloads/data.csv"
+# df_out = pl.read_csv(csv_path)
+
+# --- MODE 2: Connected Transformer (Requires an incoming connection) ---
+# If you connect a wire into this node's left port, you can transform `df`.
+# Example:
 # df_out = df.with_columns(
-#     pl.lit("Hello World").alias("Custom_Output")
+#     pl.lit("Hello World").alias("New_Column")
 # )
 
-# --- Example 2: API Request (e.g. LLM or Web API) ---
-# import requests
-# def fetch_data(val):
-#     # return requests.get(f"https://api.example.com/data?q={val}").json().get("result")
-#     return f"Processed: {val}"
-# 
-# # Apply the function row-by-row (useful for API calls)
-# # df_out = df.with_columns(
-# #     pl.col("input_column").map_elements(fetch_data, return_dtype=pl.Utf8).alias("api_result")
-# # )
-
-# Make sure to assign your final dataframe to `df_out`
-df_out = df
+# IMPORTANT: You must always assign your final dataframe to `df_out`!
+df_out = df if df is not None else pl.DataFrame()
 """
             }
         ]
@@ -42,13 +39,12 @@ df_out = df
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         df = inputs.get("input")
-        if df is None:
-            raise ValueError("Awaiting connection: PythonCode node requires an incoming data stream.")
+        # df can be None if the node is used as a standalone generator!
 
         code_string = self.parameters.get("code", "")
         if not code_string.strip():
             self.log("No Python code provided. Passing data through unchanged.")
-            return df
+            return df if df is not None else pl.DataFrame()
 
         self.log("Executing custom Python script...")
         
