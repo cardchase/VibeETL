@@ -369,3 +369,31 @@ html_string = f\"\"\"
 \"\"\"
 df_out = pl.DataFrame({"__vibe_html_payload__": [html_string]})
 ```
+
+### Recipe 4: GPU Acceleration (Nvidia RAPIDS)
+If you have an Nvidia GPU on your local system, you can execute high-throughput machine learning or matrix weight scaling at lightning speed! VibeETL's Python node architecture places no artificial limits on hardware access.
+
+By utilizing Nvidia's `cudf` and `cuml` libraries inside the script box, you can instantly offload the Polars Arrow data into GPU VRAM with zero-copy overhead.
+
+```python
+import polars as pl
+import cudf  # Nvidia RAPIDS GPU-accelerated DataFrame library
+import cuml  # Nvidia RAPIDS GPU-accelerated Machine Learning algorithms
+
+# 1. Instantly offload the Polars data table onto the GPU memory space
+gpu_df = cudf.from_pandas(df.to_pandas())
+
+# 2. Train a GPU-accelerated Random Forest Classifier close to the metal
+X = gpu_df.drop("Target_Column", axis=1)
+y = gpu_df["Target_Column"]
+
+gpu_model = cuml.ensemble.RandomForestClassifier(n_estimators=100)
+gpu_model.fit(X, y)
+
+# 3. Bring the results back from the GPU VRAM to the host system
+predictions = gpu_model.predict(X)
+gpu_df["Predictions"] = predictions
+
+# Assign the final output table back to df_out for VibeETL collection
+df_out = pl.from_pandas(gpu_df.to_pandas())
+```

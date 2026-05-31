@@ -147,10 +147,20 @@ const CanvasContent = ({
     onNodeSelect(null);
   }, [onEdgeSelect, onNodeSelect]);
 
-  const onPaneClick = useCallback(() => {
+  const [lastClickedPosition, setLastClickedPosition] = useState(null);
+
+  const onPaneClick = useCallback((event) => {
     onNodeSelect(null);
     if (onEdgeSelect) onEdgeSelect(null);
-  }, [onNodeSelect, onEdgeSelect]);
+    
+    if (reactFlowWrapper.current && event) {
+      const position = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+      setLastClickedPosition(position);
+    }
+  }, [onNodeSelect, onEdgeSelect, screenToFlowPosition]);
 
   const [isPanMode, setIsPanMode] = useState(true);
 
@@ -161,20 +171,19 @@ const CanvasContent = ({
       if (reactFlowWrapper.current) {
         let position;
         
-        if (nodes.length > 0) {
-          // Find selected node, or fallback to the rightmost node
-          const selectedNodes = nodes.filter(n => n.selected);
-          const refNode = selectedNodes.length > 0 
-            ? selectedNodes[selectedNodes.length - 1] 
-            : nodes.reduce((prev, current) => (prev.position.x > current.position.x) ? prev : current);
-          
-          // Place to the right of the reference node
+        const selectedNodes = nodes.filter(n => n.selected);
+        if (selectedNodes.length > 0) {
+          // If a node is explicitly selected, place it to the right of that node
+          const refNode = selectedNodes[selectedNodes.length - 1];
           position = {
             x: refNode.position.x + 250,
             y: refNode.position.y
           };
+        } else if (lastClickedPosition) {
+          // If no node is selected, use the exact coordinates of their last canvas click
+          position = { ...lastClickedPosition };
         } else {
-          // Fallback for empty canvas: center it relative to the viewport
+          // Fallback for empty canvas or no prior clicks: center it relative to the viewport
           const bounds = reactFlowWrapper.current.getBoundingClientRect();
           position = screenToFlowPosition({
             x: bounds.x + bounds.width / 2 - 100,
@@ -234,16 +243,6 @@ const CanvasContent = ({
         >
           <MousePointer size={14} />
           <span>Select Box</span>
-        </button>
-        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
-        <button
-          className="mode-btn"
-          onClick={() => window.dispatchEvent(new CustomEvent('vibe-snap-layout'))}
-          title="Snap Layout (Auto-arrange connected nodes)"
-          style={{ color: '#8b5cf6', fontWeight: 600, background: 'rgba(139, 92, 246, 0.1)' }}
-        >
-          <Wand size={14} />
-          <span>Snap</span>
         </button>
 
         {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
@@ -314,7 +313,7 @@ const CanvasContent = ({
         snapGrid={[16, 16]}
         panOnDrag={isPanMode}
         selectionOnDrag={!isPanMode}
-        selectionMode={SelectionMode.Partial}
+        selectionMode={SelectionMode.Full}
         connectionRadius={50}
         fitView
         fitViewOptions={{ maxZoom: 1.1, padding: 0.2 }}

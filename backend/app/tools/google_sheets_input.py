@@ -40,6 +40,11 @@ class GoogleSheetsInputNode(BaseNode):
                 "type": "text",
                 "default": "",
                 "placeholder": "Select from dropdown"
+            },
+            {
+                "field": "auth_help",
+                "type": "help_text",
+                "content": "<strong>Private Sheets require Authentication!</strong><br/>If you are accessing a private spreadsheet, you must upload your Google Credentials via the <strong>Cloud Connectors</strong> button in the top toolbar first."
             }
         ]
     }
@@ -103,7 +108,8 @@ class GoogleSheetsInputNode(BaseNode):
                 try:
                     import pandas as pd
                     df = pd.read_csv(gviz_url)
-                    self.log("Successfully fetched public sheet anonymously via Google Viz API!")
+                    self.log("SUCCESS: Fetched public sheet anonymously via Google Viz API.")
+                    self.log("⚠️ WARNING: The Google Viz API tries to infer column data types. Highly irregular sheets with mixed types (like merged headers above data rows) will have rows DROPPED or TRUNCATED. To bypass this and fetch 100% of raw data, please Authenticate Google Sheets in the top toolbar.")
                     return pl.from_pandas(df)
                 except Exception as gviz_e:
                     self.log(f"Anonymous fetch completely failed (is the sheet private?). Auth Error: {str(e)}")

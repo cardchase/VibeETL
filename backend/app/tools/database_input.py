@@ -41,11 +41,58 @@ class DatabaseInputExecutor(BaseNode):
         "category": "inout",
         "ui_schema": [
             {
+                "field": "connection_mode",
+                "label": "Connection Mode",
+                "type": "select",
+                "options": ["Raw Connection String", "Credentials Builder"],
+                "default": "Raw Connection String"
+            },
+            {
                 "field": "db_uri",
-                "label": "Connection String (URI)",
+                "label": "Raw Connection String",
                 "type": "text",
-                "default": "sqlite:///G:/My Drive/Projects/VibeETL/test.db",
-                "placeholder": "e.g., postgresql://user:pass@host:5432/dbname"
+                "default": "",
+                "placeholder": "sqlite:///./test.db OR postgresql://user:pass@host/db"
+            },
+            {
+                "field": "db_dialect",
+                "label": "Database Type (Builder)",
+                "type": "select",
+                "options": ["PostgreSQL", "MySQL", "Microsoft SQL Server", "SQLite (Local File)", "Oracle"],
+                "default": "PostgreSQL"
+            },
+            {
+                "field": "db_host",
+                "label": "Host or File Path (Builder)",
+                "type": "text",
+                "default": "",
+                "placeholder": "e.g., localhost or C:\\path\\to\\db.sqlite"
+            },
+            {
+                "field": "db_port",
+                "label": "Port (Builder)",
+                "type": "text",
+                "default": "",
+                "placeholder": "e.g., 5432"
+            },
+            {
+                "field": "db_name",
+                "label": "Database Name (Builder)",
+                "type": "text",
+                "default": "",
+                "placeholder": "e.g., my_database"
+            },
+            {
+                "field": "db_user",
+                "label": "Username (Builder)",
+                "type": "text",
+                "default": ""
+            },
+            {
+                "field": "db_password",
+                "label": "Password (Builder)",
+                "type": "password",
+                "default": ""
             },
             {
                 "field": "query",
@@ -58,7 +105,41 @@ class DatabaseInputExecutor(BaseNode):
     }
 
     def execute(self, inputs: dict) -> pl.DataFrame:
-        db_uri = self.parameters.get("db_uri", "").strip()
+        mode = self.parameters.get("connection_mode", "Raw Connection String")
+        
+        if mode == "Credentials Builder":
+            dialect = self.parameters.get("db_dialect", "PostgreSQL")
+            host = self.parameters.get("db_host", "").strip()
+            port = self.parameters.get("db_port", "").strip()
+            db_name = self.parameters.get("db_name", "").strip()
+            user = self.parameters.get("db_user", "").strip()
+            pwd = self.parameters.get("db_password", "").strip()
+
+            if not host:
+                raise ValueError("Host or File Path is required in Credentials Builder mode.")
+
+            prefix_map = {
+                "PostgreSQL": "postgresql",
+                "MySQL": "mysql",
+                "Microsoft SQL Server": "mssql+pyodbc",
+                "SQLite (Local File)": "sqlite",
+                "Oracle": "oracle"
+            }
+            prefix = prefix_map.get(dialect, "postgresql")
+
+            if prefix == "sqlite":
+                safe_path = host.replace("\\", "/")
+                db_uri = f"sqlite:///{safe_path}"
+            else:
+                auth = ""
+                if user or pwd:
+                    # properly format auth even if no password
+                    auth = f"{user}:{pwd}@"
+                port_str = f":{port}" if port else ""
+                db_uri = f"{prefix}://{auth}{host}{port_str}/{db_name}"
+        else:
+            db_uri = self.parameters.get("db_uri", "").strip()
+
         query = self.parameters.get("query", "").strip()
 
         if not db_uri:
@@ -72,11 +153,22 @@ class DatabaseInputExecutor(BaseNode):
         start_time = time.time()
         
         try:
+            # Auto-format raw file paths to SQLite URIs for convenience
+            if db_uri.endswith(".db") or db_uri.endswith(".sqlite"):
+                if not db_uri.startswith("sqlite"):
+                    # Convert backslashes to forward slashes for SQLAlchemy/ADBC
+                    safe_path = db_uri.replace("\\", "/")
+                    db_uri = f"sqlite:///{safe_path}"
+
             # Run the security verification sweep before passing to the engine
             verify_safe_sql_query(query)
             
             # Polars native read_database_uri uses connectorx or adbc under the hood for massive speed
-            df = pl.read_database_uri(query=query, uri=db_uri)
+            # Use ADBC for SQLite to prevent Windows path parsing issues in connectorx
+            if db_uri.startswith("sqlite"):
+                df = pl.read_database_uri(query=query, uri=db_uri, engine="adbc")
+            else:
+                df = pl.read_database_uri(query=query, uri=db_uri)
             
             elapsed = time.time() - start_time
             self.log(f"Successfully read {df.height} rows and {df.width} columns in {elapsed:.2f} seconds.")

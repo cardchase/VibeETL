@@ -1,11 +1,13 @@
 import React, { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { Handle, Position, useReactFlow } from '@xyflow/react';
 import * as Icons from 'lucide-react';
 
 const CustomNode = ({ id, data, selected, type }) => {
   const IconComponent = data.icon ? (Icons[data.icon] || Icons.Square) : Icons.Square;
   const category = data?.category || 'inout';
   const status = data?.status || 'idle'; // idle, success, error, running
+  
+  const reactFlow = useReactFlow();
 
   // Determine display description dynamically based on common parameter fields (supports custom tools out-of-the-box!)
   let description = '';
@@ -13,6 +15,10 @@ const CustomNode = ({ id, data, selected, type }) => {
     description = data.parameters.filePath;
   } else if (data?.parameters?.outputPath) {
     description = data.parameters.outputPath;
+  } else if (data?.parameters?.tableName) {
+    description = `Table: ${data.parameters.tableName}`;
+  } else if (data?.parameters?.connectionString) {
+    description = data.parameters.connectionString;
   } else if (data?.parameters?.pattern) {
     description = `/${data.parameters.pattern}/`;
   } else if (data?.parameters?.imagePath) {
@@ -37,8 +43,37 @@ const CustomNode = ({ id, data, selected, type }) => {
       const trueCount = data.resultSummary.ports['true']?.row_count || 0;
       const falseCount = data.resultSummary.ports['false']?.row_count || 0;
       description = `T: ${trueCount} | F: ${falseCount} rows`;
+    } else if (type === 'join') {
+      const edges = reactFlow.getEdges();
+      const nodes = reactFlow.getNodes();
+      const leftEdge = edges.find(e => e.target === id && e.targetHandle === 'left');
+      const rightEdge = edges.find(e => e.target === id && e.targetHandle === 'right');
+      const leftNode = leftEdge ? nodes.find(n => n.id === leftEdge.source) : null;
+      const rightNode = rightEdge ? nodes.find(n => n.id === rightEdge.source) : null;
+      
+      const leftCount = leftNode?.data?.resultSummary?.row_count ?? '?';
+      const rightCount = rightNode?.data?.resultSummary?.row_count ?? '?';
+      const outCount = data.resultSummary.row_count ?? 0;
+      
+      description = `L:${leftCount} R:${rightCount} ➔ ${outCount}`;
+    } else if (type === 'union') {
+      const edges = reactFlow.getEdges();
+      const nodes = reactFlow.getNodes();
+      const incomingEdges = edges.filter(e => e.target === id);
+      const incomingCounts = incomingEdges.map(e => {
+        const sourceNode = nodes.find(n => n.id === e.source);
+        const count = sourceNode?.data?.resultSummary?.row_count ?? '?';
+        return `[${e.source}]: ${count}`;
+      });
+      const inStr = incomingCounts.length > 0 ? incomingCounts.join('\n') : '0';
+      const outCount = data.resultSummary.row_count ?? 0;
+      description = `In:\n${inStr}\n➔ Out: ${outCount}`;
     } else if (data.resultSummary.row_count !== undefined) {
-      description = `${data.resultSummary.row_count} rows`;
+      if (description && type !== 'select' && type !== 'formula' && type !== 'cleanse') {
+        description = `${description}\n➔ Out: ${data.resultSummary.row_count} rows`;
+      } else {
+        description = `${data.resultSummary.row_count} rows`;
+      }
     }
   }
 
@@ -100,9 +135,14 @@ const CustomNode = ({ id, data, selected, type }) => {
         />
       ) : null}
 
+      {/* Node ID label floating above the square box */}
+      <div style={{ position: 'absolute', top: '-14px', width: '100px', textAlign: 'center', opacity: 0.4, fontSize: '0.55em', fontWeight: 'normal', color: 'var(--text-muted)', pointerEvents: 'none', left: '50%', transform: 'translateX(-50%)' }}>
+        [{id}]
+      </div>
+
       {/* Node Square Box (The tool icon) */}
       <div className={`node-icon-box ${category} ${status} ${selected ? 'selected' : ''}`}>
-        <IconComponent size={16} className="node-icon" />
+        <IconComponent size={12} className="node-icon" />
         
         {/* Status indicator on the top corner */}
         {status !== 'idle' && status !== 'waiting' && status !== 'running' && status !== 'skipped' && (
@@ -134,9 +174,6 @@ const CustomNode = ({ id, data, selected, type }) => {
       <div className="node-labels-container">
         <div className="node-label-main" style={{ textAlign: 'center' }}>
           {data?.label || 'Node'}
-        </div>
-        <div style={{ opacity: 0.5, fontSize: '0.7em', fontWeight: 'normal', color: 'var(--text-muted)', textAlign: 'center', marginTop: '2px' }}>
-          [{id}]
         </div>
         {description && (
           <div className="node-label-sub" title={description}>

@@ -121,7 +121,7 @@ async def get_node_schema(payload: Dict[str, Any] = Body(...)):
         "error": result.get("error")
     }
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 import io
 
 @app.get("/api/download/csv")
@@ -136,14 +136,13 @@ def download_node_csv(nodeId: str, portId: str = "output"):
     # Write DataFrame to an in-memory buffer
     buffer = io.BytesIO()
     df.write_csv(buffer)
-    buffer.seek(0)
     
     filename = f"VibeETL_Export_{nodeId}_{portId}.csv"
     headers = {
         'Content-Disposition': f'attachment; filename="{filename}"'
     }
     
-    return StreamingResponse(buffer, media_type="text/csv", headers=headers)
+    return Response(content=buffer.getvalue(), media_type="text/csv", headers=headers)
 
 @app.get("/api/excel/sheets")
 def get_excel_sheets(filePath: str):

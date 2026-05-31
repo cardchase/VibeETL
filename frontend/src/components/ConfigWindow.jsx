@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Upload, Check, AlertCircle, Database, Link, X, Plus } from 'lucide-react';
+import { Settings, Upload, Check, AlertCircle, Database, Link, X, Plus, ChevronUp, ChevronDown } from 'lucide-react';
 
 
-const SafeInput = ({ value, checked, onChange, onBlur, type, ...props }) => {
+const SafeInput = React.forwardRef(({ value, checked, onChange, onBlur, type, ...props }, ref) => {
   const isCheck = type === 'checkbox' || type === 'radio' || type === 'file';
   const [localValue, setLocalValue] = React.useState(isCheck ? checked : (value ?? ''));
   
@@ -42,11 +42,11 @@ const SafeInput = ({ value, checked, onChange, onBlur, type, ...props }) => {
   };
 
   if (type === 'file') {
-     return <input type={type} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown} {...props} />;
+     return <input ref={ref} type={type} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown} {...props} />;
   }
 
-  return <input type={type} value={isCheck ? undefined : localValue} checked={isCheck ? localValue : undefined} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown} {...props} />;
-};
+  return <input ref={ref} type={type} value={isCheck ? undefined : localValue} checked={isCheck ? localValue : undefined} onChange={handleChange} onBlur={handleBlur} onKeyDown={handleKeyDown} {...props} />;
+});
 
 const SafeTextarea = ({ value, onChange, onBlur, ...props }) => {
   const [localValue, setLocalValue] = React.useState(value ?? '');
@@ -60,6 +60,25 @@ const SafeTextarea = ({ value, onChange, onBlur, ...props }) => {
   const handleKeyDown = (e) => {
     if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Escape') {
       e.stopPropagation();
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      e.stopPropagation();
+      const target = e.target;
+      const start = target.selectionStart;
+      const end = target.selectionEnd;
+      const newValue = localValue.substring(0, start) + '    ' + localValue.substring(end);
+      setLocalValue(newValue);
+      
+      // Update cursor position after React re-renders
+      setTimeout(() => {
+        target.selectionStart = target.selectionEnd = start + 4;
+      }, 0);
+      
+      // We also need to fire onChange so the graph node updates
+      if (onChange) {
+        onChange({ target: { value: newValue } });
+      }
     }
     if (props.onKeyDown) props.onKeyDown(e);
   };
@@ -141,8 +160,9 @@ const OPERATOR_LABELS = {
   'is_null': 'is empty', 'is_not_null': 'is not empty'
 };
 
-const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableTools = [], results = {}, nodes = [], edges = [], style = {} }) => {
+const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableTools = [], results = {}, nodes = [], edges = [], setNodes, style = {} }) => {
   const [uploading, setUploading] = useState(false);
+  const [nodeToAdd, setNodeToAdd] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [excelSheets, setExcelSheets] = useState([]);
   const [formulaSuggestion, setFormulaSuggestion] = useState(null);
@@ -231,6 +251,102 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   }, [isValidNode, type, id, upstreamSchema, parameters.columns, onUpdateParams, hasUpstreamColumns]);
 
   if (!isValidNode) {
+    const selectedNodes = nodes.filter(n => n.selected);
+    if (selectedNodes.length > 1) {
+      return (
+        <div className="config-sidebar" style={style}>
+          <div className="sidebar-header">
+            <span className="sidebar-title">
+              <Settings size={16} />
+              Multiple Tools Selected ({selectedNodes.length})
+            </span>
+          </div>
+          <div className="sidebar-content" style={{ padding: '15px' }}>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '15px' }}>
+              The following tools are currently selected:
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {selectedNodes.map(n => (
+                <div key={n.id} style={{ 
+                  padding: '10px', 
+                  background: 'var(--bg-secondary)', 
+                  border: '1px solid var(--border-color)', 
+                  borderRadius: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  boxShadow: 'var(--shadow-sm)'
+                }}>
+                  <span style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    width: '28px', 
+                    height: '28px', 
+                    background: 'var(--bg-tertiary)', 
+                    borderRadius: '4px',
+                    color: 'var(--color-accent)'
+                  }}>
+                    <Settings size={14} />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {n.data?.parameters?.label || n.data?.label || n.type}
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      ID: {n.id}
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setNodes && setNodes(nds => nds.map(node => node.id === n.id ? { ...node, selected: false } : node))}
+                    title="Deselect"
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', borderRadius: '4px' }}
+                    onMouseOver={(e) => { e.currentTarget.style.color = 'var(--color-danger)'; e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            
+            <div style={{ marginTop: '25px', padding: '15px', background: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '10px' }}>
+                Add to Selection
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <select 
+                  value={nodeToAdd} 
+                  onChange={(e) => setNodeToAdd(e.target.value)}
+                  style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '0.75rem' }}
+                >
+                  <option value="">-- Find a tool --</option>
+                  {nodes.filter(n => !n.selected).map(n => (
+                    <option key={n.id} value={n.id}>
+                      {n.data?.parameters?.label || n.data?.label || n.type} ({n.id})
+                    </option>
+                  ))}
+                </select>
+                <button 
+                  onClick={() => {
+                    if (nodeToAdd && setNodes) {
+                      setNodes(nds => nds.map(n => n.id === nodeToAdd ? { ...n, selected: true } : n));
+                      setNodeToAdd('');
+                    }
+                  }}
+                  disabled={!nodeToAdd}
+                  style={{ padding: '6px 12px', background: 'var(--color-accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: nodeToAdd ? 'pointer' : 'not-allowed', opacity: nodeToAdd ? 1 : 0.5, fontWeight: 500, fontSize: '0.75rem' }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="config-sidebar" style={style}>
         <div className="no-node-selected">
@@ -763,6 +879,21 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
       handleParamChange('columns', updatedCols);
     };
 
+    const handleColumnMove = (idx, direction) => {
+      const newColumns = [...columns];
+      if (direction === 'up' && idx > 0) {
+        const temp = newColumns[idx];
+        newColumns[idx] = newColumns[idx - 1];
+        newColumns[idx - 1] = temp;
+        handleParamChange('columns', newColumns);
+      } else if (direction === 'down' && idx < columns.length - 1) {
+        const temp = newColumns[idx];
+        newColumns[idx] = newColumns[idx + 1];
+        newColumns[idx + 1] = temp;
+        handleParamChange('columns', newColumns);
+      }
+    };
+
     return (
       <>
         {!hasUpstreamColumns && (
@@ -781,6 +912,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
               <table style={{ width: '100%', fontSize: '0.65rem', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
+                    <th style={{ padding: '6px 8px', width: '30px', textAlign: 'center', fontWeight: 600 }}>Move</th>
                     <th style={{ padding: '6px 8px', width: '30px', textAlign: 'center' }}>
                        <SafeInput 
                          type="checkbox" 
@@ -801,6 +933,12 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 <tbody>
                   {columns.map((col, idx) => (
                     <tr key={col.name} style={{ borderBottom: '1px dotted var(--border-color)', opacity: col.keep ? 1 : 0.5, transition: 'opacity 0.2s', background: col.keep ? 'transparent' : 'rgba(0,0,0,0.02)' }}>
+                      <td style={{ padding: '2px 4px', width: '30px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0px' }}>
+                          <button onClick={() => handleColumnMove(idx, 'up')} disabled={idx === 0} style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'not-allowed' : 'pointer', color: idx === 0 ? 'var(--text-muted)' : 'var(--text-secondary)', padding: 0 }}><ChevronUp size={14} /></button>
+                          <button onClick={() => handleColumnMove(idx, 'down')} disabled={idx === columns.length - 1} style={{ background: 'transparent', border: 'none', cursor: idx === columns.length - 1 ? 'not-allowed' : 'pointer', color: idx === columns.length - 1 ? 'var(--text-muted)' : 'var(--text-secondary)', padding: 0 }}><ChevronDown size={14} /></button>
+                        </div>
+                      </td>
                       <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                         <SafeInput
                           type="checkbox"
@@ -1853,7 +1991,12 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 <div className="empty-schema">Connect Left Node</div>
               ) : (
                 leftSchema.map((col) => (
-                  <div key={col.name} className={`schema-item ${col.name === leftOn ? 'active-key' : ''}`}>
+                  <div 
+                    key={col.name} 
+                    className={`schema-item ${col.name === leftOn ? 'active-key' : ''}`}
+                    onClick={() => handleParamChange('left_on', col.name)}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <span className="col-name">
                       {col.name}
                       {col.semantic_type === 'currency_usd' && <span title="Currency" style={{ marginLeft: '4px', color: 'var(--color-success)', fontWeight: 800 }}>$</span>}
@@ -1886,7 +2029,12 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 <div className="empty-schema">Connect Right Node</div>
               ) : (
                 rightSchema.map((col) => (
-                  <div key={col.name} className={`schema-item ${col.name === rightOn ? 'active-key' : ''}`}>
+                  <div 
+                    key={col.name} 
+                    className={`schema-item ${col.name === rightOn ? 'active-key' : ''}`}
+                    onClick={() => handleParamChange('right_on', col.name)}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <span className="col-name">
                       {col.name}
                       {col.semantic_type === 'currency_usd' && <span title="Currency" style={{ marginLeft: '4px', color: 'var(--color-success)', fontWeight: 800 }}>$</span>}
@@ -2322,6 +2470,14 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             ) : (
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Connect an upstream node to see columns.</span>
             )}
+          </div>
+        );
+      }
+
+      if (fieldDef.type === 'help_text') {
+        return (
+          <div key={idx} className="form-group" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'var(--bg-primary)', padding: '10px', borderRadius: '4px', borderLeft: '3px solid var(--color-accent)', lineHeight: '1.4' }}>
+            <div dangerouslySetInnerHTML={{ __html: fieldDef.content }} />
           </div>
         );
       }

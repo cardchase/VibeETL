@@ -3,6 +3,7 @@ import json
 import polars as pl
 from typing import Dict
 from app.tools.base import BaseNode
+from app.tools.file_output import verify_safe_file_path
 
 try:
     import gspread
@@ -48,74 +49,41 @@ class GoogleSheetsOutputNode(BaseNode):
                 "default": "Overwrite"
             },
             {
-                "field": "auth_method",
-                "label": "Authentication Method",
-                "type": "select",
-                "options": ["Service Account", "OAuth 2.0 (Desktop Login)"],
-                "default": "Service Account"
-            },
-            {
-                "field": "credentials_path",
-                "label": "Credentials File Path",
-                "type": "string",
-                "default": "",
-                "placeholder": "C:/path/to/service_account.json or client_secret.json"
+                "field": "auth_help",
+                "type": "help_text",
+                "content": "<strong>Authentication Required</strong><br/>To write data to Google Sheets, you must upload your Google Credentials via the <strong>Cloud Connectors</strong> button in the top toolbar first."
             }
         ]
     }
 
-    def _get_gspread_client(self, auth_method: str, creds_path: str):
+    def _get_gspread_client(self):
         if not gspread:
             raise ImportError("Required packages are missing. Please run 'pip install gspread google-auth-oauthlib'.")
             
-        if not creds_path or not os.path.exists(creds_path):
-            raise ValueError(f"Credentials file not found at path: {creds_path}")
-
-        scopes = [
-            'https://www.googleapis.com/auth/spreadsheets',
-            'https://www.googleapis.com/auth/drive'
-        ]
-
-        if auth_method == "Service Account":
-            self.log(f"Authenticating using Service Account: {creds_path}")
-            creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
-            return gspread.authorize(creds)
-            
-        elif auth_method == "OAuth 2.0 (Desktop Login)":
-            self.log(f"Authenticating using OAuth 2.0 Client Secret: {creds_path}")
-            
-            # Use a local token.json next to the client_secret to cache login
-            creds_dir = os.path.dirname(os.path.abspath(creds_path))
-            token_path = os.path.join(creds_dir, "token.json")
-            
-            creds = None
-            if os.path.exists(token_path):
-                self.log("Found existing OAuth token, attempting to reuse...")
-                creds = UserCredentials.from_authorized_user_file(token_path, scopes)
-                
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    self.log("Refreshing expired OAuth token...")
-                    try:
-                        creds.refresh(Request())
-                    except Exception as e:
-                        self.log(f"Failed to refresh token: {e}. Falling back to browser login.")
-                        creds = None
-                        
-                if not creds:
-                    self.log("Starting browser popup for Google Login. Please check your web browser...")
-                    flow = InstalledAppFlow.from_client_secrets_file(creds_path, scopes)
-                    # Run local server for auth callback
-                    creds = flow.run_local_server(port=0)
+        GOOGLE_AUTH_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '.vibe', 'google_auth'))
+        token_path = os.path.join(GOOGLE_AUTH_DIR, 'token.json')
+        service_account_path = os.path.join(GOOGLE_AUTH_DIR, 'service_account.json')
+        
+        # Output tool requires full write scopes
+        scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        
+        creds = None
+        if os.path.exists(service_account_path):
+            self.log("Authenticating using global Service Account...")
+            creds = Credentials.from_service_account_file(service_account_path, scopes=scopes)
+        elif os.path.exists(token_path):
+            self.log("Authenticating using global OAuth token...")
+            creds = UserCredentials.from_authorized_user_file(token_path, scopes)
+            if creds and creds.expired and creds.refresh_token:
+                self.log("Refreshing expired OAuth token...")
+                creds.refresh(Request())
+                with open(token_path, 'w') as f:
+                    f.write(creds.to_json())
                     
-                # Save the credentials for the next run
-                with open(token_path, 'w') as token:
-                    token.write(creds.to_json())
-                    self.log(f"Saved OAuth token to {token_path}")
-                    
+        if creds:
             return gspread.authorize(creds)
         else:
-            raise ValueError(f"Unknown authentication method: {auth_method}")
+            raise ValueError("Authentication Required: You must configure Google Cloud Integrations in the top toolbar to write to Google Sheets.")
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         if "input" not in inputs:
@@ -125,8 +93,6 @@ class GoogleSheetsOutputNode(BaseNode):
         url_or_id = self.parameters.get("spreadsheet_id_or_url", "").strip()
         worksheet_name = self.parameters.get("worksheet_name", "").strip()
         write_mode = self.parameters.get("write_mode", "Overwrite")
-        auth_method = self.parameters.get("auth_method", "Service Account")
-        creds_path = self.parameters.get("credentials_path", "").strip()
 
         if not url_or_id:
             raise ValueError("Pending Configuration: Please provide a Spreadsheet URL or ID to begin.")
@@ -137,7 +103,7 @@ class GoogleSheetsOutputNode(BaseNode):
             spreadsheet_id = url_or_id.split("/d/")[1].split("/")[0]
 
         try:
-            client = self._get_gspread_client(auth_method, creds_path)
+            client = self._get_gspread_client()
             
             self.log(f"Opening Spreadsheet ID: {spreadsheet_id}")
             spreadsheet = client.open_by_key(spreadsheet_id)

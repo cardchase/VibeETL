@@ -9,60 +9,6 @@ import CustomNode from './components/CustomNode';
 import CommentNode from './components/CommentNode';
 import ContainerNode from './components/ContainerNode';
 import './App.css';
-const getLayoutedElements = (nodes, edges) => {
-  // Identify connected nodes
-  const connectedNodeIds = new Set();
-  edges.forEach((edge) => {
-    connectedNodeIds.add(edge.source);
-    connectedNodeIds.add(edge.target);
-  });
-
-  const connectedNodes = nodes.filter(n => connectedNodeIds.has(n.id) && n.type !== 'container');
-  const disconnectedNodes = nodes.filter(n => !connectedNodeIds.has(n.id) || n.type === 'container');
-
-  if (connectedNodes.length === 0) return nodes;
-
-  // Simple topological layout (bfs)
-  let roots = connectedNodes.filter(n => !edges.some(e => e.target === n.id));
-  if (roots.length === 0) roots = [connectedNodes[0]]; // fallback for cycles
-  
-  const visited = new Set();
-  const nodeLevels = {}; // Map of nodeId -> level (x coordinate depth)
-  
-  const queue = [...roots];
-  queue.forEach(q => { if (q) nodeLevels[q.id] = 0; });
-  
-  while(queue.length > 0) {
-    const node = queue.shift();
-    if(!node || visited.has(node.id)) continue;
-    visited.add(node.id);
-    
-    const outgoingEdges = edges.filter(e => e.source === node.id);
-    outgoingEdges.forEach(e => {
-      nodeLevels[e.target] = Math.max(nodeLevels[e.target] || 0, nodeLevels[node.id] + 1);
-      const targetNode = connectedNodes.find(n => n.id === e.target);
-      if (targetNode) queue.push(targetNode);
-    });
-  }
-
-  // Group nodes by level to calculate Y positions
-  const levelCounts = {};
-  const layoutedNodes = connectedNodes.map(node => {
-    const level = nodeLevels[node.id] || 0;
-    levelCounts[level] = (levelCounts[level] || 0) + 1;
-    const yIndex = levelCounts[level] - 1;
-    
-    return {
-      ...node,
-      position: {
-        x: 20 + level * 90, // 20px start, 90px interval (44px node + 46px right padding)
-        y: 50 + yIndex * 120 // Vertical spacing
-      }
-    };
-  });
-
-  return [...layoutedNodes, ...disconnectedNodes];
-};
 
 // Dynamic API Base URL from environment variables
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
@@ -120,7 +66,7 @@ const initialEdges = [
     targetPort: 'input',
     sourceHandle: 'output',
     targetHandle: 'input',
-    style: { stroke: '#9ca3af', strokeWidth: 2 }
+    style: { stroke: '#9ca3af', strokeWidth: 1 }
   }
 ];
 
@@ -315,23 +261,6 @@ function App() {
   }, [onNodesChangeCore]);
   const [isWebSocketConnected, setIsWebSocketConnected] = useState(false);
 
-  // Listen for snap layout event
-  useEffect(() => {
-    const handleSnapLayout = () => {
-      try {
-        setNodes((nds) => {
-          const layouted = getLayoutedElements(nds, edges);
-          setTimeout(() => window.dispatchEvent(new CustomEvent('vibe-fit-view')), 100);
-          return layouted;
-        });
-      } catch (err) {
-        alert("Snap Layout Error: " + err.message);
-        console.error(err);
-      }
-    };
-    window.addEventListener('vibe-snap-layout', handleSnapLayout);
-    return () => window.removeEventListener('vibe-snap-layout', handleSnapLayout);
-  }, [edges, setNodes]);
   // State hooks moved above the sync hook
 
   const [past, setPast] = useState([]);
@@ -1486,7 +1415,7 @@ function App() {
         const status = sourceNode?.data?.status || 'idle';
         
         let stroke = '#9ca3af'; // idle grey
-        let strokeWidth = 2;
+        let strokeWidth = 1;
         let animated = false;
 
         if (status === 'running') {
@@ -1494,17 +1423,19 @@ function App() {
           animated = true;
         } else if (status === 'success') {
           stroke = '#10b981'; // green for all successful routes
-          strokeWidth = 3;
+          strokeWidth = 1.5;
           animated = false; 
         } else if (status === 'error') {
           stroke = '#ef4444'; // red
-          strokeWidth = 3;
+          strokeWidth = 1.5;
         }
 
-        if (edge.style?.stroke !== stroke || edge.style?.strokeWidth !== strokeWidth || edge.animated !== animated) {
+        if (edge.style?.stroke !== stroke || edge.style?.strokeWidth !== strokeWidth || edge.animated !== animated || edge.type) {
           hasChanges = true;
+          const { type, ...edgeWithoutType } = edge; // Remove any saved type (straight/smoothstep)
           return {
-            ...edge,
+            ...edgeWithoutType,
+            type: 'default', // Explicitly use default bezier curves
             animated,
             style: { ...edge.style, stroke, strokeWidth }
           };
@@ -1656,6 +1587,7 @@ function App() {
             results={results}
             nodes={nodes}
             edges={edges}
+            setNodes={setNodes}
             style={{ width: `${sidebarWidth}px` }}
           />
         </ErrorBoundary>
@@ -1700,6 +1632,7 @@ function App() {
           <div style={{ flex: 1, position: 'relative' }}>
             <ErrorBoundary>
               <Canvas
+                key={activeTabId}
                 nodes={nodes}
                 edges={edges}
                 nodeTypes={nodeTypes}
