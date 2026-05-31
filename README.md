@@ -9,7 +9,11 @@
   [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
   [![Made with Polars](https://img.shields.io/badge/Engine-Polars-blue)](https://pola.rs/)
   [![React Flow](https://img.shields.io/badge/UI-ReactFlow-ff0055)](https://reactflow.dev/)
+  [![Enterprise Ready](https://img.shields.io/badge/Enterprise-Ready-8A2BE2?style=for-the-badge&logo=rocket)](#)
 </div>
+
+> [!IMPORTANT]
+> **🚀 ENTERPRISE READY (v1.0):** VibeETL has reached its enterprise readiness milestone! Featuring global secure cloud authentication (OAuth 2.0 / Service Accounts), auto-healing crash recovery, unrestricted Nvidia GPU background processing, and massive database integrations (PostgreSQL, MySQL, SQLite). The platform is actively ready for rigorous real-world testing.
 
 <div align="center">
   <img src="docs/screenshot_workflow.png" width="100%" alt="VibeETL Interactive Canvas Showcase">
