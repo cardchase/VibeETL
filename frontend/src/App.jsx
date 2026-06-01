@@ -11,7 +11,7 @@ import ContainerNode from './components/ContainerNode';
 import './App.css';
 
 // Dynamic API Base URL from environment variables
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+import { API_BASE } from './config';
 
 // Initial nodes to populate the workspace with a working demo out-of-the-box
 const initialNodes = [
@@ -905,10 +905,11 @@ function App() {
     localStorage.setItem('vibeetl_autosave_workflow_tabs', JSON.stringify(syncedTabs));
 
     const timer = setTimeout(() => {
+      const activeTabTitle = tabs.find(t => t.id === activeTabId)?.name || 'Untitled_Workflow';
       fetch(`${API_BASE}/api/autosave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodes, edges })
+        body: JSON.stringify({ nodes, edges, workflow_name: activeTabTitle })
       }).catch(err => console.error("Autosave backend failed:", err));
     }, 2000);
     

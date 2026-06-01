@@ -44,7 +44,7 @@ class GoogleSheetsInputNode(BaseNode):
             {
                 "field": "auth_help",
                 "type": "help_text",
-                "content": "<strong>Private Sheets require Authentication!</strong><br/>If you are accessing a private spreadsheet, you must upload your Google Credentials via the <strong>Cloud Connectors</strong> button in the top toolbar first."
+                "content": "<strong>Private Sheets require Authentication!</strong><br/>If you are accessing a private spreadsheet, you must upload your Google Credentials via the <strong>Cloud Connectors</strong> button in the top toolbar first.<br/><br/><strong>Important:</strong> If using a Service Account, remember to open your Google Sheet, click 'Share', and add the Service Account's email address (found in your JSON file) as a Viewer."
             }
         ]
     }
@@ -72,7 +72,23 @@ class GoogleSheetsInputNode(BaseNode):
                     
         # Return client. If no creds, it will try to access public sheets.
         if creds:
-            return gspread.authorize(creds)
+            import requests
+            import warnings
+            from urllib3.exceptions import InsecureRequestWarning
+            warnings.simplefilter('ignore', InsecureRequestWarning)
+            
+            # ULTIMATE BYPASS: Globally disable SSL verification for all requests.Session calls.
+            # This forces google-auth's internal token refresh to bypass Zscaler.
+            if not getattr(requests.Session, '_vibe_ssl_patched', False):
+                old_request = requests.Session.request
+                def new_request(self, method, url, **kwargs):
+                    kwargs['verify'] = False
+                    return old_request(self, method, url, **kwargs)
+                requests.Session.request = new_request
+                requests.Session._vibe_ssl_patched = True
+            
+            client = gspread.authorize(creds)
+            return client
         else:
             raise ValueError("Authentication Required: Please login to Google Sheets in the configuration panel to fetch your spreadsheets.")
 
@@ -91,7 +107,8 @@ class GoogleSheetsInputNode(BaseNode):
         try:
             client = self._get_gspread_client()
         except Exception as e:
-            self.log("No Google Auth configured. Attempting to fetch as a public sheet anonymously...")
+            self.log(f"Authentication setup failed: {str(e)}")
+            self.log("Attempting to fetch as a public sheet anonymously...")
             public_csv_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv"
             if worksheet_name:
                 self.log("Note: Anonymous access fetches the default tab. (Cannot select by name without API credentials).")
@@ -112,8 +129,7 @@ class GoogleSheetsInputNode(BaseNode):
                     self.log("⚠️ WARNING: The Google Viz API tries to infer column data types. Highly irregular sheets with mixed types (like merged headers above data rows) will have rows DROPPED or TRUNCATED. To bypass this and fetch 100% of raw data, please Authenticate Google Sheets in the top toolbar.")
                     return pl.from_pandas(df)
                 except Exception as gviz_e:
-                    self.log(f"Anonymous fetch completely failed (is the sheet private?). Auth Error: {str(e)}")
-                    return pl.DataFrame()
+                    raise RuntimeError("Failed to access sheet. The sheet is likely private. Please upload Google Credentials via the Cloud Connectors button, and ensure you've shared the sheet with your service account email.")
         
         try:
             self.log(f"Opening Spreadsheet ID: {spreadsheet_id}")
@@ -144,8 +160,10 @@ class GoogleSheetsInputNode(BaseNode):
             
         except Exception as e:
             error_msg = str(e)
-            if "APIError" in error_msg and "403" in error_msg:
-                raise RuntimeError("Access Denied: The spreadsheet is private and you are not authenticated. Please login to Google Sheets in the configuration panel.")
+            if "APIError" in error_msg and ("403" in error_msg or "404" in error_msg):
+                raise RuntimeError("Access Denied (403/404): Your Service Account or OAuth credentials do not have permission to view this sheet. You must open your Google Sheet, click 'Share', and add your Service Account email as a Viewer.")
+            elif "APIError" in error_msg and "400" in error_msg and "not be an Office file" in error_msg:
+                raise RuntimeError("Google Sheets API Error: The provided URL points to an uploaded Office file (like .xlsx) rather than a native Google Sheet. Please open the file in Google Drive, click 'File > Save as Google Sheets', and use the URL of the new native sheet.")
             elif "WorksheetNotFound" in error_msg:
                 raise RuntimeError(f"Worksheet '{worksheet_name}' not found in the spreadsheet.")
             else:

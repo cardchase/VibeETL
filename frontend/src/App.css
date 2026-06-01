@@ -22,7 +22,7 @@
   padding: 0 20px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
-  z-index: 50;
+  z-index: 9999;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 

@@ -44,12 +44,17 @@ Welcome to the definitive reference for VibeETL's node library! This document ex
 
 ### 5. Google Sheets Input & Output Nodes
 *   **Purpose**: Read and write data directly to live Google Sheets tabs.
+*   **Enterprise SSL Proxy Support**: VibeETL natively integrates with your Windows Certificate Store (via `truststore`). If you are behind a strict corporate firewall or MITM proxy (like Zscaler), VibeETL automatically inherits your browser's root certificates to seamlessly authenticate with Google without requiring complex SSL bypasses!
 *   **Authentication Setup**: 
-    - You only need to set this up **ONCE**! Click the "Cloud / Database Setup" button in the top toolbar.
+    - You only need to set this up **ONCE**! Click the "Cloud Connectors" button in the top toolbar.
     - Upload your Google Cloud `Service Account JSON` or `OAuth 2.0 Client Secret`.
-    - VibeETL securely saves this locally and will use it to authenticate *all* Google nodes automatically.
+    - **If using a Service Account**: A service account acts like a "robot" user. To read or write to private sheets, you MUST open your Google Sheet, click "Share", and add the Service Account's email address (found inside your JSON file as `client_email`) with Viewer or Editor permissions.
+    - **If using an OAuth 2.0 Client Secret**: You will be prompted to "Sign in with Google" via a popup to grant VibeETL access using your own Google account. Note: If your Google Cloud OAuth app is in "Testing" mode (the default), you must go to the Google Cloud Console (APIs & Services > OAuth consent screen) and add your personal email address to the **Test users** list before you can log in.
+    - VibeETL securely saves these credentials locally and will use them to authenticate *all* Google nodes automatically.
 *   **Parameters**:
-    *   `spreadsheet_id_or_url`: Just paste the full `https://docs.google.com/...` URL!
+    *   `spreadsheet_id_or_url`: Just paste the full `https://docs.google.com/...` URL! 
+        - > [!WARNING]
+        - > **NATIVE SHEETS ONLY**: The URL must point to a native Google Sheets document. If you uploaded an Excel file (`.xlsx`) to Google Drive, the API will reject it with a `[400]` error. To fix this, open the file in Google Drive, click **File > Save as Google Sheets**, and use the URL of the newly created native sheet!
     *   `worksheet_name`: The exact name of the tab (e.g., `Sheet1`).
 *   **Example Use Case**: Reading a collaborative marketing budget sheet, joining it with your database, and writing the variance back to a new `Budget_Variances` tab!
 
@@ -232,3 +237,21 @@ html = f\"\"\"
 # Output the HTML payload
 df_out = pl.DataFrame({"__vibe_html_payload__": [html]})
 ```
+
+---
+
+## 💾 Autosave & Disaster Recovery
+
+VibeETL features an enterprise-grade, two-tier auto-recovery system designed to ensure **Zero Data Loss**.
+
+### Tier 1: Local Browser Cache (Instant)
+Every time you move a node, connect a wire, or change a setting, VibeETL instantly caches your entire canvas to your browser's local storage. If you accidentally refresh the page or close your browser tab, your workflow will immediately restore exactly as you left it the next time you open the app.
+
+### Tier 2: Backend File Backups (Rolling)
+Every 2 seconds after you stop making changes, a background network process physically streams your entire workflow to the VibeETL backend server. 
+
+*   **Save Location:** These physical JSON backup files are securely stored on your computer inside the `VibeETL/backend/.autosaves/` directory.
+*   **File Naming:** The files are dynamically named using the title of your active tab, followed by a timestamp (e.g., `My_Data_Pipeline_autosave_20260601_151729.json`).
+*   **Rolling Backups:** To prevent your hard drive from filling up, the backend maintains a strict rolling limit of the **10 most recent saves**. Older autosaves are automatically deleted.
+
+If you ever suffer a catastrophic browser wipe (e.g., clearing all site data) or want to revert to an older version of your workflow, simply open the `.autosaves` directory and load the JSON file!

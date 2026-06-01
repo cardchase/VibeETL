@@ -1,5 +1,10 @@
 import os
 import shutil
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
 import polars as pl
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,10 +16,16 @@ from app.tools import NODE_CLASSES
 
 app = FastAPI(title="VibeETL - Self-hosted Alteryx Engine")
 
-# Configure CORS
+# Configure CORS for Enterprise Security
+# Restrict origins strictly to the local frontend to prevent malicious websites from communicating with the local engine.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In development, allow all origins
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",  # Vite default
+        "http://127.0.0.1:5173"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -189,7 +200,15 @@ async def autosave_workflow(pipeline: Dict[str, Any] = Body(...)):
     """
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filepath = os.path.join(AUTOSAVES_DIR, f"autosave_{timestamp}.json")
+        workflow_name = pipeline.get("workflow_name", "Untitled_Workflow")
+        
+        # Sanitize the workflow name for filesystem safety
+        import re
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', workflow_name)
+        if not safe_name:
+            safe_name = "Untitled_Workflow"
+            
+        filepath = os.path.join(AUTOSAVES_DIR, f"{safe_name}_autosave_{timestamp}.json")
         
         with open(filepath, "w") as f:
             json.dump(pipeline, f)
@@ -284,7 +303,9 @@ async def login_google_oauth():
     
     def run_flow():
         flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, scopes)
-        creds = flow.run_local_server(port=8080)
+        # Use port=0 to let the OS automatically assign an available port, 
+        # avoiding WinError 10048 (Address already in use) conflicts.
+        creds = flow.run_local_server(port=0)
         with open(token_path, 'w') as f:
             f.write(creds.to_json())
             
@@ -335,3 +356,19 @@ def logout_google_auth():
         if os.path.exists(path):
             os.remove(path)
     return {'status': 'success'}
+
+@app.on_event("startup")
+def on_startup():
+    # Purge any leftover credentials from previous unexpected crashes
+    for filename in ['token.json', 'client_secret.json', 'service_account.json']:
+        path = os.path.join(GOOGLE_AUTH_DIR, filename)
+        if os.path.exists(path):
+            os.remove(path)
+
+@app.on_event("shutdown")
+def on_shutdown():
+    # Purge credentials when the server cleanly shuts down
+    for filename in ['token.json', 'client_secret.json', 'service_account.json']:
+        path = os.path.join(GOOGLE_AUTH_DIR, filename)
+        if os.path.exists(path):
+            os.remove(path)

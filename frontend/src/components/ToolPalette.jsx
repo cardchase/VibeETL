@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import * as Icons from 'lucide-react';
 import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize } from 'lucide-react';
+import { API_BASE } from '../config';
 
 const CATEGORY_TITLES = {
   'favorites': '⭐ Favorites',
@@ -20,7 +21,8 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authStatus, setAuthStatus] = useState(null);
+  const [authStatus, setAuthStatus] = useState('checking');
+  const [uploadSuccessMessage, setUploadSuccessMessage] = useState('');
   const authFileInputRef = useRef(null);
 
   useEffect(() => {
@@ -51,11 +53,16 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
   };
 
   useEffect(() => {
-    if (isAuthModalOpen) {
-      fetch('http://localhost:8000/api/google/auth/status')
+    const checkAuth = () => {
+      fetch(`${API_BASE}/api/google/auth/status`)
         .then(res => res.json())
         .then(data => setAuthStatus(data.status))
         .catch(err => console.error("Failed to fetch auth status", err));
+    };
+    // Run on mount, and re-run whenever modal is opened
+    checkAuth();
+    if (!isAuthModalOpen) {
+      setUploadSuccessMessage(''); // clear on close
     }
   }, [isAuthModalOpen]);
 
@@ -66,33 +73,52 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
     const formData = new FormData();
     formData.append('file', file);
 
-    fetch('http://localhost:8000/api/google/auth/setup', {
+    fetch(`${API_BASE}/api/google/auth/setup`, {
       method: 'POST',
       body: formData,
     })
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
-          setAuthStatus('authenticated');
-          alert("Successfully authenticated with Google Cloud!");
+          if (data.method === 'oauth') {
+            setAuthStatus('needs_login');
+            setUploadSuccessMessage("OAuth configuration uploaded successfully! Please click 'Sign in with Google' below.");
+          } else {
+            setAuthStatus('authenticated');
+            setUploadSuccessMessage("Successfully connected with Google Cloud Service Account!");
+          }
         } else {
-          alert("Error: " + data.detail);
+          setUploadSuccessMessage("Error: " + data.detail);
         }
       })
-      .catch(err => alert("Upload failed: " + err));
+      .catch(err => setUploadSuccessMessage("Upload failed: " + err));
     
     // Reset input
     e.target.value = '';
   };
 
+  const handleAuthLogin = () => {
+    fetch(`${API_BASE}/api/google/auth/login`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          setAuthStatus('authenticated');
+          setUploadSuccessMessage("Successfully logged in with Google!");
+        } else {
+          setUploadSuccessMessage("Login failed: " + (data.detail || "Unknown error"));
+        }
+      })
+      .catch(err => setUploadSuccessMessage("Login request failed: " + err));
+  };
+
   const handleAuthDelete = () => {
     if (!window.confirm("Are you sure you want to remove your Google Cloud credentials?")) return;
     
-    fetch('http://localhost:8000/api/google/auth/logout', { method: 'POST' })
+    fetch(`${API_BASE}/api/google/auth/logout`, { method: 'POST' })
       .then(res => res.json())
       .then(() => {
         setAuthStatus('needs_setup');
-        alert("Credentials successfully removed.");
+        setUploadSuccessMessage('');
       })
       .catch(err => alert("Failed to remove credentials: " + err));
   };
@@ -375,11 +401,22 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
         </button>
         <button 
           className="run-button" 
-          style={{ background: '#e8f0fe', color: '#1a73e8', border: '1px solid #d2e3fc', marginLeft: '4px' }} 
+          style={{ 
+            background: authStatus === 'authenticated' ? '#ecfdf5' : '#e8f0fe', 
+            color: authStatus === 'authenticated' ? '#10b981' : '#1a73e8', 
+            border: `1px solid ${authStatus === 'authenticated' ? '#a7f3d0' : '#d2e3fc'}`, 
+            marginLeft: '4px',
+            position: 'relative'
+          }} 
           onClick={() => setIsAuthModalOpen(true)} 
           title="Google Cloud Connections"
         >
           <Icons.Cloud size={16} />
+          {authStatus === 'authenticated' && (
+            <div style={{ position: 'absolute', bottom: -2, right: -2, background: 'white', borderRadius: '50%' }}>
+              <Icons.CheckCircle size={10} color="#10b981" />
+            </div>
+          )}
         </button>
         
         <div style={{ width: '1px', height: '24px', background: 'var(--border-color)' }} />
@@ -507,21 +544,35 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                 <div style={{ 
                   width: '10px', height: '10px', borderRadius: '50%', 
-                  background: authStatus === 'authenticated' ? '#10b981' : '#f59e0b' 
+                  background: authStatus === 'authenticated' ? '#10b981' : (authStatus === 'needs_login' ? '#3b82f6' : '#f59e0b') 
                 }} />
                 <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#333333' }}>
-                  Google Sheets Status: {authStatus === 'authenticated' ? 'Connected' : 'Not Connected'}
+                  Google Sheets Status: {authStatus === 'authenticated' ? 'Connected' : (authStatus === 'needs_login' ? 'Login Required' : 'Not Connected')}
                 </span>
               </div>
               <p style={{ fontSize: '0.8rem', color: '#666666', margin: 0 }}>
                 {authStatus === 'authenticated' 
-                  ? 'Your global Service Account / OAuth credentials are active. Nodes will use them automatically.'
-                  : 'Currently operating in anonymous fallback mode. Upload a Service Account JSON or OAuth Client Secret to unlock full access.'}
+                  ? 'Your global Service Account / OAuth credentials are active. Nodes will use them automatically. 💡 Remember: If using a Service Account, you must open your Google Sheet and "Share" it with your Service Account email (found inside your JSON file).'
+                  : (authStatus === 'needs_login' 
+                    ? 'OAuth Desktop Client credentials uploaded. You must now sign in to your Google Account to authorize access.'
+                    : 'Currently operating in anonymous fallback mode. Upload a Service Account JSON or OAuth Client Secret to unlock full access.')}
               </p>
             </div>
 
+            {uploadSuccessMessage && (
+              <div style={{ marginTop: '12px', padding: '12px', background: '#f0fdf4', color: '#166534', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '0.85rem', fontWeight: 500, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>✓ {uploadSuccessMessage}</div>
+                <button 
+                  onClick={() => setIsAuthModalOpen(false)} 
+                  style={{ background: '#16a34a', color: 'white', border: 'none', padding: '6px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-              {authStatus === 'authenticated' ? (
+              {authStatus === 'authenticated' || authStatus === 'needs_login' ? (
                 <button 
                   onClick={handleAuthDelete}
                   style={{
@@ -541,6 +592,27 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
                 <div /> // Placeholder for flex-between
               )}
               <div style={{ display: 'flex', gap: '8px' }}>
+                {authStatus === 'needs_login' && (
+                  <button 
+                    onClick={handleAuthLogin}
+                    style={{
+                      background: '#ffffff',
+                      color: '#4285f4',
+                      border: '1px solid #4285f4',
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '0.9rem'
+                    }}
+                  >
+                    <Icons.LogIn size={16} />
+                    Sign in with Google
+                  </button>
+                )}
                 <input 
                   type="file" 
                   accept=".json" 

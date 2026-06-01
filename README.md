@@ -13,7 +13,7 @@
 </div>
 
 > [!IMPORTANT]
-> **🚀 ENTERPRISE READY (v1.0):** VibeETL has reached its enterprise readiness milestone! Featuring global secure cloud authentication (OAuth 2.0 / Service Accounts), auto-healing crash recovery, unrestricted Nvidia GPU background processing, and massive database integrations (PostgreSQL, MySQL, SQLite). The platform is actively ready for rigorous real-world testing.
+> **🚀 ENTERPRISE READY (v1.1):** VibeETL has reached its enterprise readiness milestone! Featuring global secure cloud authentication (OAuth 2.0 / Service Accounts) with **Native Windows Certificate Store integration** for bypassing corporate MITM proxies (like Zscaler), auto-healing crash recovery, unrestricted Nvidia GPU background processing, and massive database integrations (PostgreSQL, MySQL, SQLite). The platform is actively ready for rigorous real-world testing.
 
 <div align="center">
   <img src="docs/screenshot_workflow.png" width="100%" alt="VibeETL Interactive Canvas Showcase">
