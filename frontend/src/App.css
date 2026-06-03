@@ -562,9 +562,16 @@
 
 .results-content {
   flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+
+.log-viewer {
+  flex: 1;
   overflow: auto;
   padding: 12px 16px;
-  background: var(--bg-primary);
 }
 
 /* Minimal Custom Node Styles in Canvas (34px x 34px Square) */
@@ -1229,4 +1236,26 @@
   transition: none !important;
   box-sizing: border-box !important;
   transform-origin: top left !important;
+}
+
+/* Compact Spreadsheet Look for AG Grid */
+.ag-theme-quartz {
+  --ag-grid-size: 4px;
+  --ag-row-height: 28px;
+  --ag-header-height: 32px;
+  --ag-font-size: 0.75rem;
+  --ag-header-background-color: var(--bg-secondary);
+  --ag-row-border-color: var(--border-color);
+  --ag-border-color: var(--border-color);
+  --ag-borders: solid 1px var(--border-color);
+  --ag-odd-row-background-color: rgba(0, 0, 0, 0.015);
+  --ag-row-hover-color: rgba(37, 99, 235, 0.05);
+}
+
+.ag-theme-quartz .ag-cell {
+  border-right: 1px solid var(--border-color) !important;
+}
+
+.ag-theme-quartz .ag-header-cell {
+  border-right: 1px solid var(--border-color) !important;
 }

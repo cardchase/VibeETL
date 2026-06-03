@@ -1,16 +1,21 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Terminal, Database, FileText, Copy, Check } from 'lucide-react';
+import { AgGridReact } from 'ag-grid-react';
+import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
+import 'ag-grid-community/styles/ag-grid.css';
+import 'ag-grid-community/styles/ag-theme-quartz.css';
 
+ModuleRegistry.registerModules([AllCommunityModule]);
 const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style = {} }) => {
   const [activeTab, setActiveTab] = useState('data'); // 'logs' or 'data'
   const [selectedPort, setSelectedPort] = useState(null);
   const [prevNodeId, setPrevNodeId] = useState(null);
   const [copied, setCopied] = useState(false);
   const [dataCopied, setDataCopied] = useState(false);
-  const [selectedRows, setSelectedRows] = useState(new Set());
   const [wrapText, setWrapText] = useState(false);
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-  const [scrollTop, setScrollTop] = useState(0);
+  const [selectedRowCount, setSelectedRowCount] = useState(0);
+  
+  const gridRef = useRef(null);
 
   const nodeId = selectedNode?.id;
   const isInspectingUpstream = originalNode && selectedNode && originalNode.id !== selectedNode.id;
@@ -19,8 +24,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
   if (nodeId !== prevNodeId) {
     setPrevNodeId(nodeId);
     setSelectedPort(null);
-    setSelectedRows(new Set());
-    setSortConfig({ key: null, direction: 'asc' });
+    setSelectedRowCount(0);
   }
 
   const nodeResult = nodeId ? results?.[nodeId] : null;
@@ -35,23 +39,49 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
   const schema = activePortData ? (activePortData.schema || []) : (nodeResult?.schema || []);
   const rawPreviewData = activePortData ? (activePortData.preview || []) : (nodeResult?.preview || []);
   const rowCount = activePortData ? (activePortData.row_count || 0) : (nodeResult?.row_count || 0);
-  
-  // Sort data
-  const previewData = useMemo(() => {
-    if (!sortConfig.key) return rawPreviewData;
-    const sorted = [...rawPreviewData];
-    sorted.sort((a, b) => {
-      let aVal = a[sortConfig.key];
-      let bVal = b[sortConfig.key];
-      if (aVal === null || aVal === undefined) aVal = '';
-      if (bVal === null || bVal === undefined) bVal = '';
-      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-    return sorted;
-  }, [rawPreviewData, sortConfig]);
+  // Data for AG Grid
+  const previewData = rawPreviewData;
   const colCount = activePortData ? (activePortData.column_count || 0) : (nodeResult?.column_count || 0);
+
+  // AG Grid Column Definitions
+  const columnDefs = useMemo(() => {
+    return schema.map((col) => {
+      let filterType = 'agTextColumnFilter';
+      if (['int64', 'Int64', 'Float64', 'float64', 'number', 'integer'].includes(col.type) || ['currency_usd', 'percentage'].includes(col.semantic_type)) {
+        filterType = 'agNumberColumnFilter';
+      } else if (['date', 'datetime', 'timestamp'].includes(col.type)) {
+        filterType = 'agDateColumnFilter';
+      }
+
+      const colDef = {
+        field: col.name,
+        headerName: col.name,
+        filter: filterType,
+        sortable: true,
+        resizable: true,
+        wrapText: wrapText,
+        autoHeight: wrapText
+      };
+
+      if (col.semantic_type === 'currency_usd') {
+        colDef.headerName = col.name + ' ($)';
+      } else if (col.semantic_type === 'percentage') {
+        colDef.headerName = col.name + ' (%)';
+      }
+
+      return colDef;
+    });
+  }, [schema, wrapText]);
+
+  const onSelectionChanged = useCallback(() => {
+    if (gridRef.current && gridRef.current.api) {
+      const selectedRows = gridRef.current.api.getSelectedRows();
+      setSelectedRowCount(selectedRows.length);
+    }
+  }, []);
+
+
+  
   const duration = nodeResult?.duration_ms || 0;
   const error = nodeResult?.error;
   const status = nodeResult?.status;
@@ -79,42 +109,25 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
     });
   };
 
-  const toggleRowSelection = (rowIdx) => {
-    const newSelection = new Set(selectedRows);
-    if (newSelection.has(rowIdx)) {
-      newSelection.delete(rowIdx);
+  const handleCopyData = useCallback(() => {
+    if (!gridRef.current || !gridRef.current.api) return;
+    
+    let rowsToCopy = [];
+    const selectedRows = gridRef.current.api.getSelectedRows();
+    
+    if (selectedRows.length > 0) {
+      rowsToCopy = selectedRows;
     } else {
-      newSelection.add(rowIdx);
-    }
-    setSelectedRows(newSelection);
-  };
-
-  const handleSort = (key) => {
-    let direction = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setSortConfig({ key, direction });
-  };
-
-  const handleCopyData = () => {
-    let sortedIndices = [];
-    if (selectedRows.size === 0) {
-      // Copy all visible rows if none selected
-      sortedIndices = Array.from({ length: previewData.length }, (_, i) => i);
-    } else {
-      // Sort selected indices
-      sortedIndices = Array.from(selectedRows).sort((a, b) => a - b);
+      // Get all sorted/filtered rows
+      gridRef.current.api.forEachNodeAfterFilterAndSort((node) => {
+        rowsToCopy.push(node.data);
+      });
     }
     
-    if (sortedIndices.length === 0) return;
+    if (rowsToCopy.length === 0) return;
     
-    // Get headers
     const headers = schema.map(c => c.name).join('\t');
-    
-    // Get rows data
-    const rowsText = sortedIndices.map(idx => {
-      const row = previewData[idx];
+    const rowsText = rowsToCopy.map(row => {
       return schema.map(col => {
         const val = row[col.name];
         return val !== null && val !== undefined ? String(val) : '';
@@ -127,7 +140,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
       setDataCopied(true);
       setTimeout(() => setDataCopied(false), 2000);
     });
-  };
+  }, [schema]);
 
   return (
     <div className="results-window" style={style}>
@@ -206,7 +219,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
       {/* Pane Content */}
       <div className="results-content">
         {activeTab === 'data' && (
-          <div style={{ height: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             {!selectedNode ? (
               <div className="no-node-selected" style={{ padding: 20 }}>
                 <Database />
@@ -270,19 +283,24 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                   </div>
                 </div>
               ) : previewData.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                   <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      {selectedRows.size > 0 && (
+                      {selectedRowCount > 0 && (
                         <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                          {selectedRows.size} row{selectedRows.size > 1 ? 's' : ''} selected
+                          {selectedRowCount} row{selectedRowCount > 1 ? 's' : ''} selected
                         </span>
                       )}
                       <label style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: 'var(--text-secondary)' }}>
                         <input 
                           type="checkbox" 
                           checked={wrapText} 
-                          onChange={(e) => setWrapText(e.target.checked)} 
+                          onChange={(e) => {
+                            setWrapText(e.target.checked);
+                            if (gridRef.current && gridRef.current.api) {
+                              gridRef.current.api.resetRowHeights();
+                            }
+                          }} 
                           style={{ margin: 0 }}
                         />
                         Wrap Text
@@ -300,103 +318,45 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                       </button>
                       <button className="copy-logs-btn" onClick={handleCopyData}>
                         {dataCopied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
-                        {dataCopied ? "Copied Data" : (selectedRows.size > 0 ? "Copy Selected Rows" : "Copy Preview Data")}
+                        {dataCopied ? "Copied Data" : (selectedRowCount > 0 ? "Copy Selected Rows" : "Copy Preview Data")}
                       </button>
                     </div>
                   </div>
-                  <div 
-                    className="spreadsheet-container" 
-                    style={{ flex: 1, overflow: 'auto' }}
-                    onScroll={(e) => setScrollTop(e.target.scrollTop)}
-                  >
-                    <table className="spreadsheet" style={{ tableLayout: 'auto' }}>
-                      <thead>
-                        <tr>
-                          <th style={{ width: '40px', minWidth: '40px', textAlign: 'center', background: 'var(--bg-secondary)' }}>#</th>
-                          {schema.map((col) => (
-                            <th 
-                              key={col.name} 
-                              onClick={() => handleSort(col.name)}
-                              style={{ resize: 'horizontal', overflow: 'hidden', minWidth: '80px', position: 'relative', cursor: 'pointer', userSelect: 'none' }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                <div>
-                                  {col.name}
-                                  {col.semantic_type === 'currency_usd' && (
-                                    <span title="Currency" style={{ marginLeft: '6px', color: 'var(--color-success)', fontWeight: 800 }}>$</span>
-                                  )}
-                                  {col.semantic_type === 'percentage' && (
-                                    <span title="Percentage" style={{ marginLeft: '6px', color: 'var(--color-accent)', fontWeight: 800 }}>%</span>
-                                  )}
-                                  <span className="col-header-type" style={{ marginLeft: '6px' }}>
-                                    {col.type && typeof col.type === 'string' ? col.type.split('.').pop() : 'Unknown'}
-                                  </span>
-                                </div>
-                                {sortConfig.key === col.name && (
-                                  <span style={{ fontSize: '0.7rem', color: 'var(--color-accent)' }}>
-                                    {sortConfig.direction === 'asc' ? '▲' : '▼'}
-                                  </span>
-                                )}
-                              </div>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(() => {
-                          const ROW_HEIGHT = 32;
-                          const buffer = 10;
-                          const viewportRows = Math.ceil(800 / ROW_HEIGHT);
-                          const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - buffer);
-                          const endIndex = Math.min(previewData.length, startIndex + viewportRows + (buffer * 2));
-                          const visibleRows = previewData.slice(startIndex, endIndex);
-                          const topSpacerHeight = startIndex * ROW_HEIGHT;
-                          const bottomSpacerHeight = Math.max(0, (previewData.length - endIndex) * ROW_HEIGHT);
-
-                          return (
-                            <>
-                              {topSpacerHeight > 0 && (
-                                <tr style={{ height: topSpacerHeight }}>
-                                  <td colSpan={schema.length + 1} style={{ padding: 0, border: 'none' }}></td>
-                                </tr>
-                              )}
-                              {visibleRows.map((row, relativeIdx) => {
-                                const rowIdx = startIndex + relativeIdx;
-                                return (
-                                  <tr 
-                                    key={rowIdx} 
-                                    onClick={() => toggleRowSelection(rowIdx)}
-                                    style={{ 
-                                      cursor: 'pointer',
-                                      backgroundColor: selectedRows.has(rowIdx) ? 'rgba(59, 130, 246, 0.1)' : undefined,
-                                      height: ROW_HEIGHT
-                                    }}
-                                  >
-                                    <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 600, background: 'var(--bg-secondary)', height: ROW_HEIGHT, padding: '0 8px' }}>
-                                      {rowIdx + 1}
-                                    </td>
-                                    {schema.map((col) => (
-                                      <td 
-                                        key={col.name} 
-                                        title={String(row[col.name] ?? '')}
-                                        style={wrapText ? { whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: '300px', lineHeight: '1.4', verticalAlign: 'top', padding: '0 8px' } : { height: ROW_HEIGHT, padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '300px' }}
-                                      >
-                                        {row[col.name] !== null && row[col.name] !== undefined ? String(row[col.name]) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>null</span>}
-                                      </td>
-                                    ))}
-                                  </tr>
-                                );
-                              })}
-                              {bottomSpacerHeight > 0 && (
-                                <tr style={{ height: bottomSpacerHeight }}>
-                                  <td colSpan={schema.length + 1} style={{ padding: 0, border: 'none' }}></td>
-                                </tr>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </tbody>
-                    </table>
+                  <div className="ag-theme-quartz" style={{ flex: 1, width: '100%', minHeight: 0 }}>
+                    <AgGridReact
+                      key={`${nodeId}-${activePort || 'default'}`}
+                      ref={gridRef}
+                      rowData={previewData}
+                      columnDefs={columnDefs}
+                      rowSelection="multiple"
+                      onSelectionChanged={onSelectionChanged}
+                      enableCellTextSelection={true}
+                      suppressRowClickSelection={true}
+                      rowMultiSelectWithClick={true}
+                      autoSizeStrategy={{ type: 'fitCellContents' }}
+                      suppressColumnVirtualisation={true}
+                      defaultColDef={{
+                        sortable: true,
+                        filter: true,
+                        resizable: true,
+                        wrapText: wrapText,
+                        autoHeight: wrapText,
+                        cellRenderer: (params) => {
+                          if (params.value === null) {
+                            return <span style={{ color: 'var(--text-secondary, #888)', fontStyle: 'italic' }}>null</span>;
+                          }
+                          if (typeof params.value === 'boolean') {
+                            return String(params.value);
+                          }
+                          if (typeof params.value === 'object') {
+                            return JSON.stringify(params.value);
+                          }
+                          return params.value;
+                        }
+                      }}
+                      pagination={true}
+                      paginationPageSize={100}
+                    />
                   </div>
                 </div>
               ) : (

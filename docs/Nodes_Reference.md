@@ -238,6 +238,44 @@ html = f\"\"\"
 df_out = pl.DataFrame({"__vibe_html_payload__": [html]})
 ```
 
+### **Example 5: Audio DSP & Visualizer Prep (Multimodal)**
+VibeETL is not just for corporate data. You can process raw audio files, extract their features (like volume amplitude or tempo), and convert them into structured datasets for visualization.
+
+**Prerequisites**: You must install `librosa` and `numpy` (`pip install librosa numpy`).
+
+```python
+import polars as pl
+import librosa
+import numpy as np
+import os
+
+# 1. Define the path to your raw audio file
+audio_path = "C:/path/to/your/album/track_01.wav"
+
+# 2. Load the audio file using librosa
+y, sr = librosa.load(audio_path, sr=None)
+
+# 3. Extract the Volume Envelope (RMS Energy)
+frame_length = 2048
+hop_length = 512
+rms_energy = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
+
+# 4. Generate the corresponding timestamps
+frames = range(len(rms_energy))
+times = librosa.frames_to_time(frames, sr=sr, hop_length=hop_length)
+
+# 5. Extract the global Tempo (BPM)
+tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+
+# 6. Build the Polars DataFrame to pass back to the VibeETL Canvas
+df_out = pl.DataFrame({
+    "Time_Seconds": times,
+    "Volume_RMS": rms_energy,
+    "Track_BPM": np.full(len(times), tempo[0]), 
+    "Track_Name": np.full(len(times), os.path.basename(audio_path))
+})
+```
+
 ---
 
 ## 💾 Autosave & Disaster Recovery

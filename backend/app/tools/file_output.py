@@ -56,6 +56,14 @@ class FileOutputNode(BaseNode):
         file_path = self.parameters.get("outputPath", "output.csv")
         output_format = self.parameters.get("outputFormat", "csv").lower()
         
+        # Smart detection for visualizations (HTML payloads)
+        if "__vibe_html_payload__" in df.columns:
+            output_format = "html"
+            base, ext = os.path.splitext(file_path)
+            if ext.lower() != ".html":
+                file_path = base + ".html"
+                self.log(f"Detected Visualization data. Automatically switching export format to HTML.")
+        
         # If the file path is relative, put it in the outputs directory
         if not os.path.isabs(file_path):
             outputs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "outputs"))
