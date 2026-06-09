@@ -6,7 +6,23 @@ Welcome to the definitive reference for VibeETL's node library! This document ex
 
 ## 📥 In / Out Tools (Data Connectors)
 
-### 1. File Input Node (`fileInput`)
+### 1. Folder Input Node (`folderInput`)
+*   **Purpose**: Recursively scan local directories and output a DataFrame containing file metadata.
+*   **Parameters**:
+    *   `folderPath`: Absolute path to the directory (e.g., `C:/data/monthly_reports`).
+    *   `includeSubfolders`: Checkbox to scan recursively.
+    *   `fileMask`: Glob pattern to filter files (e.g., `*.csv`).
+*   **Example Use Case**: Point it at a folder full of hundreds of daily CSV files to instantly get a structured table of their paths, sizes, and extensions. Pass this output directly into a `Dynamic Input` node to merge them all together!
+
+### 2. Dynamic Input Node (`dynamicInput`)
+*   **Purpose**: Iterate through a list of file paths (like those output by `Folder Input`) and dynamically read and merge standard data files (CSV, Excel) into a single unified DataFrame.
+*   **Parameters**:
+    *   `pathColumn`: The name of the column containing the file paths (e.g., `FilePath`).
+    *   `referenceFilePath`: (Optional) Absolute path to a "Gold Standard" template file.
+    *   `strictMode`: If a reference file is provided, this forces all incoming files to strictly adhere to the reference schema. Extra columns are dropped, and missing columns are padded with nulls.
+*   **Example Use Case**: You have 50 messy Excel files from different departments. They have slightly different column names. Use `pl.concat(..., how="diagonal")` under the hood to automatically align what matches, or enforce a strict Reference Schema to guarantee a 1:1 structural match.
+
+### 3. File Input Node (`fileInput`)
 *   **Purpose**: Read and ingest local raw tabular data files (CSV, Excel, JSON).
 *   **Parameters**:
     *   `filePath`: Absolute path to your file (e.g., `C:/data/sales.csv`).
@@ -68,8 +84,10 @@ Welcome to the definitive reference for VibeETL's node library! This document ex
 *   **Purpose**: The essential debugging window. It displays a live preview of the first 1000 rows and the precise schema metadata.
 *   **Example Use Case**: Drop these anywhere in the middle of your pipeline to inspect the data transformation exactly at that step.
 
-### 8. Image Ingest / Captioning Node (`imageCaption`)
-*   **Purpose**: Feed local visual media files to a lightweight local ONNX model to generate AI captions offline.
+### 10. Image Ingest / Captioning Node (`imageCaption`)
+*   **Purpose**: Feed local visual media files to a lightweight local ONNX model (or Vision-Language Model like Qwen2-VL) to generate AI captions offline.
+*   **Batch Processing**: This node natively supports batch processing! If you connect upstream data (like the output of a `Folder Input` node) containing a `FilePath` column, it will automatically iterate and process ALL images sequentially instead of relying on the single-image configuration field.
+*   **Workflow Cancellation**: Safe to abort! If it's stuck processing 1,000 images, just hover over the spinning loader on the canvas and hit Stop. It will instantly break the batch loop and safely halt.
 *   **Example Use Case**: Connect a folder of product images to this node to instantly generate textual descriptions for your e-commerce catalog.
 
 ---
