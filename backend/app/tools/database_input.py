@@ -58,7 +58,7 @@ class DatabaseInputExecutor(BaseNode):
                 "field": "db_dialect",
                 "label": "Database Type (Builder)",
                 "type": "select",
-                "options": ["PostgreSQL", "MySQL", "Microsoft SQL Server", "SQLite (Local File)", "Oracle"],
+                "options": ["PostgreSQL", "MySQL", "Microsoft SQL Server", "SQLite (Local File)", "Oracle", "Microsoft Access (Local File)"],
                 "default": "PostgreSQL"
             },
             {
@@ -123,13 +123,16 @@ class DatabaseInputExecutor(BaseNode):
                 "MySQL": "mysql",
                 "Microsoft SQL Server": "mssql+pyodbc",
                 "SQLite (Local File)": "sqlite",
-                "Oracle": "oracle"
+                "Oracle": "oracle",
+                "Microsoft Access (Local File)": "access"
             }
             prefix = prefix_map.get(dialect, "postgresql")
 
             if prefix == "sqlite":
                 safe_path = host.replace("\\", "/")
                 db_uri = f"sqlite:///{safe_path}"
+            elif prefix == "access":
+                db_uri = f"access:///{host}"
             else:
                 auth = ""
                 if user or pwd:
@@ -159,6 +162,23 @@ class DatabaseInputExecutor(BaseNode):
                     # Convert backslashes to forward slashes for SQLAlchemy/ADBC
                     safe_path = db_uri.replace("\\", "/")
                     db_uri = f"sqlite:///{safe_path}"
+                    
+            if db_uri.startswith("access:///") or db_uri.endswith(".mdb") or db_uri.endswith(".accdb"):
+                # Handle MS Access separately since polars read_database doesn't support it natively
+                import os
+                
+                # Extract file path
+                if db_uri.startswith("access:///"):
+                    file_path = db_uri[10:]
+                elif db_uri.startswith("access://"):
+                    file_path = db_uri[9:]
+                else:
+                    file_path = db_uri
+                    
+                df = self._parse_access(file_path, query)
+                elapsed = time.time() - start_time
+                self.log(f"Successfully read {df.height} rows and {df.width} columns in {elapsed:.2f} seconds.")
+                return df
 
             # Run the security verification sweep before passing to the engine
             verify_safe_sql_query(query)
@@ -180,3 +200,57 @@ class DatabaseInputExecutor(BaseNode):
             else:
                 self.log(f"Database Error: {str(e)}")
             raise ValueError(f"Failed to read from database: {str(e)}")
+
+    def _parse_access(self, file_path: str, query: str) -> pl.DataFrame:
+        self.log(f"Parsing MS Access Database: {file_path}")
+        import os
+        try:
+            import pyodbc
+        except ImportError:
+            self.log("pyodbc is missing. Attempting dynamic install...")
+            import subprocess
+            import sys
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "pyodbc"], stdout=subprocess.DEVNULL)
+                import pyodbc
+            except Exception as e:
+                raise RuntimeError(f"Could not install pyodbc. Please install it manually: {e}")
+
+        # Check if Microsoft Access Driver is available
+        drivers = pyodbc.drivers()
+        access_driver = None
+        for driver in drivers:
+            if "Microsoft Access Driver" in driver and "(*.mdb, *.accdb)" in driver:
+                access_driver = driver
+                break
+
+        if not access_driver:
+            err_msg = (
+                "Microsoft Access ODBC driver not found on this system. "
+                "Please download and install the 'Microsoft Access Database Engine 2016 Redistributable' "
+                "(or newer) from Microsoft's website. "
+                f"Available ODBC drivers: {drivers}"
+            )
+            self.log(err_msg)
+            raise RuntimeError(err_msg)
+
+        conn_str = f"Driver={{{access_driver}}};DBQ={os.path.abspath(file_path)};"
+        try:
+            conn = pyodbc.connect(conn_str)
+            cursor = conn.cursor()
+            
+            self.log(f"Executing query: {query}")
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            columns = [column[0] for column in cursor.description]
+            
+            if not rows:
+                return pl.DataFrame({c: [] for c in columns})
+                
+            data = [dict(zip(columns, row)) for row in rows]
+            df = pl.DataFrame(data)
+            return df
+            
+        except Exception as e:
+            self.log(f"Error reading Access database: {str(e)}")
+            raise RuntimeError(f"MS Access Error: {str(e)}")

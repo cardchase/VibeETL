@@ -15,16 +15,33 @@ class FileInputNode(BaseNode):
     1. Create a new method (e.g., `_parse_json(self, file_path: str) -> pl.DataFrame`).
     2. Register the extension mapping inside `_get_parser_registry()`.
     """
+import os
+import polars as pl
+import pdfplumber
+import pandas as pd
+from typing import Dict, Any, Callable
+from app.tools.base import BaseNode
+from app.utils.semantic_profiler import profile_and_cast_df
+
+class FileInputNode(BaseNode):
+    """
+    FileInputNode ingests data from local files.
+    
+    COMMUNITY EXTENSIBILITY GUIDE:
+    To add support for a new file type (e.g., JSON, Parquet):
+    1. Create a new method (e.g., `_parse_json(self, file_path: str) -> pl.DataFrame`).
+    2. Register the extension mapping inside `_get_parser_registry()`.
+    """
     
     MANIFEST = {
         "id": "fileInput",
         "name": "File Input",
         "category": "inout",
         "icon": "FileText",
-        "description": "Read data from local CSV, Excel, PDF, or Image files.",
+        "description": "Read data from local CSV, Excel, PDF, Text, or Word files.",
         "ui_schema": [
             {"field": "filePath", "type": "string", "label": "File Path / Name", "default": ""},
-            {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "pdf", "image", "multimodal"], "default": "auto"},
+            {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "pdf", "text", "word"], "default": "auto"},
             {"field": "process_local", "type": "boolean", "label": "Process Media Locally (OCR/Parse vs AI Pass-through)", "default": True},
             {"field": "unleash_hardware", "type": "boolean", "label": "🚀 Unleash Maximum Local Memory (Bypass Frontend Safeguards)", "default": False}
         ]
@@ -128,8 +145,8 @@ class FileInputNode(BaseNode):
             "csv": self._parse_csv,
             "excel": self._parse_excel,
             "pdf": self._parse_pdf,
-            "image": self._parse_image,
-            "multimodal": self._parse_multimodal
+            "text": self._parse_txt,
+            "word": self._parse_word
         }
 
     def _resolve_auto_type(self, ext: str, registry: dict) -> str:
@@ -137,13 +154,9 @@ class FileInputNode(BaseNode):
         if ext == ".csv": return "csv"
         if ext in [".xls", ".xlsx", ".xlsm", ".xlsb", ".ods"]: return "excel"
         if ext == ".pdf": return "pdf"
-        if ext in [".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif", ".webp"]: return "image"
-        if ext in [".mp3", ".wav", ".m4a", ".mp4", ".mov", ".avi", ".mkv", ".webm"]: return "multimodal"
+        if ext == ".txt": return "text"
+        if ext in [".doc", ".docx"]: return "word"
         return "csv" # Fallback
-
-    def _parse_multimodal(self, file_path: str) -> pl.DataFrame:
-        self.log("Multimodal pass-through mode: Flowing raw file path downstream for AI processing.")
-        return pl.DataFrame({"FilePath": [file_path]})
 
     def _parse_csv(self, file_path: str) -> pl.DataFrame:
         delimiter = self.parameters.get("csvDelimiter", ",")
@@ -222,38 +235,56 @@ class FileInputNode(BaseNode):
                 self.log(f"Extracted {len(tables_data)} text lines as a single column.")
             else:
                 raise ValueError("No text or tables could be extracted from this PDF.")
-
         pdf_pd = pd.DataFrame(tables_data, columns=headers)
         df = pl.from_pandas(pdf_pd)
         
         self.log(f"Successfully read PDF. Row count: {df.height}, Column count: {df.width}")
         return df
 
-    def _parse_image(self, file_path: str) -> pl.DataFrame:
-        self.log("Parsing Image text using pytesseract OCR...")
-        try:
-            import pytesseract
-            from PIL import Image
-        except ImportError:
-            err_msg = "pytesseract or Pillow is not installed. Please run: pip install pytesseract pillow"
-            self.log(err_msg)
-            raise ImportError(err_msg)
-
-        try:
-            img = Image.open(file_path)
-            text = pytesseract.image_to_string(img)
-        except Exception as e:
-            err_msg = f"OCR failed. Please ensure Tesseract-OCR is installed. Error: {str(e)}"
-            self.log(err_msg)
-            raise RuntimeError(err_msg)
-
-        text_lines = [line.strip() for line in text.splitlines() if line.strip()] if text else []
-        
-        if not text_lines:
-            self.log("No text could be extracted from the image.")
-            df = pl.DataFrame({"Text_Line": []}, schema={"Text_Line": pl.String})
-        else:
-            df = pl.DataFrame({"Text_Line": text_lines})
+    def _parse_txt(self, file_path: str) -> pl.DataFrame:
+        self.log(f"Parsing Text file: {file_path}")
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = [line.strip() for line in f if line.strip()]
             
-        self.log(f"Successfully read Image OCR. Row count: {df.height}, Column count: {df.width}")
+        if not lines:
+            self.log("Text file is empty.")
+            return pl.DataFrame({"Text": []})
+            
+        df = pl.DataFrame({"Text": lines})
+        self.log(f"Successfully read Text. Row count: {df.height}, Column count: {df.width}")
+        return df
+        
+    def _parse_word(self, file_path: str) -> pl.DataFrame:
+        self.log(f"Parsing Word Document: {file_path}")
+        try:
+            from docx import Document
+        except ImportError:
+            self.log("python-docx is missing. Attempting dynamic install...")
+            import subprocess
+            import sys
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "python-docx"], stdout=subprocess.DEVNULL)
+                from docx import Document
+            except Exception as e:
+                raise RuntimeError(f"Could not install python-docx. Please install it manually: {e}")
+                
+        doc = Document(file_path)
+        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        
+        tables_data = []
+        for table in doc.tables:
+            for row in table.rows:
+                tables_data.append([cell.text.strip() for cell in row.cells])
+                
+        # If there are tables, we can try to return the first table or a combined table view
+        if tables_data:
+            self.log(f"Found {len(doc.tables)} tables in the Word document. Extracting tables...")
+            headers = tables_data[0]
+            data = tables_data[1:]
+            df = pl.DataFrame(data, schema=[f"Col_{i}" if not h else str(h) for i, h in enumerate(headers)], orient="row")
+        else:
+            self.log("No tables found. Extracting paragraphs instead.")
+            df = pl.DataFrame({"Paragraph": paragraphs})
+            
+        self.log(f"Successfully read Word Doc. Row count: {df.height}, Column count: {df.width}")
         return df

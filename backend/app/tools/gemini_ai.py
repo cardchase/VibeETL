@@ -3,11 +3,9 @@ import polars as pl
 from typing import Dict, Any
 from app.tools.base import BaseNode
 
-try:
-    import google.generativeai as genai
-    HAS_GENAI = True
-except ImportError:
-    HAS_GENAI = False
+import sys
+import subprocess
+import site
 
 class GeminiAINode(BaseNode):
     MANIFEST = {
@@ -30,8 +28,20 @@ class GeminiAINode(BaseNode):
         if df is None:
             raise ValueError("Awaiting connection: GeminiAi node requires an incoming data stream.")
 
-        if not HAS_GENAI:
-            raise RuntimeError("The google-generativeai library is not installed on the server.")
+        # Dynamically install or upgrade the google-genai library if missing
+        try:
+            from google import genai
+        except ImportError:
+            self.log("Installing the latest 'google-genai' SDK in the background...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "uv"], stdout=subprocess.DEVNULL)
+            user_site = site.getusersitepackages()
+            subprocess.check_call([
+                sys.executable, "-m", "uv", "pip", "install", "--target", user_site, "google-genai"
+            ])
+            if user_site not in sys.path:
+                sys.path.append(user_site)
+            from google import genai
+            self.log("Successfully installed 'google-genai' SDK.")
 
         input_column = self.parameters.get("input_column", "")
         output_column = self.parameters.get("output_column", "AI_Response")
@@ -48,8 +58,8 @@ class GeminiAINode(BaseNode):
         if not key_to_use:
             raise ValueError("Missing Gemini API Key. Provide it in the tool settings or set the GEMINI_API_KEY environment variable.")
 
-        genai.configure(api_key=key_to_use)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        client = genai.Client(api_key=key_to_use)
+        model_name = 'gemini-1.5-flash'
 
         self.log(f"Preparing to run Gemini AI on column '{input_column}' into '{output_column}' for {df.height} rows...")
         
@@ -70,17 +80,23 @@ class GeminiAINode(BaseNode):
                 # Check for multimodal file processing (Image, Audio, Video)
                 if os.path.isfile(val_str):
                     self.log(f"Row {idx}: Detected local file path, uploading to Gemini: {val_str}")
-                    uploaded_file = genai.upload_file(val_str)
+                    uploaded_file = client.files.upload(file=val_str)
                     
                     try:
-                        response = model.generate_content([formatted_prompt, uploaded_file])
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=[formatted_prompt, uploaded_file]
+                        )
                         ai_responses.append(response.text.strip())
                     finally:
                         # Ensure we securely delete the file from Google servers
-                        uploaded_file.delete()
+                        client.files.delete(name=uploaded_file.name)
                 else:
                     # Text-only processing
-                    response = model.generate_content(formatted_prompt)
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=formatted_prompt
+                    )
                     ai_responses.append(response.text.strip())
 
                 if idx > 0 and idx % 10 == 0:

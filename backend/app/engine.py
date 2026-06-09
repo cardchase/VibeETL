@@ -12,7 +12,7 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
       - nodes: List[Dict[str, Any]]
       - edges: List[Dict[str, Any]]
     """
-    cache.add_global_log("Initializing pipeline execution...")
+    pipeline_start_time = time.time()
 
     nodes_list = pipeline_data.get("nodes", [])
     edges_list = pipeline_data.get("edges", [])
@@ -43,6 +43,7 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
                 cached_node_ids.add(n["id"])
 
     cache.clear_except(list(cached_node_ids))
+    cache.add_global_log("Initializing pipeline execution...")
 
     enabled_nodes = []
     for n in nodes_list:
@@ -138,6 +139,16 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
         start_time = time.time()
         node_logs = [f"Node '{node_name}' initialization..."]
 
+        if cache.is_cancelled(node_id):
+            duration = (time.time() - start_time) * 1000
+            err_msg = "Execution cancelled by user."
+            cache.set_node_error(node_id, err_msg, duration, node_logs + [err_msg])
+            cache.add_global_log(f"Node '{node_name}' execution aborted (Cancelled).")
+            # If global cancel is true, break the entire pipeline execution loop
+            if cache.is_cancelled():
+                break
+            continue
+
         if node_id in cached_node_ids:
             cache.add_global_log(f"Node '{node_name}' is cached. Skipping execution and using existing data.")
             # Ensure it is in the results payload so the frontend knows it was successful
@@ -197,6 +208,9 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             # Instantiate executor
             executor = node_class(node_id, parameters)
             
+            # Inject cancellation lambda
+            executor.is_cancelled = lambda: cache.is_cancelled(node_id)
+            
             # Inject upstream semantic metadata for nodes that need it (e.g. Visualization)
             executor.upstream_semantic_metadata = input_metadata
             
@@ -234,7 +248,8 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             cache.set_node_error(node_id, err_msg, duration, node_logs + [f"Runtime Exception: {err_msg}"])
             cache.add_global_log(f"Node '{node_name}' execution failed: {err_msg}")
 
-    cache.add_global_log("Pipeline execution finished.")
+    total_time = (time.time() - pipeline_start_time) * 1000
+    cache.add_global_log(f"Pipeline execution finished in {total_time:.1f}ms.")
     return {
         "status": "success",
         "global_logs": cache.get_global_logs(),

@@ -25,6 +25,22 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
   const [uploadSuccessMessage, setUploadSuccessMessage] = useState('');
   const authFileInputRef = useRef(null);
 
+  const [runStatus, setRunStatus] = useState('idle');
+  const prevIsRunning = useRef(isRunning);
+
+  useEffect(() => {
+    if (prevIsRunning.current === true && isRunning === false) {
+      setRunStatus('completed');
+      const timer = setTimeout(() => {
+        setRunStatus('idle');
+      }, 2000);
+      return () => clearTimeout(timer);
+    } else if (isRunning === true) {
+      setRunStatus('running');
+    }
+    prevIsRunning.current = isRunning;
+  }, [isRunning]);
+
   useEffect(() => {
     const handleHistoryUpdate = (e) => {
       setCanUndo(e.detail.canUndo);
@@ -470,24 +486,42 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
           </button>
         )}
 
-        <button
-          className="run-button"
-          onClick={onRunPipeline}
-          disabled={isRunning}
-          title="Run the entire pipeline from start to finish"
-        >
-          {isRunning ? (
-            <>
-              <RefreshCw className="animate-spin" size={16} />
-              <span>Running...</span>
-            </>
-          ) : (
-            <>
-              <Play size={16} fill="white" />
-              <span>Run</span>
-            </>
-          )}
-        </button>
+        {runStatus === 'running' ? (
+          <button
+            className="run-button"
+            onClick={async () => {
+              try {
+                await fetch('http://localhost:8000/api/cancel', { method: 'POST' });
+              } catch (e) {
+                console.error("Failed to cancel pipeline:", e);
+              }
+            }}
+            style={{ background: '#ef4444', color: 'white', border: '1px solid #dc2626' }}
+            title="Stop the running pipeline"
+          >
+            <Icons.Square size={14} fill="white" strokeWidth={3} />
+            <span>Stop</span>
+          </button>
+        ) : (
+          <button
+            className="run-button"
+            onClick={onRunPipeline}
+            disabled={runStatus === 'completed'}
+            title="Run the entire pipeline from start to finish"
+          >
+            {runStatus === 'completed' ? (
+              <>
+                <Icons.Check size={16} color="var(--color-success)" strokeWidth={3} />
+                <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>Completed</span>
+              </>
+            ) : (
+              <>
+                <Play size={16} fill="white" />
+                <span>Run</span>
+              </>
+            )}
+          </button>
+        )}
 
         <button
           className="run-button"

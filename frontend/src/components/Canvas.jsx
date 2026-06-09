@@ -127,14 +127,36 @@ const CanvasContent = ({
       // Check if dropped element is valid
       if (!type) return;
 
-      const position = screenToFlowPosition({
+      let position = screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       });
 
+      // Prevent stacking - Find closest available area "1 tool apart" (Alteryx style)
+      let conflict = true;
+      let offsetMultiplier = 0;
+      
+      while (conflict && offsetMultiplier < 20) {
+        // A standard tool is roughly 150x80. If another tool is within 160px X and 100px Y, it's overlapping.
+        // eslint-disable-next-line no-loop-func
+        conflict = nodes.some(n => 
+          Math.abs(n.position.x - position.x) < 160 && 
+          Math.abs(n.position.y - position.y) < 100
+        );
+        
+        if (conflict) {
+          offsetMultiplier++;
+          // Shift exactly "1 tool apart" to the right
+          position = {
+            x: position.x + 200,
+            y: position.y
+          };
+        }
+      }
+
       onAddNode(type, position);
     },
-    [screenToFlowPosition, onAddNode]
+    [screenToFlowPosition, onAddNode, nodes]
   );
 
   const onNodeClick = useCallback((event, node) => {
@@ -179,11 +201,15 @@ const CanvasContent = ({
             x: refNode.position.x + 250,
             y: refNode.position.y
           };
-        } else if (lastClickedPosition) {
-          // If no node is selected, use the exact coordinates of their last canvas click
-          position = { ...lastClickedPosition };
+        } else if (nodes.length > 0) {
+          // If no node is selected, place it to the right of the right-most node
+          const rightMostNode = nodes.reduce((prev, current) => (prev.position.x > current.position.x) ? prev : current);
+          position = {
+            x: rightMostNode.position.x + 250,
+            y: rightMostNode.position.y
+          };
         } else {
-          // Fallback for empty canvas or no prior clicks: center it relative to the viewport
+          // Fallback for empty canvas: center it relative to the viewport
           const bounds = reactFlowWrapper.current.getBoundingClientRect();
           position = screenToFlowPosition({
             x: bounds.x + bounds.width / 2 - 100,
@@ -191,22 +217,23 @@ const CanvasContent = ({
           });
         }
         
-        // Prevent stacking
+        // Prevent stacking - Find closest available area "1 tool apart" (Alteryx style)
         let conflict = true;
         let offsetMultiplier = 0;
         
         while (conflict && offsetMultiplier < 20) {
           // eslint-disable-next-line no-loop-func
           conflict = nodes.some(n => 
-            Math.abs(n.position.x - position.x) < 30 && 
-            Math.abs(n.position.y - position.y) < 30
+            Math.abs(n.position.x - position.x) < 160 && 
+            Math.abs(n.position.y - position.y) < 100
           );
           
           if (conflict) {
             offsetMultiplier++;
+            // Shift exactly "1 tool apart" to the right
             position = {
-              x: position.x + 30,
-              y: position.y + 30
+              x: position.x + 200,
+              y: position.y
             };
           }
         }

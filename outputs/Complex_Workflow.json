@@ -1,0 +1,177 @@
+{
+  "nodes": [
+    {
+      "id": "node_1",
+      "type": "fileInput",
+      "position": { "x": 20, "y": 150 },
+      "data": {
+        "label": "File Input",
+        "category": "inout",
+        "icon": "FileText",
+        "parameters": {
+          "filePath": "data_historical.csv",
+          "fileType": "auto",
+          "process_local": true,
+          "csvDelimiter": ",",
+          "csvHeader": true
+        },
+        "status": "idle"
+      },
+      "measured": { "width": 34, "height": 34 },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_2",
+      "type": "select",
+      "position": { "x": 220, "y": 150 },
+      "data": {
+        "label": "Select Columns",
+        "category": "prep",
+        "icon": "MousePointerClick",
+        "parameters": {
+          "columns": [
+            { "name": "Country", "keep": true },
+            { "name": "FT_HomeScore", "keep": true },
+            { "name": "FT_AwayScore", "keep": true }
+          ]
+        },
+        "status": "idle"
+      },
+      "measured": { "width": 34, "height": 34 },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_3",
+      "type": "formula",
+      "position": { "x": 420, "y": 150 },
+      "data": {
+        "label": "Calculate Total Goals",
+        "category": "prep",
+        "icon": "Calculator",
+        "parameters": {
+          "output_column": "TotalGoals",
+          "expression": "[FT_HomeScore] + [FT_AwayScore]"
+        },
+        "status": "idle"
+      },
+      "measured": { "width": 34, "height": 34 },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_4",
+      "type": "filter",
+      "position": { "x": 620, "y": 150 },
+      "data": {
+        "label": "Filter High Scoring",
+        "category": "prep",
+        "icon": "Filter",
+        "parameters": {
+          "column": "TotalGoals",
+          "operator": ">",
+          "value": "2"
+        },
+        "status": "idle"
+      },
+      "measured": { "width": 34, "height": 34 },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_5",
+      "type": "summarize",
+      "position": { "x": 820, "y": 150 },
+      "data": {
+        "label": "Aggregate by Country",
+        "category": "transform",
+        "icon": "Sigma",
+        "parameters": {
+          "actions": [
+            { "column": "Country", "action": "group_by", "output": "Country" },
+            { "column": "TotalGoals", "action": "sum", "output": "TotalGoals_Sum" }
+          ]
+        },
+        "status": "idle"
+      },
+      "measured": { "width": 34, "height": 34 },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_6",
+      "type": "sort",
+      "position": { "x": 1020, "y": 150 },
+      "data": {
+        "label": "Sort Descending",
+        "category": "prep",
+        "icon": "ArrowDownAZ",
+        "parameters": {
+          "sort_rules": [
+            { "column": "TotalGoals_Sum", "descending": true }
+          ]
+        },
+        "status": "idle"
+      },
+      "measured": { "width": 34, "height": 34 },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_7",
+      "type": "visualization",
+      "position": { "x": 1220, "y": 150 },
+      "data": {
+        "label": "Bar Chart",
+        "category": "analysis",
+        "icon": "BarChart3",
+        "parameters": {
+          "chartType": "bar",
+          "xAxis": "Country",
+          "yAxis": "TotalGoals_Sum",
+          "colorBy": "",
+          "barmode": "group",
+          "title": "Total Goals by Country (Matches > 2 Goals)"
+        },
+        "status": "idle"
+      },
+      "measured": { "width": 34, "height": 34 },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_8",
+      "type": "fileOutput",
+      "position": { "x": 1420, "y": 150 },
+      "data": {
+        "label": "Export Chart",
+        "category": "inout",
+        "icon": "Save",
+        "parameters": {
+          "saveFile": true,
+          "outputPath": "Goals_Chart.html",
+          "outputFormat": "html"
+        },
+        "status": "idle"
+      },
+      "measured": { "width": 34, "height": 34 },
+      "selected": false,
+      "dragging": false
+    }
+  ],
+  "edges": [
+    { "id": "e1-2", "source": "node_1", "target": "node_2", "sourceHandle": "output", "targetHandle": "input" },
+    { "id": "e2-3", "source": "node_2", "target": "node_3", "sourceHandle": "output", "targetHandle": "input" },
+    { "id": "e3-4", "source": "node_3", "target": "node_4", "sourceHandle": "output", "targetHandle": "input" },
+    { "id": "e4-5", "source": "node_4", "target": "node_5", "sourceHandle": "true", "targetHandle": "input" },
+    { "id": "e5-6", "source": "node_5", "target": "node_6", "sourceHandle": "output", "targetHandle": "input" },
+    { "id": "e6-7", "source": "node_6", "target": "node_7", "sourceHandle": "output", "targetHandle": "input" },
+    { "id": "e7-8", "source": "node_7", "target": "node_8", "sourceHandle": "output", "targetHandle": "input" }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

@@ -1,0 +1,20 @@
+=========================================
+GCS Input Tool (gcs_in) Documentation
+=========================================
+
+Purpose:
+--------
+Read datasets directly from Google Cloud Storage buckets.
+
+Parameters:
+-----------
+- bucket (String): GCS Bucket Name (e.g., my-data-bucket).
+- path (String): Path to the file within the bucket (e.g., data/file.csv).
+
+Authentication:
+---------------
+- Uses the Global Cloud Credentials uploaded via the top toolbar.
+
+Schema Outputs:
+---------------
+- Dynamic: Evaluated from the downloaded file.

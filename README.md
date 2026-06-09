@@ -59,7 +59,7 @@ VibeETL bridges the gap between complex code-based data preparation and heavy en
 - 🤝 **Share & Collaborate**: Because workflows are saved as ultra-lightweight JSON files, you can instantly share them over Slack, Discord, or GitHub! The community can load your exact pipeline to help you debug errors, build custom visualizations, or extend your data models.
 - 🛡️ **Zero Data-Loss Auto-Recover**: VibeETL features an enterprise-grade, two-tier autosave system. Workflows are instantly cached to your browser locally, while a debounced network process physically streams rolling `.autosave` increments to your backend server to protect you against catastrophic cache-wipes!
 - 🗂️ **Multi-Tabbed Workspaces**: Work on multiple isolated DAGs simultaneously, just like a modern IDE! Open, swap, and execute multiple independent pipelines via a seamless tab bar without ever overwriting your progress.
-- 📂 **Flexible I/O**: Ingest CSVs, Excel files, Images (via AI OCR), parse tables directly out of PDFs, or write out fully interactive HTML visualizations.
+- 📂 **Flexible I/O**: Ingest CSVs, Excel files, Text files, Word Documents, Database files (SQLite, Microsoft Access), parse tables directly out of PDFs, or write out fully interactive HTML visualizations.
 - ☁️ **Global Cloud Integrations**: VibeETL features a unified authentication system for cloud providers. Upload a Google Cloud `Service Account JSON` or `OAuth 2.0 Client Secret` exactly once in the global toolbar to instantly and securely authenticate all downstream cloud nodes simultaneously!
 - **Self-Hosted & Privacy-First**: Run both the web UI and the execution engine entirely on your local machine. No external APIs required (unless explicitly using the Gemini node).
 
@@ -100,7 +100,7 @@ VibeETL comes pre-loaded with an extensive suite of data engineering nodes, eleg
 | :--- | :--- | :--- |
 | **In / Out** | Green 🟢 | `File Input`, `Database Input`, `Browse`, `File Output`, `Database Output`, `Image Ingest` |
 | **Cloud** | Cyan 🩵 | `Google Sheets In`, `Google Sheets Out`, `GCS Input`, `GCS Output` |
-| **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Cleanse`, `Formula Compute`, `Unique`, `Regex`, `Record ID`, `Sample Records` |
+| **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Cleanse`, `Formula Compute`, `Unique`, `Regex`, `Record ID`, `Sample Records`, `Field Info` |
 | **Transform** | Orange 🟠 | `Select`, `Pivot`, `Unpivot`, `Summarize`, `Date Time` |
 | **Join** | Purple 🟣 | `Union`, `Join` |
 | **Analysis** | Pink 🦩 | `Gemini AI (Multimodal LLM)`, `Visualization`, `Python Code`, `LLM Chunker` |

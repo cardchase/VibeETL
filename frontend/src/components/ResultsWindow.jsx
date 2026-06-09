@@ -14,6 +14,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
   const [dataCopied, setDataCopied] = useState(false);
   const [wrapText, setWrapText] = useState(false);
   const [selectedRowCount, setSelectedRowCount] = useState(0);
+  const [previewImage, setPreviewImage] = useState(null);
   
   const gridRef = useRef(null);
 
@@ -55,18 +56,20 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
 
       const colDef = {
         field: col.name,
-        headerName: col.name,
+        headerName: `${col.name} \n(${col.type})`,
         filter: filterType,
         sortable: true,
         resizable: true,
         wrapText: wrapText,
-        autoHeight: wrapText
+        autoHeight: wrapText,
+        wrapHeaderText: true,
+        autoHeaderHeight: true
       };
 
       if (col.semantic_type === 'currency_usd') {
-        colDef.headerName = col.name + ' ($)';
+        colDef.headerName = `${col.name} ($) \n(${col.type})`;
       } else if (col.semantic_type === 'percentage') {
-        colDef.headerName = col.name + ' (%)';
+        colDef.headerName = `${col.name} (%) \n(${col.type})`;
       }
 
       return colDef;
@@ -140,7 +143,22 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
       setDataCopied(true);
       setTimeout(() => setDataCopied(false), 2000);
     });
-  }, [schema]);
+  }, [schema, selectedNode]);
+
+  const handleExportHtml = () => {
+    if (!previewData || previewData.length === 0 || !previewData[0]['__vibe_html_payload__']) return;
+    
+    const htmlContent = previewData[0]['__vibe_html_payload__'];
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `VibeETL_Report_${selectedNode?.data?.label || 'export'}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="results-window" style={style}>
@@ -267,7 +285,33 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                   }}>
                     <div style={{ padding: '12px 16px', background: '#ffffff', borderBottom: '1px solid #e2e8f0', fontSize: '0.85rem', fontWeight: 600, color: '#475569', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ whiteSpace: 'nowrap', marginRight: '30px' }}>Interactive Report Visualization 📊</span>
-                      <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#94a3b8', whiteSpace: 'nowrap' }}>Hover to export</span>
+                      <button 
+                        onClick={handleExportHtml}
+                        style={{ 
+                          fontSize: '0.75rem', 
+                          fontWeight: 600, 
+                          color: '#ffffff', 
+                          backgroundColor: '#3b82f6',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '4px 10px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
+                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#3b82f6'}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                          <polyline points="7 10 12 15 17 10"></polyline>
+                          <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        Download HTML
+                      </button>
                     </div>
                     <iframe 
                       srcDoc={previewData[0]['__vibe_html_payload__']} 
@@ -309,8 +353,35 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button 
                         className="copy-logs-btn" 
-                        onClick={() => {
-                          window.open(`http://localhost:8000/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}`, '_blank');
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`http://localhost:8000/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}`);
+                            if (!res.ok) {
+                              const errData = await res.json();
+                              alert(`Download failed: ${errData.detail || res.statusText}`);
+                              return;
+                            }
+                            const blob = await res.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            
+                            // Extract filename from Content-Disposition header if possible
+                            const disposition = res.headers.get('Content-Disposition');
+                            let filename = `VibeETL_Export_${nodeId}_${activePort || 'output'}.csv`;
+                            if (disposition && disposition.includes('filename=')) {
+                                const match = disposition.match(/filename="?([^"]+)"?/);
+                                if (match && match[1]) filename = match[1];
+                            }
+                            
+                            a.download = filename;
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            window.URL.revokeObjectURL(url);
+                          } catch (err) {
+                            alert(`Download failed: ${err.message}`);
+                          }
                         }}
                       >
                         <FileText size={12} />
@@ -344,6 +415,22 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                         cellRenderer: (params) => {
                           if (params.value === null) {
                             return <span style={{ color: 'var(--text-secondary, #888)', fontStyle: 'italic' }}>null</span>;
+                          }
+                          if (typeof params.value === 'string' && 
+                              (params.colDef.field === 'FilePath' || params.colDef.field === 'ImagePath' || params.colDef.field === 'ResolvedPath') && 
+                              (params.value.toLowerCase().endsWith('.jpg') || params.value.toLowerCase().endsWith('.png') || params.value.toLowerCase().endsWith('.jpeg'))) {
+                            return (
+                              <a 
+                                href="#" 
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  setPreviewImage(params.value);
+                                }}
+                                style={{ color: '#3b82f6', textDecoration: 'underline', cursor: 'pointer' }}
+                              >
+                                {params.value}
+                              </a>
+                            );
                           }
                           if (typeof params.value === 'boolean') {
                             return String(params.value);
@@ -380,7 +467,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
               <div style={{ color: 'var(--text-muted)' }}>Console is empty. Run the workflow to generate logs.</div>
             ) : (
               <>
-                {globalLogs.length > 0 && (
+                {!selectedNode && globalLogs.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8 }}>
                       <div style={{ color: 'var(--color-accent)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -398,16 +485,28 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                     ))}
                   </div>
                 )}
-                {selectedNode && nodeLogs.length > 0 && (
+                {selectedNode && (
                   <div>
-                    <div style={{ color: 'var(--color-inout)', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Terminal size={12} /> SELECTED NODE LOGS ({selectedNode.data?.label || selectedNode.id})
-                    </div>
-                    {nodeLogs.map((log, idx) => (
-                      <div key={`n-${idx}`} className={`log-entry ${typeof log === 'string' && log.toLowerCase().includes('error') ? 'error' : typeof log === 'string' && log.toLowerCase().includes('warning') ? 'warning' : ''}`}>
-                        {log}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--color-inout)', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Terminal size={12} /> SELECTED NODE LOGS ({selectedNode.data?.label || selectedNode.id})
                       </div>
-                    ))}
+                      <button className="copy-logs-btn" onClick={handleCopyLogs}>
+                        {copied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
+                        {copied ? "Copied" : "Copy Logs"}
+                      </button>
+                    </div>
+                    {nodeLogs.length > 0 ? (
+                      nodeLogs.map((log, idx) => (
+                        <div key={`n-${idx}`} className={`log-entry ${typeof log === 'string' && log.toLowerCase().includes('error') ? 'error' : typeof log === 'string' && log.toLowerCase().includes('warning') ? 'warning' : ''}`}>
+                          {log}
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic', padding: '10px 0' }}>
+                        No logs available for this node yet.
+                      </div>
+                    )}
                   </div>
                 )}
               </>
@@ -415,6 +514,33 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
           </div>
         )}
       </div>
+
+      {previewImage && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 99999
+        }} onClick={() => setPreviewImage(null)}>
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
+            <img 
+              src={`http://localhost:8000/api/local-image?path=${encodeURIComponent(previewImage)}`} 
+              style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', backgroundColor: 'white' }}
+              alt="Preview"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button 
+              onClick={(e) => { e.stopPropagation(); setPreviewImage(null); }}
+              style={{ position: 'absolute', top: -30, right: -30, background: 'none', border: 'none', color: 'white', fontSize: '28px', cursor: 'pointer' }}
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

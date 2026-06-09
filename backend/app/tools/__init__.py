@@ -16,9 +16,13 @@ from app.tools.join import JoinNode
 from app.tools.summarize import SummarizeNode
 from app.tools.unique import UniqueNode
 from app.tools.visualization import VisualizationNode
+from app.tools.report_builder import ReportBuilderNode
 from app.tools.database_input import DatabaseInputExecutor
 from app.tools.database_output import DatabaseOutputExecutor
 from app.tools.record_id import RecordIDNode
+from app.tools.field_info import FieldInfoNode
+from app.tools.folder_input import FolderInputNode
+from app.tools.dynamic_input import DynamicInputNode
 
 from app.tools.gemini_ai import GeminiAINode
 from app.tools.datetime_parser import DateTimeNode
@@ -35,6 +39,9 @@ NODE_CLASSES = {
     "databaseInput": DatabaseInputExecutor,
     "databaseOutput": DatabaseOutputExecutor,
     "fileOutput": FileOutputNode,
+    "reportBuilder": ReportBuilderNode,
+    "folderInput": FolderInputNode,
+    "dynamicInput": DynamicInputNode,
     "filter": FilterNode,
     "sort": SortNode,
     "select": SelectNode,
@@ -59,5 +66,6 @@ NODE_CLASSES = {
     "gcs_in": GCSInputNode,
     "gcs_out": GCSOutputNode,
     "google_sheets_in": GoogleSheetsInputNode,
-    "google_sheets_out": GoogleSheetsOutputNode
+    "google_sheets_out": GoogleSheetsOutputNode,
+    "fieldInfo": FieldInfoNode
 }

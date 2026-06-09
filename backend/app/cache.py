@@ -8,6 +8,29 @@ class PipelineCache:
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._global_logs: List[str] = []
         self._node_statuses: Dict[str, str] = {}
+        self._global_cancel_flag: bool = False
+        self._cancelled_nodes: set = set()
+
+    def cancel_pipeline(self):
+        with self._lock:
+            self._global_cancel_flag = True
+
+    def cancel_node(self, node_id: str):
+        with self._lock:
+            self._cancelled_nodes.add(node_id)
+
+    def reset_cancellations(self):
+        with self._lock:
+            self._global_cancel_flag = False
+            self._cancelled_nodes.clear()
+
+    def is_cancelled(self, node_id: str = None) -> bool:
+        with self._lock:
+            if self._global_cancel_flag:
+                return True
+            if node_id and node_id in self._cancelled_nodes:
+                return True
+            return False
 
     def clear(self):
         with self._lock:
@@ -167,8 +190,12 @@ class PipelineCache:
             return payload
 
     def add_global_log(self, message: str):
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        formatted = f"[{ts}] {message}"
+        print(f"[GLOBAL LOG] {formatted}")
         with self._lock:
-            self._global_logs.append(message)
+            self._global_logs.append(formatted)
 
     def get_global_logs(self) -> List[str]:
         with self._lock:

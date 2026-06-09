@@ -18,6 +18,8 @@ class BaseNode:
         self.logs: List[str] = []
 
     def log(self, message: str):
+        node_name = self.MANIFEST.get("name", self.node_id)
+        print(f"[NODE LOG - {node_name}] {message}")
         self.logs.append(message)
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:

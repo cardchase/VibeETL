@@ -484,7 +484,8 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <option value="csv">CSV (Comma-Separated)</option>
             <option value="excel">Excel Spreadsheet</option>
             <option value="pdf">PDF Document (Tables)</option>
-            <option value="image">Image (OCR Text)</option>
+            <option value="text">Text File (.txt)</option>
+            <option value="word">Word Document (.docx)</option>
           </SafeSelect>
         </div>
 
@@ -1085,9 +1086,71 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           />
         </div>
 
-        <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', lineHeight: '1.4', marginTop: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '8px' }}>
-          <p><strong>Image Ingest & Description Model</strong> compiles visual characteristics of the picture locally using standard CPU instruction pipelines.</p>
-          <p style={{ marginTop: 5 }}>On its first execution, a lightweight <strong>ViT-GPT2 Visual Network ONNX model</strong> is cached. It automatically outputs descriptive semantic tags (e.g. format, sizes, generated caption description) directly into your downstream data stream using a pure CPU <strong>ONNX Runtime</strong> session (no GPU or PyTorch required!).</p>
+        {/* Dynamic GPU Configurations from Schema - Elegant Dense Layout */}
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '12px', 
+          marginTop: '16px',
+          paddingTop: '16px',
+          borderTop: '1px solid var(--border-color)'
+        }}>
+          {toolDef && toolDef.ui_schema && toolDef.ui_schema.filter(f => f.field !== 'imagePath').map((fieldDef) => {
+            if (fieldDef.type === 'select') {
+              return (
+                <div className="form-group" key={fieldDef.field} style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    {fieldDef.field === 'execution_mode' && <span style={{ color: '#8b5cf6' }}>⚙️</span>}
+                    {fieldDef.field === 'gpu_vram' && <span style={{ color: '#10b981' }}>💾</span>}
+                    {fieldDef.field === 'model_size' && <span style={{ color: '#f59e0b' }}>🧠</span>}
+                    {fieldDef.label}
+                  </label>
+                  <select
+                    className="form-select"
+                    style={{ fontSize: '0.75rem', padding: '6px 8px' }}
+                    value={parameters[fieldDef.field] !== undefined ? parameters[fieldDef.field] : fieldDef.default}
+                    onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
+                  >
+                    {fieldDef.options.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            } else if (fieldDef.type === 'string') {
+              return (
+                <div className="form-group" key={fieldDef.field} style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ color: '#ec4899' }}>✍️</span>
+                    {fieldDef.label}
+                  </label>
+                  <SafeTextarea
+                    style={{ fontSize: '0.75rem', padding: '6px 8px', minHeight: '60px', width: '100%', resize: 'vertical', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}
+                    value={parameters[fieldDef.field] !== undefined ? parameters[fieldDef.field] : fieldDef.default}
+                    onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
+                  />
+                </div>
+              );
+            }
+            return null;
+          })}
+        </div>
+
+        <div style={{ 
+          color: 'var(--text-secondary)', 
+          fontSize: '0.72rem', 
+          lineHeight: '1.4', 
+          marginTop: 16, 
+          background: 'linear-gradient(to right, rgba(139, 92, 246, 0.05), rgba(59, 130, 246, 0.05))', 
+          border: '1px solid rgba(139, 92, 246, 0.2)', 
+          borderRadius: '8px', 
+          padding: '12px' 
+        }}>
+          <p style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: '#4f46e5', marginBottom: '6px' }}>
+            <span style={{ fontSize: '1rem' }}>✨</span> VLM Extraction Engine
+          </p>
+          <p>Analyzes visual characteristics, extracts tabular data, and reads inline text using <strong>Qwen2-VL</strong>.</p>
+          <p style={{ marginTop: 6, fontSize: '0.65rem', color: '#64748b' }}>Models are cached in VRAM after first execution for 0ms latency on subsequent runs. Adjust VRAM limits to prevent OutOfMemory errors on 6GB/8GB cards.</p>
         </div>
       </>
     );

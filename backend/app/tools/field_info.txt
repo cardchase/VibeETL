@@ -1,0 +1,22 @@
+=========================================
+Field Info Tool (fieldInfo) Documentation
+=========================================
+
+Purpose:
+--------
+Outputs the schema metadata of an incoming data stream. Similar to Alteryx's
+Field Info tool, it takes any input dataframe and returns a new dataframe where
+each row describes a column from the input dataset.
+
+Parameters:
+-----------
+- No UI configuration required. Simply connect it to the output port of any node.
+
+Schema Outputs:
+---------------
+Outputs a fixed data frame containing exactly 5 columns:
+- Name (String): The name of the incoming column.
+- Type (String): The foundational Polars data type (e.g. Int64, String, Date).
+- Semantic_Type (String): VibeETL logical type detected (e.g. currency_usd).
+- Null_Count (Int64): The count of null or empty values present in that column.
+- Sample_Value (String): A stringified sample of the first valid data point in the column.

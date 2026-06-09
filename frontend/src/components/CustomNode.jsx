@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
 import * as Icons from 'lucide-react';
 
@@ -7,6 +7,7 @@ const CustomNode = ({ id, data, selected, type }) => {
   const category = data?.category || 'inout';
   const status = data?.status || 'idle'; // idle, success, error, running
   
+  const [isHoveringCancel, setIsHoveringCancel] = useState(false);
   const reactFlow = useReactFlow();
 
   // Determine display description dynamically based on common parameter fields (supports custom tools out-of-the-box!)
@@ -125,7 +126,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             onClick={(e) => handleAnchorClick(e, 'target', 'right')}
           />
         </>
-      ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'image_caption', 'imageCaption', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn'].includes(type)) ? (
+      ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'folder_input', 'folderInput', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn'].includes(type)) ? (
         <Handle
           type="target"
           position={Position.Left}
@@ -149,8 +150,22 @@ const CustomNode = ({ id, data, selected, type }) => {
           <div className={`node-status-dot ${status}`} title={`Status: ${status}`} />
         )}
         {status === 'running' && (
-          <div className="node-status-running" title="Processing...">
-            <Icons.Loader2 size={12} className="animate-spin" style={{ color: '#3b82f6' }} />
+          <div 
+            className="node-status-running" 
+            title="Processing... Click to stop this node."
+            onMouseEnter={() => setIsHoveringCancel(true)}
+            onMouseLeave={() => setIsHoveringCancel(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              fetch(`http://localhost:8000/api/cancel/${id}`, { method: 'POST' }).catch(console.error);
+            }}
+            style={{ cursor: 'pointer', pointerEvents: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {isHoveringCancel ? (
+              <Icons.Square size={10} fill="#ef4444" color="#ef4444" />
+            ) : (
+              <Icons.Loader2 size={12} className="animate-spin" style={{ color: '#3b82f6' }} />
+            )}
           </div>
         )}
         {status === 'skipped' && (

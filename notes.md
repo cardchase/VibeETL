@@ -33,3 +33,16 @@ Today we implemented a significant number of architectural, backend, and UI/UX i
 ### 5. Housekeeping
 - Purged temporary testing files (`test.db`, `test_sheet.csv`) from the root directory to maintain repository cleanliness.
 - Updated documentation and `Nodes_Reference.md` to showcase the new GPU capabilities.
+
+## June 9, 2026 - Batch Processing & Folder Ingestion
+- Implemented `Folder Input` node to recursively scan local directories and output a DataFrame containing file metadata (FilePath, FileName, Extension, Size).
+- Implemented `Dynamic Input` node to iterate through a list of file paths (like those output by Folder Input) and dynamically read and merge standard data files (CSV, Excel) into a single Polars DataFrame. It uses `pl.concat(..., how="diagonal")` to handle heterogeneous schemas smoothly.
+  - **New Feature**: Added optional Reference Schema validation. If a `referenceFilePath` is provided, the node extracts its schema and compares all incoming batch files against it, logging detailed missing/extra column warnings. Added a "Strict (Align to Reference)" mode that pads missing columns with nulls and permanently drops extra columns to guarantee a 1:1 structural match to the reference template.
+- Upgraded `Image Ingest` node to natively support batch processing. When a DataFrame with a `FilePath` column (e.g. from `Folder Input`) is connected, it automatically iterates and processes all images instead of relying on the single-image configuration field.
+- Fixed a frontend UI bug where text inputs (like Custom Prompts) were not rendering in node configuration panels.
+
+## June 9, 2026 - Workflow Cancellation & Engine Stability
+- Implemented **Global Workflow Cancellation**: Users can now stop a running pipeline instantly. The execution engine (`engine.py`) has been upgraded to respect a `_global_cancel_flag` in the memory cache, aborting the topological sort loop gracefully without crashing the server.
+- Implemented **Per-Node Interactive Cancellation**: Added an interactive hover-state to the spinning loader on the ReactFlow canvas (`CustomNode.jsx`). Users can hover over any running node and click the red Stop square to send a targeted kill signal to just that node (`POST /api/cancel/{node_id}`).
+- Upgraded the `Image Ingest` tool to explicitly check `self.is_cancelled()` during its image batch loop, allowing it to safely abort mid-execution without waiting for 100+ images to finish processing. Downstream nodes naturally fail due to missing dependencies, while upstream cached data remains fully intact.
+- Resolved a critical threadpool deadlock issue where the development server would hang completely if auto-reloaded while a background execution thread was running an uncancellable loop.

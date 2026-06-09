@@ -1,0 +1,17 @@
+=========================================
+Google Sheets Out Tool (google_sheets_out) Documentation
+=========================================
+
+Purpose:
+--------
+Write datasets directly to Google Sheets using global credentials.
+
+Parameters:
+-----------
+- spreadsheet_id_or_url (String): The full URL or unique ID of the Google Sheet.
+- worksheet_name (String): Optional name of the specific tab to write to.
+- write_mode (String): Overwrite or Append data.
+
+Authentication:
+---------------
+- Uses the Global Cloud Credentials uploaded via the top toolbar (Service Account JSON or OAuth 2.0).

@@ -1,6 +1,6 @@
 # DB-In Node
 
-Read data from SQL Databases (PostgreSQL, MySQL, SQLite) using high-speed Polars connectors.
+Read data from SQL Databases (PostgreSQL, MySQL, SQLite, Oracle, SQL Server, and Microsoft Access .mdb/.accdb) using high-speed Polars connectors and PyODBC.
 
 ## Parameters:
 - **Connection String (URI)**: The SQLAlchemy or ADBC connection string (e.g. `postgresql://user:pass@host:5432/dbname`).

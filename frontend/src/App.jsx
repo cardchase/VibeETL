@@ -235,6 +235,7 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [selectedHandle, setSelectedHandle] = useState(null);
+  const [isBackendConnected, setIsBackendConnected] = useState(true);
 
   // Tab-Canvas Synchronization Hook
   useEffect(() => {
@@ -985,14 +986,29 @@ function App() {
     window.addEventListener('mouseup', handleMouseUp);
   }, []);
 
-  // Fetch dynamic tools from backend
+  // Fetch dynamic tools and check backend connection status
   useEffect(() => {
-    fetch(`${API_BASE}/api/tools`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.tools) setAvailableTools(data.tools);
-      })
-      .catch(err => console.error("Failed to fetch tools:", err));
+    const fetchToolsAndStatus = () => {
+      fetch(`${API_BASE}/api/tools`)
+        .then(res => {
+          if (!res.ok) throw new Error("Backend not OK");
+          setIsBackendConnected(true);
+          return res.json();
+        })
+        .then(data => {
+          if (data.tools) setAvailableTools(data.tools);
+        })
+        .catch(err => {
+          setIsBackendConnected(false);
+        });
+    };
+    
+    // Initial fetch
+    fetchToolsAndStatus();
+    
+    // Poll every 5 seconds to keep connection status alive
+    const interval = setInterval(fetchToolsAndStatus, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Handles adding wire connections between nodes
@@ -1669,6 +1685,77 @@ function App() {
           </ErrorBoundary>
         </div>
       </div>
+
+      {/* Backend Disconnected Elegant Overlay */}
+      {!isBackendConnected && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(255, 255, 255, 0.7)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#1e293b',
+          fontFamily: 'Inter, sans-serif',
+          animation: 'fadeIn 0.3s ease-out'
+        }}>
+          <div style={{
+            background: 'white',
+            padding: '48px',
+            borderRadius: '24px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0,0,0,0.05)',
+            textAlign: 'center',
+            maxWidth: '440px',
+            transform: 'translateY(-20px)'
+          }}>
+            <div style={{
+              width: '80px', height: '80px',
+              background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)', 
+              color: '#ef4444',
+              borderRadius: '50%', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              margin: '0 auto 24px auto',
+              boxShadow: '0 10px 15px -3px rgba(239, 68, 68, 0.3)'
+            }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+            <h2 style={{ margin: '0 0 16px 0', fontSize: '28px', fontWeight: '800', letterSpacing: '-0.02em', color: '#0f172a' }}>
+              Backend Disconnected
+            </h2>
+            <p style={{ margin: '0 0 32px 0', color: '#64748b', fontSize: '16px', lineHeight: '1.6' }}>
+              VibeETL has lost connection to the Python engine. Please ensure that <code style={{background: '#f1f5f9', padding: '4px 8px', borderRadius: '6px', color: '#334155', fontWeight: 600}}>python run.py</code> is actively running in your terminal.
+            </p>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', padding: '10px 20px',
+              background: '#f8fafc', borderRadius: '999px', fontSize: '14px', fontWeight: 600, color: '#475569',
+              border: '1px solid #e2e8f0'
+            }}>
+              <span style={{ 
+                width: '10px', height: '10px', borderRadius: '50%', 
+                background: '#ef4444', marginRight: '10px', 
+                boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.2)'
+              }}></span>
+              Waiting for connection...
+            </div>
+          </div>
+          <style>{`
+            @keyframes fadeIn {
+              from { opacity: 0; backdrop-filter: blur(0px); }
+              to { opacity: 1; backdrop-filter: blur(12px); }
+            }
+          `}</style>
+        </div>
+      )}
     </div>
   );
 }

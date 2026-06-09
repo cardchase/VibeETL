@@ -1,21 +1,22 @@
 ===================================================
-Image Ingest Tool (imageCaption) Documentation
-===================================================
+Image Ingest (ImageCaptionNode)
 
-Purpose:
---------
-Loads a local image file and feeds it to a lightweight CPU ONNX model
-to auto-generate semantic captions and characteristic tags.
+Extracts textual descriptions and markdown tabular data from images using the state-of-the-art Qwen2-VL Vision-Language Model.
 
-Parameters:
------------
-- imagePath (String): Local absolute path or uploaded photo filename.
+## Features
+- **GPU Acceleration**: Utilizes PyTorch `device_map="auto"` to offload inference to NVIDIA GPUs.
+- **VRAM Control**: Allows users to restrict memory limits (e.g. 4GB) to prevent Out-Of-Memory crashes on mid-tier hardware like the RTX 2060.
+- **Precision Scaling**: Automatically scales down precision to `FP16` when GPU is selected to half the memory footprint while maintaining quality.
+- **Batch Processing**: Automatically detects incoming datasets. If an upstream node provides a column named `ImagePath`, `ResolvedPath`, `FilePath` (or any string column containing image names), it will iterate through the dataset and process all images in a single run without reloading the model.
 
-Schema Outputs:
----------------
-- Outputs a fixed data frame containing:
-  * ImagePath (String)
-  * ResolvedPath (String)
-  * Description (String)
-  * Dimensions (String)
-  * Format (String)
+## UI Schema Configuration
+- `imagePath`: (String) Fallback image path if no upstream dataset is provided.
+- `deviceType`: (Select) "Auto", "GPU (NVIDIA)", "CPU Only".
+- `maxVram`: (Select) "4GB", "8GB", "Unlimited".
+- `precision`: (Select) "FP16 (Fast/Low VRAM)", "FP32 (High VRAM)".
+
+## Internal Execution
+1. Dynamically attempts to load `transformers`, `qwen-vl-utils`, and `torch`. If missing, automatically installs them via `uv pip`.
+2. Evaluates the provided hardware constraints and initializes `Qwen2VLForConditionalGeneration`.
+3. Checks for `inputs["default"]`. If empty, uses `imagePath`. Otherwise, maps over the relevant column.
+4. Returns a standard Polars DataFrame containing `[ImagePath, ResolvedPath, Description, Dimensions, Format]`.

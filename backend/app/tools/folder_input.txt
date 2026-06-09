@@ -1,0 +1,16 @@
+=========================================
+Folder Input Tool (folderInput) Documentation
+=========================================
+
+Purpose:
+--------
+Scans a local directory and outputs a dataset of all files. Useful for batch processing.
+
+Parameters:
+-----------
+- folderPath (String): Absolute or relative path to the directory to scan.
+- extensions (String): Comma-separated list of allowed extensions (e.g., .csv,.xlsx). Use * for all.
+
+Schema Outputs:
+---------------
+- Dynamic: Returns FilePath, FileName, Extension, Size.

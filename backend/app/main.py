@@ -66,6 +66,19 @@ async def upload_file(file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
+        # If the file is an image, skip schema parsing
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff']:
+            return {
+                "status": "success",
+                "filename": file.filename,
+                "filePath": file.filename,
+                "schema": [{"name": "ImagePath", "type": "String"}],
+                "preview": [{"ImagePath": file.filename}],
+                "row_count": 1,
+                "column_count": 1
+            }
+
         # Attempt to read file immediately to get schema preview
         # Instantiate a mock FileInputNode to read it
         mock_node = FileInputNode(node_id="upload_preview", parameters={"filePath": file.filename, "fileType": "auto"})
@@ -100,6 +113,22 @@ async def execute_dag(pipeline: Dict[str, Any] = Body(...)):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error executing pipeline: {str(e)}")
+
+@app.post("/api/cancel")
+def cancel_execution():
+    """
+    Cancels the entire running pipeline.
+    """
+    cache.cancel_pipeline()
+    return {"status": "cancelling"}
+
+@app.post("/api/cancel/{node_id}")
+def cancel_node_execution(node_id: str):
+    """
+    Cancels a specific node that is currently running.
+    """
+    cache.cancel_node(node_id)
+    return {"status": "cancelling_node", "node_id": node_id}
 
 @app.get("/api/status")
 def get_status():
@@ -154,6 +183,27 @@ def download_node_csv(nodeId: str, portId: str = "output"):
     }
     
     return Response(content=buffer.getvalue(), media_type="text/csv", headers=headers)
+
+from fastapi.responses import FileResponse
+
+@app.get("/api/local-image")
+def get_local_image(path: str):
+    """
+    Serves a local image file by absolute path if it exists.
+    """
+    if not path:
+        raise HTTPException(status_code=400, detail="Path parameter is required")
+        
+    # Check if the path is relative and exists in UPLOAD_DIR
+    if not os.path.isabs(path) and not os.path.exists(path):
+        upload_path = os.path.join(UPLOAD_DIR, path)
+        if os.path.exists(upload_path):
+            path = upload_path
+
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Image not found")
+        
+    return FileResponse(path)
 
 @app.get("/api/excel/sheets")
 def get_excel_sheets(filePath: str):
