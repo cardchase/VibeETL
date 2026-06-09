@@ -61,6 +61,8 @@ VibeETL bridges the gap between complex code-based data preparation and heavy en
 - 🗂️ **Multi-Tabbed Workspaces**: Work on multiple isolated DAGs simultaneously, just like a modern IDE! Open, swap, and execute multiple independent pipelines via a seamless tab bar without ever overwriting your progress.
 - 📂 **Flexible I/O**: Ingest CSVs, Excel files, Text files, Word Documents, Database files (SQLite, Microsoft Access), parse tables directly out of PDFs, or write out fully interactive HTML visualizations.
 - ☁️ **Global Cloud Integrations**: VibeETL features a unified authentication system for cloud providers. Upload a Google Cloud `Service Account JSON` or `OAuth 2.0 Client Secret` exactly once in the global toolbar to instantly and securely authenticate all downstream cloud nodes simultaneously!
+- 📁 **Massive Batch Processing**: Use `Folder Input` to recursively scan directories and `Dynamic Input` to merge hundreds of heterogeneous CSV/Excel files diagonally, bypassing the need for identical schemas.
+- 🛑 **Interactive Workflow Cancellation**: Stop run-away pipelines or infinitely looping nodes instantly! Hit the global Stop button, or hover over any running node's spinner to surgically abort its execution mid-loop without losing upstream data.
 - **Self-Hosted & Privacy-First**: Run both the web UI and the execution engine entirely on your local machine. No external APIs required (unless explicitly using the Gemini node).
 
 ## 🎨 Enterprise UI & Semantic Intelligence
@@ -98,7 +100,7 @@ VibeETL comes pre-loaded with an extensive suite of data engineering nodes, eleg
 
 | Category | Color | Included Tools |
 | :--- | :--- | :--- |
-| **In / Out** | Green 🟢 | `File Input`, `Database Input`, `Browse`, `File Output`, `Database Output`, `Image Ingest` |
+| **In / Out** | Green 🟢 | `Folder Input`, `Dynamic Input`, `File Input`, `Database Input`, `Browse`, `File Output`, `Database Output`, `Image Ingest` |
 | **Cloud** | Cyan 🩵 | `Google Sheets In`, `Google Sheets Out`, `GCS Input`, `GCS Output` |
 | **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Cleanse`, `Formula Compute`, `Unique`, `Regex`, `Record ID`, `Sample Records`, `Field Info` |
 | **Transform** | Orange 🟠 | `Select`, `Pivot`, `Unpivot`, `Summarize`, `Date Time` |
