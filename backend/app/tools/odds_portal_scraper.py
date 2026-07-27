@@ -682,7 +682,7 @@ class OddsPortalScraperNode(BaseNode):
         extracted_row.update(score_data)
 
         # --- PHASE 3: HARMONIZED CORNER ODDS SCRAPER ENGINE ---
-        def get_evaluate_tab_state(expected_mains, expected_sub=None):
+        def get_evaluate_tab_state(expected_mains, expected_sub=None, expected_odds_count=3):
             import json
             mains_json = json.dumps([m.lower() for m in expected_mains])
             sub_json = json.dumps(expected_sub.lower() if expected_sub else None)
@@ -746,6 +746,7 @@ class OddsPortalScraperNode(BaseNode):
             // --- 1. MODERN STRUCTURED EXTRACTION ---
             let modernRows = document.querySelectorAll('[data-testid="over-under-expanded-row"], [data-testid="bookmaker-table-row"]');
             if (modernRows.length > 0) {{
+                let foundAnyModernOdds = false;
                 for (let row of modernRows) {{
                     let text = row.innerText || '';
                     let isBet365 = text.toLowerCase().includes('bet365') || !!row.querySelector('[title*="bet365" i]');
@@ -755,24 +756,34 @@ class OddsPortalScraperNode(BaseNode):
                         let oddsArr = Array.from(oddsNodes).map(n => {{
                             let t = n.innerText.trim();
                             if (t === '-') return null;
-                            let match = t.match(/^[+-]?\d+\.\d+$/);
+                            let match = t.match(/^[+-]?\\d+\\.\\d+$/);
                             return match ? parseFloat(t) : null;
                         }});
                         
-                        anyOddsFound = true;
-                        if (isBet365) {{
-                            bet365Odds = oddsArr;
-                            break;
-                        }} else if (!fallbackOdds) {{
-                            fallbackOdds = oddsArr;
+                        // ONLY accept odds if it matches the expected count for the market!
+                        if (oddsArr.length >= {expected_odds_count}) {{
+                            anyOddsFound = true;
+                            foundAnyModernOdds = true;
+                            if (isBet365) {{
+                                bet365Odds = oddsArr;
+                                break;
+                            }} else if (!fallbackOdds) {{
+                                fallbackOdds = oddsArr;
+                            }}
                         }}
                     }}
+                }}
+                
+                // If the table physically loaded, but absolutely NO bookmaker has valid odds
+                if (!foundAnyModernOdds) {{
+                    return {{ status: "rows_present_no_odds", odds: [] }};
                 }}
             }}
             
             // --- 2. FALLBACK GENERIC EXTRACTION ---
             if (!anyOddsFound) {{
-                let allElements = Array.from(document.querySelectorAll('div, a, span, p')).reverse();
+                let tableContainer = document.querySelector('[data-testid="bookmaker-table"]') || document.querySelector('#odds-data-table') || document.body;
+                let allElements = Array.from(tableContainer.querySelectorAll('div, a, span, p')).reverse();
                 for (let el of allElements) {{
                     let text = el.innerText || el.alt || el.title || '';
                     if (text.length > 200 || el.children.length > 15) continue;
@@ -781,7 +792,7 @@ class OddsPortalScraperNode(BaseNode):
                     if (lower.includes('payout') || lower.includes('average')) continue;
     
                     let oddsArr = extractOddsFromText(text);
-                    if (oddsArr.length >= 2) {{
+                    if (oddsArr.length >= {expected_odds_count}) {{
                         anyOddsFound = true; 
                         
                         if (lower.includes('bet365')) {{
@@ -823,7 +834,7 @@ class OddsPortalScraperNode(BaseNode):
 
         page_reloaded = False
         
-        async def navigate_and_scrape(main_tab_text, sub_tab_text: str = None):
+        async def navigate_and_scrape(main_tab_text, sub_tab_text: str = None, expected_odds_count: int = 3):
             nonlocal page_reloaded
             main_tab_texts = main_tab_text if isinstance(main_tab_text, list) else [main_tab_text]
             label = f"['{'/'.join(main_tab_texts)}'] -> {sub_tab_text or 'Full Time'}"
@@ -918,9 +929,10 @@ class OddsPortalScraperNode(BaseNode):
                     # We will wait up to 120 seconds (120 loops of 1000ms) for odds to appear.
                     # We will not instantly abort on empty_market, as OddsPortal flashes this while loading.
                     empty_market_count = 0
+                    rows_present_count = 0
                     for _ in range(120):
                         await page.wait_for_timeout(1000)
-                        state = await page.evaluate(get_evaluate_tab_state(main_tab_texts, sub_tab_text))
+                        state = await page.evaluate(get_evaluate_tab_state(main_tab_texts, sub_tab_text, expected_odds_count))
                         if state["status"] == "loaded":
                             return state["odds"]
                         elif state["status"] == "empty_market":
@@ -928,8 +940,13 @@ class OddsPortalScraperNode(BaseNode):
                             if empty_market_count >= 15: # Enforce a full 15-second wait before trusting 'empty'
                                 await asyncio.sleep(2.0) # Prevent racing through missing tabs
                                 return []
+                        elif state["status"] == "rows_present_no_odds":
+                            rows_present_count += 1
+                            if rows_present_count >= 5: # If rows are present for 5s but no odds populate, it's padlocked
+                                return []
                         else:
                             empty_market_count = 0
+                            rows_present_count = 0
                             
                     # If we reach here, we timed out
                     if hasattr(self, "is_cancelled") and self.is_cancelled():
@@ -954,39 +971,39 @@ class OddsPortalScraperNode(BaseNode):
             return []
 
         # --- PHASE 4: EXECUTE HARVESTING & EXPLICIT BOUND UNPACKING ---
-        ft_odds = await navigate_and_scrape("1X2", "Full Time")
+        ft_odds = await navigate_and_scrape("1X2", "Full Time", 3)
         if ft_odds and len(ft_odds) >= 3: extracted_row["FT_HomeOdds"], extracted_row["FT_DrawOdds"], extracted_row["FT_AwayOdds"] = ft_odds[:3]
-        h1_odds = await navigate_and_scrape("1X2", "1st Half")
+        h1_odds = await navigate_and_scrape("1X2", "1st Half", 3)
         if h1_odds and len(h1_odds) >= 3: extracted_row["1H_HomeOdds"], extracted_row["1H_DrawOdds"], extracted_row["1H_AwayOdds"] = h1_odds[:3]
-        h2_odds = await navigate_and_scrape("1X2", "2nd Half")
+        h2_odds = await navigate_and_scrape("1X2", "2nd Half", 3)
         if h2_odds and len(h2_odds) >= 3: extracted_row["SH_HomeOdds"], extracted_row["SH_DrawOdds"], extracted_row["SH_AwayOdds"] = h2_odds[:3]
 
         # Double Chance Bound-Safe Dynamic Unpacking Map Matrix
-        dc_ft = await navigate_and_scrape("Double Chance", "Full Time")
+        dc_ft = await navigate_and_scrape("Double Chance", "Full Time", 2)
         if dc_ft:
             if len(dc_ft) >= 3: extracted_row["DC_FT_1X"], extracted_row["DC_FT_12"], extracted_row["DC_FT_X2"] = dc_ft[0], dc_ft[1], dc_ft[2]
             elif len(dc_ft) == 2: extracted_row["DC_FT_1X"], extracted_row["DC_FT_12"], extracted_row["DC_FT_X2"] = None, dc_ft[0], dc_ft[1]
             
-        dc_1h = await navigate_and_scrape("Double Chance", "1st Half")
+        dc_1h = await navigate_and_scrape("Double Chance", "1st Half", 2)
         if dc_1h:
             if len(dc_1h) >= 3: extracted_row["DC_1H_1X"], extracted_row["DC_1H_12"], extracted_row["DC_1H_X2"] = dc_1h[0], dc_1h[1], dc_1h[2]
             elif len(dc_1h) == 2: extracted_row["DC_1H_1X"], extracted_row["DC_1H_12"], extracted_row["DC_1H_X2"] = None, dc_1h[0], dc_1h[1]
             
-        dc_2h = await navigate_and_scrape("Double Chance", "2nd Half")
+        dc_2h = await navigate_and_scrape("Double Chance", "2nd Half", 2)
         if dc_2h:
             if len(dc_2h) >= 3: extracted_row["DC_2H_1X"], extracted_row["DC_2H_12"], extracted_row["DC_2H_X2"] = dc_2h[0], dc_2h[1], dc_2h[2]
             elif len(dc_2h) == 2: extracted_row["DC_2H_1X"], extracted_row["DC_2H_12"], extracted_row["DC_2H_X2"] = None, dc_2h[0], dc_2h[1]
 
-        dnb_odds = await navigate_and_scrape(["DNB", "Draw No Bet"], "Full Time")
+        dnb_odds = await navigate_and_scrape(["DNB", "Draw No Bet"], "Full Time", 2)
         if dnb_odds and len(dnb_odds) >= 2: extracted_row["DNB_Home"], extracted_row["DNB_Away"] = dnb_odds[:2]
 
-        btts_ft = await navigate_and_scrape("Both Teams to Score", "Full Time")
+        btts_ft = await navigate_and_scrape("Both Teams to Score", "Full Time", 2)
         if btts_ft and len(btts_ft) >= 2: extracted_row["BTTS_Yes"], extracted_row["BTTS_No"] = btts_ft[:2]
         
-        btts_1h = await navigate_and_scrape("Both Teams to Score", "1st Half")
+        btts_1h = await navigate_and_scrape("Both Teams to Score", "1st Half", 2)
         if btts_1h and len(btts_1h) >= 2: extracted_row["BTTS_1H_Yes"], extracted_row["BTTS_1H_No"] = btts_1h[:2]
         
-        btts_2h = await navigate_and_scrape("Both Teams to Score", "2nd Half")
+        btts_2h = await navigate_and_scrape("Both Teams to Score", "2nd Half", 2)
         if btts_2h and len(btts_2h) >= 2: extracted_row["BTTS_2H_Yes"], extracted_row["BTTS_2H_No"] = btts_2h[:2]
 
         # --- PHASE 5: OVER/UNDER EXPANSION PIPELINE ---
@@ -1009,10 +1026,10 @@ class OddsPortalScraperNode(BaseNode):
                         continue
                     break
                         
-                # Smart poll for Over/Under data to load
+                # Smart poll for Over/Under data to load and accordions to appear
                 empty_ou_count = 0
                 for _ in range(120):
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(500)
                     has_rows = await page.evaluate("""
                         () => {
                             if (document.querySelectorAll('[data-testid="over-under-collapsed-row"]').length > 0) return true;
@@ -1035,7 +1052,8 @@ class OddsPortalScraperNode(BaseNode):
                     else:
                         empty_ou_count = 0
 
-                await page.wait_for_timeout(5000) # Extra wait for Over/Under data to settle
+                if empty_ou_count >= 15:
+                    break
                 
                 # Expand all the goal-line accordions so we can see the bookmaker odds
                 await page.evaluate("""
@@ -1063,7 +1081,12 @@ class OddsPortalScraperNode(BaseNode):
                     });
                 }
                 """)
-                await page.wait_for_timeout(1500) # Give accordions time to physically animate open
+                
+                # Smart poll for the odds extraction logic to find numbers!
+                ou_data = {}
+                for _ in range(60):
+                    await page.wait_for_timeout(500)
+                    ou_data = await page.evaluate(r"""
                 
                 content = await page.content()
                 with open("scraper_ou_dom.html", "w", encoding="utf-8") as f:
@@ -1181,6 +1204,9 @@ class OddsPortalScraperNode(BaseNode):
                     return results;
                 }
                 """)
+                    if ou_data and len(ou_data.keys()) > 0:
+                        break
+                        
                 extracted_row.update(ou_data)
                 break
             except Exception as e:
