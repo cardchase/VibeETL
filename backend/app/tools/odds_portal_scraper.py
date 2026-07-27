@@ -831,19 +831,21 @@ class OddsPortalScraperNode(BaseNode):
             for attempt in range(2):
                 try:
                     # 1. Click Main Tab safely using visible items
-                    # We inject a wait_for(timeout=5000) explicitly before checking count() 
-                    # to prevent instantaneous failures under heavy CPU load (high concurrency).
+                    # We combine all fallback texts into a single regex.
+                    # This prevents Playwright from blindly freezing for 15s waiting for Fallback 1
+                    # when Fallback 2 is already instantly visible on the screen.
+                    combined_pattern = f"^\\s*({'|'.join(re.escape(t) for t in main_tab_texts)})\\s*$"
+                    main_regex = re.compile(combined_pattern, re.I)
+                    target = page.get_by_text(main_regex).filter(visible=True).first
+                    
+                    try:
+                        await target.wait_for(timeout=25000)
+                    except:
+                        pass
+                        
                     main_tab = None
-                    for tab_text in main_tab_texts:
-                        main_regex = re.compile(fr"^\s*{re.escape(tab_text)}\s*$", re.I)
-                        target = page.get_by_text(main_regex).filter(visible=True).first
-                        try:
-                            await target.wait_for(timeout=15000)
-                        except:
-                            pass
-                        if await target.count() > 0:
-                            main_tab = target
-                            break
+                    if await target.count() > 0:
+                        main_tab = target
                             
                     if not main_tab:
                         # Check if it's hidden under 'More'
@@ -853,17 +855,14 @@ class OddsPortalScraperNode(BaseNode):
                             await more_tab.click()
                             await page.wait_for_timeout(1000)
                             
-                        # Check again
-                        for tab_text in main_tab_texts:
-                            main_regex = re.compile(fr"^\s*{re.escape(tab_text)}\s*$", re.I)
-                            target = page.get_by_text(main_regex).filter(visible=True).first
-                            try:
-                                await target.wait_for(timeout=15000)
-                            except:
-                                pass
-                            if await target.count() > 0:
-                                main_tab = target
-                                break
+                        # Check again with combined regex
+                        target = page.get_by_text(main_regex).filter(visible=True).first
+                        try:
+                            await target.wait_for(timeout=25000)
+                        except:
+                            pass
+                        if await target.count() > 0:
+                            main_tab = target
 
                     if not main_tab:
                         # Fallback to partial match
@@ -899,7 +898,7 @@ class OddsPortalScraperNode(BaseNode):
                         sub_regex = re.compile(fr"^\s*{re.escape(sub_tab_text)}\s*$", re.I)
                         sub_tab = page.get_by_text(sub_regex).filter(visible=True).first
                         try:
-                            await sub_tab.wait_for(timeout=15000)
+                            await sub_tab.wait_for(timeout=25000)
                         except:
                             pass
                         if await sub_tab.count() > 0:
