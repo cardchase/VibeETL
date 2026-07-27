@@ -8,7 +8,14 @@ import ErrorBoundary from './components/ErrorBoundary';
 import CustomNode from './components/CustomNode';
 import CommentNode from './components/CommentNode';
 import ContainerNode from './components/ContainerNode';
+import ChatPanel from './components/ChatPanel';
 import './App.css';
+
+// Ensure a unique session ID exists for this specific browser tab.
+// This isolates the execution cache on the backend.
+if (!window.sessionId) {
+  window.sessionId = crypto.randomUUID();
+}
 
 // Dynamic API Base URL from environment variables
 import { API_BASE } from './config';
@@ -188,12 +195,38 @@ const resolveNodeSchema = (nodeId, nodes, edges, results = {}) => {
   return upstreamSchema;
 };
 
+const getUniqueTabName = (baseName, existingNames) => {
+  let name = baseName;
+  let counter = 2;
+  while (existingNames.includes(name)) {
+    name = `${baseName} (${counter})`;
+    counter++;
+  }
+  return name;
+};
+
 const getInitialTabs = () => {
+  const sanitizeNodes = (nodes) => (nodes || []).map(n => ({
+    ...n,
+    data: { ...(n.data || {}), status: n.type === 'comment' ? 'idle' : 'idle' }
+  }));
+
   try {
     const savedTabs = localStorage.getItem('vibeetl_autosave_workflow_tabs');
     if (savedTabs) {
       const parsed = JSON.parse(savedTabs);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const existingNames = [];
+        return parsed.map(tab => {
+          const uniqueName = getUniqueTabName(tab.name || 'Untitled Workflow', existingNames);
+          existingNames.push(uniqueName);
+          return {
+            ...tab,
+            name: uniqueName,
+            nodes: sanitizeNodes(tab.nodes)
+          };
+        });
+      }
     }
     const savedSingle = localStorage.getItem('vibeetl_autosave_workflow');
     if (savedSingle) {
@@ -201,7 +234,7 @@ const getInitialTabs = () => {
       return [{
         id: 'tab-1',
         name: 'Untitled Workflow',
-        nodes: parsed.nodes || initialNodes,
+        nodes: sanitizeNodes(parsed.nodes || initialNodes),
         edges: parsed.edges || initialEdges,
         results: {},
         globalLogs: [],
@@ -212,7 +245,7 @@ const getInitialTabs = () => {
   return [{
     id: 'tab-1',
     name: 'Untitled Workflow',
-    nodes: initialNodes,
+    nodes: sanitizeNodes(initialNodes),
     edges: initialEdges,
     results: {},
     globalLogs: [],
@@ -228,7 +261,11 @@ function App() {
   
   const [nodes, setNodes, onNodesChangeCore] = useNodesState(activeTab.nodes || []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeTab.edges || []);
-  const [isRunning, setIsRunning] = useState(false);
+  const [isRunningMap, setIsRunningMap] = useState({});
+  const isRunning = isRunningMap[activeTabId] || false;
+  const setIsRunning = useCallback((val, tabId = activeTabId) => {
+    setIsRunningMap(prev => ({ ...prev, [tabId]: typeof val === 'function' ? val(prev[tabId]) : val }));
+  }, [activeTabId]);
   const [results, setResults] = useState(activeTab.results || {});
   const [globalLogs, setGlobalLogs] = useState(activeTab.globalLogs || []);
   const [isDirty, setIsDirty] = useState(activeTab.isDirty || false);
@@ -236,6 +273,7 @@ function App() {
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [selectedHandle, setSelectedHandle] = useState(null);
   const [isBackendConnected, setIsBackendConnected] = useState(true);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   // Tab-Canvas Synchronization Hook
   useEffect(() => {
@@ -252,6 +290,10 @@ function App() {
   }, [activeTabId, setNodes, setEdges]); // Explicitly omitted 'tabs' to prevent recursive rendering loops
 
   const isDraggingNode = React.useRef(false);
+  const activeTabIdRef = React.useRef(activeTabId);
+  React.useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
 
   const onNodesChange = useCallback((changes) => {
     onNodesChangeCore(changes);
@@ -392,6 +434,60 @@ function App() {
     window.addEventListener('vibe-handle-click', handleHandleClick);
     return () => window.removeEventListener('vibe-handle-click', handleHandleClick);
   }, []);
+
+  // Topological Sort for UI Node Numbering
+  useEffect(() => {
+    if (!nodes || nodes.length === 0) return;
+    
+    const inDegree = {};
+    const adj = {};
+    nodes.forEach(n => { inDegree[n.id] = 0; adj[n.id] = []; });
+    edges.forEach(e => {
+      if (inDegree[e.target] !== undefined && adj[e.source]) {
+        inDegree[e.target]++;
+        adj[e.source].push(e.target);
+      }
+    });
+    
+    const queue = [];
+    nodes.forEach(n => { if (inDegree[n.id] === 0) queue.push(n.id); });
+    
+    const order = [];
+    while (queue.length > 0) {
+      const u = queue.shift();
+      order.push(u);
+      adj[u]?.forEach(v => {
+        inDegree[v]--;
+        if (inDegree[v] === 0) queue.push(v);
+      });
+    }
+    
+    let execIdx = 1;
+    const newExecIndexes = {};
+    order.forEach(id => {
+      const node = nodes.find(n => n.id === id);
+      if (node && node.type !== 'container') {
+        newExecIndexes[id] = execIdx++;
+      }
+    });
+    
+    let hasChanges = false;
+    nodes.forEach(n => {
+       if (n.type !== 'container' && n.data?.executionIndex !== newExecIndexes[n.id]) {
+           hasChanges = true;
+       }
+    });
+    
+    if (hasChanges) {
+      setNodes(nds => nds.map(n => {
+        if (n.type !== 'container' && n.data?.executionIndex !== newExecIndexes[n.id]) {
+           return { ...n, data: { ...n.data, executionIndex: newExecIndexes[n.id] } };
+        }
+        return n;
+      }));
+    }
+  }, [edges, nodes.length, setNodes]);
+
 
   useEffect(() => {
     const handleCreateContainer = (e) => {
@@ -775,7 +871,9 @@ function App() {
     setTabs(prev => {
       const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty } : t);
       const newTabId = `tab-${Date.now()}`;
-      const newTab = { id: newTabId, name: `Workflow ${currentSaved.length + 1}`, nodes: [], edges: [], results: {}, globalLogs: [], isDirty: false };
+      const existingNames = currentSaved.map(t => t.name);
+      const uniqueName = getUniqueTabName(`Workflow ${currentSaved.length + 1}`, existingNames);
+      const newTab = { id: newTabId, name: uniqueName, nodes: [], edges: [], results: {}, globalLogs: [], isDirty: false };
       setActiveTabId(newTabId);
       return [...currentSaved, newTab];
     });
@@ -800,15 +898,26 @@ function App() {
       if (activeTag === 'INPUT' || activeTag === 'SELECT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
 
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (selectedNodeId) {
+        const selectedNodes = nodes.filter(n => n.selected || n.id === selectedNodeId);
+        const selectedEdges = edges.filter(edge => edge.selected || edge.id === selectedEdgeId);
+        
+        if (selectedNodes.length > 0 || selectedEdges.length > 0) {
           e.preventDefault();
-          setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
-          setEdges((eds) => eds.filter((edge) => edge.source !== selectedNodeId && edge.target !== selectedNodeId));
-          setSelectedNodeId(null);
-        } else if (selectedEdgeId) {
-          e.preventDefault();
-          setEdges((eds) => eds.filter((edge) => edge.id !== selectedEdgeId));
-          setSelectedEdgeId(null);
+          const selectedNodeIds = selectedNodes.map(n => n.id);
+          
+          if (selectedNodes.length > 0) {
+            setNodes(nds => nds.filter(n => !selectedNodeIds.includes(n.id)));
+            setSelectedNodeId(null);
+          }
+          
+          if (selectedNodeIds.length > 0 || selectedEdges.length > 0) {
+            setEdges(eds => eds.filter(edge => 
+              !selectedEdges.some(e => e.id === edge.id) &&
+              !selectedNodeIds.includes(edge.source) && 
+              !selectedNodeIds.includes(edge.target)
+            ));
+            setSelectedEdgeId(null);
+          }
         }
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         e.preventDefault();
@@ -824,6 +933,10 @@ function App() {
         if (nodesToCopy.length > 0) {
           localStorage.setItem('vibeetl_clipboard', JSON.stringify({ nodes: nodesToCopy, edges: edgesToCopy }));
         }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setNodes(nds => nds.map(n => ({ ...n, selected: true })));
+        setEdges(eds => eds.map(edge => ({ ...edge, selected: true })));
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
         e.preventDefault();
         const clipboard = localStorage.getItem('vibeetl_clipboard');
@@ -928,7 +1041,7 @@ function App() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
-  const [autoRun, setAutoRun] = useState(true);
+  const [autoRun, setAutoRun] = useState(false);
   const [availableTools, setAvailableTools] = useState([]);
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const isResizing = React.useRef(false);
@@ -1056,7 +1169,7 @@ function App() {
   }, [setNodes]);
 
   // Add a new node dropped from the tool palette
-  const handleAddNode = useCallback((type, position) => {
+  const handleAddNode = useCallback((type, position, anchorNodeId = null) => {
     let label = 'Node';
     let category = 'inout';
     let icon = 'Square';
@@ -1196,7 +1309,18 @@ function App() {
 
     setNodes((nds) => nds.concat(newNode));
     setSelectedNodeId(newNodeId);
-  }, [setNodes, availableTools, nodes]);
+
+    if (anchorNodeId) {
+      setEdges((eds) => eds.concat({
+        id: `edge_e${anchorNodeId}-${newNodeId}`,
+        source: anchorNodeId,
+        target: newNodeId,
+        sourceHandle: 'output',
+        targetHandle: 'input',
+        style: { stroke: '#9ca3af', strokeWidth: 2 }
+      }));
+    }
+  }, [setNodes, setEdges, availableTools, nodes]);
 
   // Clean state when nodes are deleted
   const onNodesDelete = useCallback((deleted) => {
@@ -1255,8 +1379,9 @@ function App() {
   };
 
   const handleRunPipeline = async () => {
-    if (isRunning) return;
-    setIsRunning(true);
+    const currentTabId = activeTabId;
+    if (isRunningMap[currentTabId]) return;
+    setIsRunning(true, currentTabId);
     setGlobalLogs(['Triggering pipeline execution...', 'Serializing DAG graph structure...']);
 
     // Set all nodes' status to waiting
@@ -1270,6 +1395,7 @@ function App() {
     // Build DAG JSON payload for FastAPI
     // We only need id, type, parameters for nodes, and connection ports for edges
     const dagPayload = {
+      session_id: currentTabId,
       nodes: nodes.filter(n => n.type !== 'comment').map((n) => ({
         id: n.id,
         type: n.type,
@@ -1299,48 +1425,72 @@ function App() {
 
       const data = await response.json();
       
-      setGlobalLogs(data.global_logs || []);
-      setResults(data.results || {});
-
-      // Update individual nodes' statuses based on node outcomes
-      setNodes((nds) =>
-        nds.map((node) => {
-          const nodeResult = data.results?.[node.id];
-          const outcomeStatus = nodeResult?.status || 'idle';
-          
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              status: outcomeStatus,
-              resultSummary: nodeResult ? {
-                row_count: nodeResult.row_count,
-                ports: nodeResult.ports
-              } : null,
-              // If node is a FileInput and returned a schema, cache it in parameters
-              parameters: {
-                ...node.data.parameters,
-                ...(node.type === 'fileInput' && nodeResult?.status === 'success'
-                  ? { detectedSchema: nodeResult.schema }
-                  : {})
-              }
+      const applyNodeUpdates = (node) => {
+        const nodeResult = data.results?.[node.id];
+        const outcomeStatus = nodeResult?.status || 'idle';
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            status: outcomeStatus,
+            resultSummary: nodeResult ? {
+              row_count: nodeResult.row_count,
+              ports: nodeResult.ports
+            } : null,
+            parameters: {
+              ...node.data.parameters,
+              ...(node.type === 'fileInput' && nodeResult?.status === 'success'
+                ? { detectedSchema: nodeResult.schema }
+                : {})
             }
-          };
-        })
-      );
+          }
+        };
+      };
+
+      if (currentTabId === activeTabIdRef.current) {
+        setGlobalLogs(data.global_logs || []);
+        setResults(data.results || {});
+        setNodes((nds) => nds.map(applyNodeUpdates));
+      } else {
+        setTabs(prev => prev.map(t => {
+          if (t.id === currentTabId) {
+            return {
+              ...t,
+              nodes: t.nodes.map(applyNodeUpdates),
+              results: data.results || {},
+              globalLogs: data.global_logs || []
+            };
+          }
+          return t;
+        }));
+      }
+
     } catch (err) {
       const errMsg = err.message || 'Network error communicating with pipeline solver.';
-      setGlobalLogs((prev) => [...prev, `ERROR: ${errMsg}`]);
       
-      // Set all nodes to error
-      setNodes((nds) =>
-        nds.map((node) => ({
-          ...node,
-          data: { ...node.data, status: 'error' }
-        }))
-      );
+      const errorMsg = `ERROR: ${errMsg}`;
+      const applyErrorNodes = (node) => ({
+        ...node,
+        data: { ...node.data, status: 'error' }
+      });
+
+      if (currentTabId === activeTabIdRef.current) {
+        setGlobalLogs((prev) => [...prev, errorMsg]);
+        setNodes((nds) => nds.map(applyErrorNodes));
+      } else {
+        setTabs(prev => prev.map(t => {
+          if (t.id === currentTabId) {
+            return {
+              ...t,
+              nodes: t.nodes.map(applyErrorNodes),
+              globalLogs: [...t.globalLogs, errorMsg]
+            };
+          }
+          return t;
+        }));
+      }
     } finally {
-      setIsRunning(false);
+      setIsRunning(false, currentTabId);
     }
   };
 
@@ -1383,13 +1533,40 @@ function App() {
 
   // Live polling of execution status
   React.useEffect(() => {
-    if (!isRunning) return;
-
-    const intervalId = setInterval(() => {
-      fetch(`${API_BASE}/api/status`)
-        .then(res => res.json())
+    let intervalId;
+    if (isRunning) {
+      intervalId = setInterval(() => {
+        fetch(`${API_BASE}/api/status?session_id=${activeTabId}`)
+          .then(res => res.json())
         .then(data => {
           if (data.statuses) {
+            // Stream partial results for nodes that are running
+            setResults(prevResults => {
+              let updated = false;
+              const nextResults = { ...prevResults };
+              
+              for (const [nodeId, payload] of Object.entries(data.statuses)) {
+                if (payload.status === 'running' && payload.preview) {
+                  // Update if row count changed OR logs length changed to ensure real-time log streaming
+                  const currentLogsCount = nextResults[nodeId] && nextResults[nodeId].logs ? nextResults[nodeId].logs.length : 0;
+                  const newLogsCount = payload.logs ? payload.logs.length : 0;
+                  
+                  if (!nextResults[nodeId] || nextResults[nodeId].row_count !== payload.row_count || currentLogsCount !== newLogsCount) {
+                    nextResults[nodeId] = {
+                      schema: payload.schema,
+                      preview: payload.preview,
+                      row_count: payload.row_count,
+                      column_count: payload.column_count,
+                      logs: payload.logs || [],
+                      ports: payload.ports
+                    };
+                    updated = true;
+                  }
+                }
+              }
+              return updated ? nextResults : prevResults;
+            });
+
             setNodes((nds) => nds.map((node) => {
               const nodePayload = data.statuses[node.id];
               if (!nodePayload) return node;
@@ -1418,7 +1595,8 @@ function App() {
           }
         })
         .catch(err => console.error("Polling error:", err));
-    }, 250);
+      }, 250);
+    }
 
     return () => clearInterval(intervalId);
   }, [isRunning, setNodes]);
@@ -1545,7 +1723,8 @@ function App() {
           setTabs(prev => {
             const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty } : t);
             const newTabId = `tab-${Date.now()}`;
-            const newTabName = file.name.replace('.json', '');
+            const existingNames = currentSaved.map(t => t.name);
+            const newTabName = getUniqueTabName(file.name.replace('.json', ''), existingNames);
             const newTab = { id: newTabId, name: newTabName, nodes: loaded.nodes, edges: loaded.edges, results: {}, globalLogs: ['Workflow loaded successfully.'], isDirty: false };
             setActiveTabId(newTabId);
             return [...currentSaved, newTab];
@@ -1591,6 +1770,8 @@ function App() {
         availableTools={availableTools}
         selectedNode={selectedNode}
         onUpdateParams={handleUpdateParams}
+        isChatOpen={isChatOpen}
+        onToggleChat={() => setIsChatOpen(!isChatOpen)}
       />
 
       {/* Workspace Area */}
@@ -1622,9 +1803,14 @@ function App() {
                 onClick={() => handleTabChange(tab.id)}
               >
                 <span className="tab-title" onDoubleClick={(e) => {
-                  const newName = prompt("Rename Tab:", tab.name);
+                  let newName = prompt("Rename Tab:", tab.name);
                   if (newName) {
-                    setTabs(prev => prev.map(t => t.id === tab.id ? { ...t, name: newName } : t));
+                    newName = newName.trim();
+                    setTabs(prev => {
+                      const existingNames = prev.filter(t => t.id !== tab.id).map(t => t.name);
+                      const uniqueName = getUniqueTabName(newName, existingNames);
+                      return prev.map(t => t.id === tab.id ? { ...t, name: uniqueName } : t);
+                    });
                   }
                 }}>{tab.name}</span>
                 {tabs.length > 1 && (
@@ -1680,6 +1866,7 @@ function App() {
               originalNode={nodes.find(n => n.id === selectedNodeId)}
               results={results}
               globalLogs={globalLogs}
+              activeTabId={activeTabId}
               style={{ height: `${resultsHeight}px` }}
             />
           </ErrorBoundary>
@@ -1756,6 +1943,13 @@ function App() {
           `}</style>
         </div>
       )}
+      
+      <ChatPanel 
+        isOpen={isChatOpen} 
+        onClose={() => setIsChatOpen(false)} 
+        nodes={nodes} 
+        edges={edges} 
+      />
     </div>
   );
 }

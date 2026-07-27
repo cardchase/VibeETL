@@ -126,7 +126,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             onClick={(e) => handleAnchorClick(e, 'target', 'right')}
           />
         </>
-      ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'folder_input', 'folderInput', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn'].includes(type)) ? (
+      ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'folder_input', 'folderInput', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn', 'odds_portal_scraper', 'oddsPortalScraper'].includes(type)) ? (
         <Handle
           type="target"
           position={Position.Left}
@@ -157,7 +157,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             onMouseLeave={() => setIsHoveringCancel(false)}
             onClick={(e) => {
               e.stopPropagation();
-              fetch(`http://localhost:8000/api/cancel/${id}`, { method: 'POST' }).catch(console.error);
+              fetch(`http://localhost:8000/api/cancel/${id}?session_id=${window.sessionId}`, { method: 'POST' }).catch(console.error);
             }}
             style={{ cursor: 'pointer', pointerEvents: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
@@ -188,7 +188,7 @@ const CustomNode = ({ id, data, selected, type }) => {
       {/* Node Labels floating underneath the square box */}
       <div className="node-labels-container">
         <div className="node-label-main" style={{ textAlign: 'center' }}>
-          {data?.label || 'Node'}
+          {data?.label || 'Node'} {data?.executionIndex ? `[${data.executionIndex}]` : ''}
         </div>
         {description && (
           <div className="node-label-sub" title={description}>

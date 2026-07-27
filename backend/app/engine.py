@@ -2,7 +2,7 @@ import time
 import polars as pl
 from graphlib import TopologicalSorter
 from typing import Dict, Any, List, Set
-from app.cache import cache
+from app.cache import cache_manager
 from app.tools import NODE_CLASSES
 
 def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -11,7 +11,10 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
     pipeline_data contains:
       - nodes: List[Dict[str, Any]]
       - edges: List[Dict[str, Any]]
+      - session_id: str
     """
+    session_id = pipeline_data.get("session_id", "default")
+    cache = cache_manager.get_cache(session_id)
     pipeline_start_time = time.time()
 
     nodes_list = pipeline_data.get("nodes", [])
@@ -43,6 +46,7 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
                 cached_node_ids.add(n["id"])
 
     cache.clear_except(list(cached_node_ids))
+    cache.reset_cancellations()
     cache.add_global_log("Initializing pipeline execution...")
 
     enabled_nodes = []
@@ -120,6 +124,7 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
         cache.set_node_skipped(node_id)
 
     # Execute nodes in topological order
+    exec_idx = 1
     for node_id in execution_order:
         node_cfg = node_map.get(node_id)
         if not node_cfg:
@@ -133,7 +138,11 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             continue
             
         parameters = node_cfg.get("parameters", {})
-        node_name = node_cfg.get("data", {}).get("label", f"{node_type}_{node_id}")
+        
+        # Append [exec_idx] to the node name so the logs match the UI canvas
+        base_name = node_cfg.get("data", {}).get("label", f"{node_type}_{node_id}")
+        node_name = f"{base_name} [{exec_idx}]"
+        exec_idx += 1
 
         cache.add_global_log(f"Starting execution of node '{node_name}' ({node_id})")
         start_time = time.time()
@@ -208,7 +217,8 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             # Instantiate executor
             executor = node_class(node_id, parameters)
             
-            # Inject cancellation lambda
+            # Inject session_id and cancellation lambda
+            executor.session_id = session_id
             executor.is_cancelled = lambda: cache.is_cancelled(node_id)
             
             # Inject upstream semantic metadata for nodes that need it (e.g. Visualization)
