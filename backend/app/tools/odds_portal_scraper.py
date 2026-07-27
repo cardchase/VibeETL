@@ -138,7 +138,13 @@ class OddsPortalScraperNode(BaseNode):
             # We use an authentic user agent to avoid trivial bot blocking
             browser = await p.chromium.launch(
                 headless=headless_mode,
-                args=['--no-sandbox', '--disable-setuid-sandbox']
+                args=[
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    '--headless=new', 
+                    '--window-position=-2400,-2400',
+                    '--disable-gpu'
+                ]
             )
             context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
@@ -677,33 +683,51 @@ class OddsPortalScraperNode(BaseNode):
                 res.Match_Status = "Finished";
             }
 
+            // 2. Extract Country and Competition from Visual Breadcrumbs (data-testid)
+            let a2 = document.querySelector('a[data-testid="2"]');
+            if (a2) res.Country = cleanText(a2.innerText);
+            let a3 = document.querySelector('a[data-testid="3"]');
+            if (a3) {
+                let compStr = cleanText(a3.innerText);
+                let seasonMatch = compStr.match(/\d{4}\/\d{4}/);
+                if (seasonMatch) {
+                    res.Competition = compStr.replace(seasonMatch[0], '').trim();
+                } else {
+                    res.Competition = compStr.trim();
+                }
+            }
+
+            // 3. Extract exact Team names from JSON-LD (since team names on DOM can be abbreviated)
             document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
                 try {
                     let d = JSON.parse(script.textContent);
                     if (d["@type"]?.includes("Event")) {
-                        res.HomeTeam = d.homeTeam?.name || res.HomeTeam;
-                        res.AwayTeam = d.awayTeam?.name || res.AwayTeam;
-                        if (d.startDate) {
-                            let dt = new Date(d.startDate);
-                            let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                            res.Date = dt.getDate() + " " + months[dt.getMonth()] + " " + dt.getFullYear();
-                            res.Time = String(dt.getHours()).padStart(2, '0') + ":" + String(dt.getMinutes()).padStart(2, '0');
-                        }
-                    }
-                    if (d["@type"] === "BreadcrumbList" && d.itemListElement?.length >= 4) {
-                        res.Country = d.itemListElement[2].name; 
-                        let compStr = d.itemListElement[3].name;
-                        let seasonMatch = compStr.match(/\d{4}\/\d{4}/);
-                        if (seasonMatch) {
-                            res.Season = seasonMatch[0];
-                            res.Competition = compStr.replace(seasonMatch[0], '').trim();
-                        } else {
-                            res.Competition = compStr.trim();
-                            if (res.Date) {
-                                let yearMatch = res.Date.match(/\d{4}/);
-                                if (yearMatch) res.Season = yearMatch[0];
+                        let ldHome = d.homeTeam?.name;
+                        let ldAway = d.awayTeam?.name;
+                        if (ldHome && ldAway) {
+                            let h1 = document.querySelector('h1');
+                            if (h1) {
+                                let h1Str = h1.innerText;
+                                let idxHome = h1Str.indexOf(ldHome);
+                                let idxAway = h1Str.indexOf(ldAway);
+                                if (idxHome !== -1 && idxAway !== -1 && idxHome > idxAway) {
+                                    // Flipped in JSON-LD! The H1 shows Away Team first.
+                                    res.HomeTeam = ldAway;
+                                    res.AwayTeam = ldHome;
+                                } else {
+                                    res.HomeTeam = ldHome;
+                                    res.AwayTeam = ldAway;
+                                }
+                            } else {
+                                res.HomeTeam = ldHome;
+                                res.AwayTeam = ldAway;
                             }
+                        } else {
+                            res.HomeTeam = ldHome || res.HomeTeam;
+                            res.AwayTeam = ldAway || res.AwayTeam;
                         }
+                        // d.startDate in JSON-LD is notoriously incorrect on OddsPortal for older matches.
+                        // We rely strictly on the DOM visual extraction for Date and Time.
                     }
                 } catch(e) {}
             });
@@ -717,6 +741,19 @@ class OddsPortalScraperNode(BaseNode):
         }
         """)
         extracted_row.update(score_data)
+
+        # Force the Season from the URL to be 100% accurate (e.g., 2024-2025)
+        # as OddsPortal's breadcrumbs and JSON-LD can sometimes be mismatched or missing.
+        season_match = re.search(r'-(\d{4}-\d{4})/', url)
+        if season_match:
+            extracted_row["Season"] = season_match.group(1).replace('-', '/')
+        elif "Season" not in extracted_row or not extracted_row["Season"]:
+            # Fallback if it's the current season without a year in the URL
+            date_str = extracted_row.get("Date", "")
+            if date_str:
+                year_match = re.search(r'\d{4}', date_str)
+                if year_match:
+                    extracted_row["Season"] = year_match.group(0)
 
         # --- PHASE 3: HARMONIZED CORNER ODDS SCRAPER ENGINE ---
         def get_evaluate_tab_state(expected_mains, expected_sub=None, expected_odds_count=3):
