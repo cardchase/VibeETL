@@ -1,3 +1,16 @@
+"""
+OddsPortal Scraper Module
+=========================
+
+An enterprise-grade, high-concurrency web scraper utilizing Playwright and Stealth modules 
+to interact with and extract historical betting odds from OddsPortal.
+
+Core features:
+- Deep React-DOM synchronization for race-condition prevention under CPU load.
+- Smart fallbacks and polling loops for UI hydration.
+- Exact-match decimal, American, and fractional odds parsing pipelines.
+- Headless Chromium orchestration with dynamic cancellation listeners.
+"""
 import asyncio
 import re
 from typing import Dict, Any, List
@@ -64,6 +77,13 @@ HEADERS = [
 ]
 
 class OddsPortalScraperNode(BaseNode):
+    """
+    ETL Node for harvesting odds data from OddsPortal.
+    
+    This node intercepts the requested URL (either a single match page or a league/tournament 
+    overview page), orchestrates headless Chromium instances, and systematically extracts 
+    match status, scores, and various betting market lines.
+    """
     MANIFEST = {
         "id": "odds_portal_scraper",
         "name": "OddsPortal Scraper",
@@ -73,6 +93,11 @@ class OddsPortalScraperNode(BaseNode):
     }
 
     def execute(self, inputs: Dict[str, Any]) -> pl.DataFrame:
+        """
+        Main execution entrypoint for the ETL pipeline.
+        Validates inputs, initializes the asynchronous scraping pipeline, and wraps
+        the result in a strongly-typed Polars DataFrame.
+        """
         target_url = self.parameters.get("targetUrl")
         if not target_url:
             raise ValueError("Target URL is required.")
@@ -85,6 +110,15 @@ class OddsPortalScraperNode(BaseNode):
         return pl.DataFrame(result_rows, schema=schema) if result_rows else pl.DataFrame([], schema=schema)
 
     async def run_crawler_pipeline(self, url: str) -> List[Dict[str, Any]]:
+        """
+        Orchestrates the entire scraping lifecycle.
+        
+        - Instantiates Playwright and Chromium.
+        - Applies stealth plugin to evade bot detection.
+        - If the URL is a specific match, scrapes it directly.
+        - If the URL is a competition/league, it paginates through the list of matches
+          and uses an asyncio Semaphore to extract data concurrently (e.g. 10 tabs at once).
+        """
         # Instantly clear any old cached results in the UI
         sid = getattr(self, "session_id", "default")
         schema = {h: pl.Utf8 if h in ["Date", "Time", "Country", "Competition", "Season", "HomeTeam", "AwayTeam", "Match_Status", "URL", "Match_Winner_Final", "Is_Knockout", "Went_To_ET"] else pl.Float64 for h in HEADERS}
@@ -397,6 +431,17 @@ class OddsPortalScraperNode(BaseNode):
         return match_links
 
     async def execute_interception_engine(self, page, url: str) -> Dict[str, Any]:
+        """
+        The core harvesting engine for an individual match page.
+        
+        This method uses a multi-phase approach:
+        1. Navigates to the match URL and waits for the foundational DOM to render.
+        2. Injects JS to extract metadata (teams, scores, match state) from the UI and LD+JSON script tags.
+        3. Defines JS functions to explicitly verify the active state of React tabs to prevent race conditions.
+        4. Navigates through betting markets (Full Time, 1st Half, Over/Under, etc.) while
+           strictly waiting for React DOM updates before extracting odds.
+        5. Parses exact-match betting odds using tailored Regex and handles UI fallback structures.
+        """
         
         async def cancel_watcher():
             while True:
@@ -675,6 +720,11 @@ class OddsPortalScraperNode(BaseNode):
                         extracted.push(null);
                         continue;
                     }}
+                    
+                    // Regex Extractors for Valid Odds Formats
+                    // Note on Fractional Odds: The regex is strictly bound to `\d{1,3}` (max 3 digits) 
+                    // to prevent it from accidentally mathematically converting calendar years (e.g., '2026/2027')
+                    // found in page headers into fractional odds and parsing them into massive floats.
                     if (t.match(/^[+-]?\d+\.\d+$/)) {{ // Decimal (1, 2 or 3+ decimals)
                         extracted.push(parseFloat(t));
                     }} else if (t.match(/^\d{1,3}\/\d{1,3}$/)) {{ // Fractional
@@ -781,6 +831,8 @@ class OddsPortalScraperNode(BaseNode):
             for attempt in range(2):
                 try:
                     # 1. Click Main Tab safely using visible items
+                    # We inject a wait_for(timeout=5000) explicitly before checking count() 
+                    # to prevent instantaneous failures under heavy CPU load (high concurrency).
                     main_tab = None
                     for tab_text in main_tab_texts:
                         main_regex = re.compile(fr"^\s*{re.escape(tab_text)}\s*$", re.I)
