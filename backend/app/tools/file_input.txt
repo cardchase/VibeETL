@@ -1,13 +1,8 @@
-=========================================
-File Input Tool (fileInput) Documentation
-=========================================
+File Input Node
 
-Purpose:
---------
 Loads local structured and unstructured text files (CSV, Excel, Text, Word Docs, PDFs containing tables, and MS Access DBs) and parses them into an in-memory Polars DataFrame stream.
 
 Parameters:
------------
 - filePath (String): The path or filename of the target dataset. If relative,
   it resolves relative to the `backend/uploads/` directory.
 - fileType (String): File formatting parser to use. Options are:
@@ -23,6 +18,4 @@ Parameters:
 - csvEncoding (String): Target character set parser (Default: "utf-8").
 - excelSheet (String): Excel sheet worksheet to load. If empty, defaults to the first sheet.
 
-Schema Outputs:
----------------
-- Dynamic: Evaluated directly from the loaded file headers.
+Schema Output: - Dynamic: Evaluated directly from the loaded file headers.

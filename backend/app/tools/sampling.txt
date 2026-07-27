@@ -1,3 +1,5 @@
+Sampling Node
+
 The Sample Records node allows you to quickly isolate a subset of your dataset. This is highly useful for drastically reducing the size of massive datasets during the pipeline design phase, allowing the VibeETL engine to run sub-millisecond tests.
 
 **Sample Methods**:
@@ -8,3 +10,8 @@ The Sample Records node allows you to quickly isolate a subset of your dataset. 
 **Parameters**:
 - **Sample Method**: The extraction logic.
 - **Number of Records (N)**: The exact row count to reduce the dataset to.
+
+Parameters:
+- None explicitly defined.
+
+Schema Output: Outputs a Polars DataFrame.

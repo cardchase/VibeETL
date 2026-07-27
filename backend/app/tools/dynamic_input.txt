@@ -1,13 +1,8 @@
-=========================================
-Dynamic Input Tool (dynamicInput) Documentation
-=========================================
+Dynamic Input Node
 
-Purpose:
---------
 Dynamically reads and unions multiple files based on a list of file paths from an upstream node.
 
 Parameters:
------------
 - filePathColumn (Column): The column containing the file paths to read.
 - fileType (String): Auto-detect, CSV, Excel, JSON, or Parquet.
 - onSchemaMismatch (String): Behavior when file schemas do not match exactly:
@@ -17,6 +12,4 @@ Parameters:
   * Error: Fails execution if schemas do not match exactly.
 - referenceFilePath (String): Optional reference template file. Used in Strict mode.
 
-Schema Outputs:
----------------
-- Dynamic: Evaluated based on the union of all read files or the reference file.
+Schema Output: - Dynamic: Evaluated based on the union of all read files or the reference file.

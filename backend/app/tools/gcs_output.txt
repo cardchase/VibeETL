@@ -1,16 +1,13 @@
-=========================================
-GCS Output Tool (gcs_out) Documentation
-=========================================
+Gcs Output Node
 
-Purpose:
---------
 Write datasets directly to Google Cloud Storage buckets.
 
 Parameters:
------------
 - bucket (String): GCS Bucket Name (e.g., my-data-bucket).
 - path (String): Destination path within the bucket (e.g., data/output.csv).
 
 Authentication:
----------------
+
 - Uses the Global Cloud Credentials uploaded via the top toolbar.
+
+Schema Output: Outputs a Polars DataFrame.

@@ -1,20 +1,16 @@
-=========================================
-Google Sheets In Tool (google_sheets_in) Documentation
-=========================================
+Google Sheets Input Node
 
-Purpose:
---------
+Google Sheets In Tool (google_sheets_in) Documentation
+
+
 Read datasets directly from Google Sheets using global credentials.
 
 Parameters:
------------
 - spreadsheet_id_or_url (String): The full URL or unique ID of the Google Sheet.
 - worksheet_name (String): Optional name of the specific tab to read (defaults to the first tab).
 
 Authentication:
----------------
+
 - Uses the Global Cloud Credentials uploaded via the top toolbar (Service Account JSON or OAuth 2.0).
 
-Schema Outputs:
----------------
-- Dynamic: Evaluated directly from the sheet columns.
+Schema Output: - Dynamic: Evaluated directly from the sheet columns.

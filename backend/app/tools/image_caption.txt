@@ -1,4 +1,5 @@
-===================================================
+Image Caption Node
+
 Image Ingest (ImageCaptionNode)
 
 Extracts textual descriptions and markdown tabular data from images using the state-of-the-art Qwen2-VL Vision-Language Model.
@@ -20,3 +21,8 @@ Extracts textual descriptions and markdown tabular data from images using the st
 2. Evaluates the provided hardware constraints and initializes `Qwen2VLForConditionalGeneration`.
 3. Checks for `inputs["default"]`. If empty, uses `imagePath`. Otherwise, maps over the relevant column.
 4. Returns a standard Polars DataFrame containing `[ImagePath, ResolvedPath, Description, Dimensions, Format]`.
+
+Parameters:
+- None explicitly defined.
+
+Schema Output: 

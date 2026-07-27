@@ -10,3 +10,5 @@ Parameters:
 
 Example:
 Set chartType to 'scatter', xAxis to 'Age', and yAxis to 'Salary'. Connect the output to a File Output node configured for 'html'.
+
+Schema Output: Outputs a Polars DataFrame.

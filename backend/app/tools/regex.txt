@@ -1,3 +1,5 @@
+Regex Node
+
 Tool Name: Regex Parser
 Description: Extracts substrings from a target string column using Regular Expression capture groups. It appends the extracted groups as new columns to the end of the dataframe. You can seamlessly cast the newly extracted data to numeric or boolean types directly within the node.
 
@@ -12,3 +14,5 @@ Required Input Schema:
 
 Output Schema:
 - Returns the full upstream schema, plus the newly created `outputColumns` appended to the end of the dataframe, successfully casted to the chosen data types.
+
+Schema Output: 

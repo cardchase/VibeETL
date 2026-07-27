@@ -124,6 +124,8 @@ To make VibeETL user-friendly for tech-savvy users, we have provided automated s
 
 ### Method 1: The Automated Runner (Recommended)
 
+These scripts (`run.ps1` for Windows, `run.sh` for Mac/Linux) are the primary entrypoints for VibeETL. They automatically set up your Python virtual environment, install Node.js dependencies, and launch both the backend and frontend servers simultaneously.
+
 **Windows (PowerShell)**
 ```powershell
 .\run.ps1

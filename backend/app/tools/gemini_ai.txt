@@ -1,5 +1,6 @@
-# Gemini AI Node
+Gemini Ai Node
 
+# 
 Connects your data pipeline directly to Google's Gemini Multimodal Large Language Models.
 
 ## Features:
@@ -7,8 +8,12 @@ Connects your data pipeline directly to Google's Gemini Multimodal Large Languag
 - Generates a new column containing the AI's response for every row.
 - System Prompts allow you to guide the AI to extract specific schema patterns or insights.
 
-## Parameters:
+##
+
+Parameters:
 - **System Prompt**: The instructions for the AI (e.g., "Extract the sentiment from this text and return only POSITIVE, NEGATIVE, or NEUTRAL").
 - **Target Column**: Which column from your dataset to send to the AI.
 - **Output Column**: The name of the new column to append to your dataset with the AI's response.
 - **Model Choice**: Choose between Gemini Pro (Reasoning) or Gemini Flash (Speed).
+
+Schema Output: Outputs a Polars DataFrame.

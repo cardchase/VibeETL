@@ -1,5 +1,6 @@
-The LLM Chunker node batches sequential rows of text into massive, aggregated chunks. This is an extremely powerful pattern in AI Engineering to drastically reduce LLM API Token Limits and Network Latency by grouping thousands of independent strings into manageable prompt batches.
+Llm Chunker Node
 
+The 
 For example, 5,000 individual tweet strings can be chunked into 100 rows containing 50 tweets each.
 
 **Modular Chunking**:
@@ -9,3 +10,8 @@ This tool independently aggregates **every column you select**. If you select `C
 - **Rows per Chunk**: The number of sequential rows to group together.
 - **Columns to Combine**: Select the text column(s) to aggregate. Each selected column is chunked independently.
 - **Row Separator**: Determines how the aggregated rows are joined together in the final prompt (e.g. separated by New Lines or Commas).
+
+Parameters:
+- None explicitly defined.
+
+Schema Output: Outputs a Polars DataFrame.

@@ -1,3 +1,5 @@
+Datetime Parser Node
+
 Tool Name: Date Time
 Description: Parses string fields into DateTime format or formats DateTime objects back into strings. It supports auto-inferencing of common dates, predefined standard formats, as well as highly customized strptime/strftime patterns.
 
@@ -46,3 +48,5 @@ Developer Examples:
   "output_column": "BirthDateFormatted"
 }
 ```
+
+Schema Output: 

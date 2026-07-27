@@ -1,9 +1,15 @@
+Database Input Node
+
 # DB-In Node
 
 Read data from SQL Databases (PostgreSQL, MySQL, SQLite, Oracle, SQL Server, and Microsoft Access .mdb/.accdb) using high-speed Polars connectors and PyODBC.
 
-## Parameters:
+##
+
+Parameters:
 - **Connection String (URI)**: The SQLAlchemy or ADBC connection string (e.g. `postgresql://user:pass@host:5432/dbname`).
 - **SQL Query**: The SQL query to execute to fetch the data.
 
 This node leverages connectorx for zero-copy Arrow memory transfers, making it incredibly fast for large datasets.
+
+Schema Output: Outputs a Polars DataFrame.

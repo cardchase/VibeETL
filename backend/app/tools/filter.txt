@@ -1,14 +1,9 @@
-=====================================
-Filter Tool (filter) Documentation
-=====================================
+Filter Node
 
-Purpose:
---------
 Splits a connected data stream into two pathways ("true" matching and "false" non-matching)
 based on a conditional predicate comparison.
 
 Parameters:
------------
 - filterType (String): `"basic"` or `"custom"`
 - column (String): Column to evaluate (Basic filter only).
 - operator (String): Evaluator condition. Available options:
@@ -27,6 +22,4 @@ Parameters:
 - customExpression (String): Complex SQL-like filter expression (Custom filter only).
   Example: `[Age] > 30 AND [Department] == "Sales"`
 
-Schema Outputs:
----------------
-- Passes the upstream input schema unchanged to both the True and False ports.
+Schema Output: - Passes the upstream input schema unchanged to both the True and False ports.

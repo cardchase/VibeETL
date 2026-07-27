@@ -1,3 +1,5 @@
+Odds Portal Scraper Node
+
 OddsPortal Scraper Node
 
 Enterprise-grade, high-concurrency web scraper utilizing Playwright and Stealth modules to extract historical betting odds.

@@ -1,16 +1,9 @@
-=====================================
-Browse Tool (browse) Documentation
-=====================================
+Browse Node
 
-Purpose:
---------
 Serves as an output diagnostic panel displaying the full dataset records, row counts,
 and columns profile at the target node location.
 
 Parameters:
------------
 - None
 
-Schema Outputs:
----------------
-- Passes the upstream schema unchanged.
+Schema Output: - Passes the upstream schema unchanged.

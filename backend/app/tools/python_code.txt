@@ -1,5 +1,6 @@
-# Python Code Tool
-Execute custom Python scripts to manipulate data on the fly. 
+Python Code Node
+
+# Execute custom Python scripts to manipulate data on the fly. 
 This tool provides total flexibility, exposing the incoming dataframe as `df` and the Polars library as `pl`.
 
 ## Usage
@@ -34,3 +35,8 @@ df_out = df.with_columns(
     (pl.col("Score") * math.pi).alias("Score_Pi")
 )
 ```
+
+Parameters:
+- None explicitly defined.
+
+Schema Output: Outputs a Polars DataFrame.
