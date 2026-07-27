@@ -838,7 +838,7 @@ class OddsPortalScraperNode(BaseNode):
                         main_regex = re.compile(fr"^\s*{re.escape(tab_text)}\s*$", re.I)
                         target = page.get_by_text(main_regex).filter(visible=True).first
                         try:
-                            await target.wait_for(timeout=5000)
+                            await target.wait_for(timeout=15000)
                         except:
                             pass
                         if await target.count() > 0:
@@ -858,7 +858,7 @@ class OddsPortalScraperNode(BaseNode):
                             main_regex = re.compile(fr"^\s*{re.escape(tab_text)}\s*$", re.I)
                             target = page.get_by_text(main_regex).filter(visible=True).first
                             try:
-                                await target.wait_for(timeout=3000)
+                                await target.wait_for(timeout=15000)
                             except:
                                 pass
                             if await target.count() > 0:
@@ -884,6 +884,8 @@ class OddsPortalScraperNode(BaseNode):
                             await main_tab.click(timeout=3000)
                             await page.wait_for_timeout(500) # Give React a tiny moment to unmount old data
                     else:
+                        if hasattr(self, "is_cancelled") and self.is_cancelled():
+                            return []
                         if not page_reloaded and attempt == 0:
                             self.log(f"Smart Refresh: Tab {label} missing. Reloading page...")
                             page_reloaded = True
@@ -897,7 +899,7 @@ class OddsPortalScraperNode(BaseNode):
                         sub_regex = re.compile(fr"^\s*{re.escape(sub_tab_text)}\s*$", re.I)
                         sub_tab = page.get_by_text(sub_regex).filter(visible=True).first
                         try:
-                            await sub_tab.wait_for(timeout=5000)
+                            await sub_tab.wait_for(timeout=15000)
                         except:
                             pass
                         if await sub_tab.count() > 0:
@@ -925,11 +927,14 @@ class OddsPortalScraperNode(BaseNode):
                         elif state["status"] == "empty_market":
                             empty_market_count += 1
                             if empty_market_count >= 15: # Enforce a full 15-second wait before trusting 'empty'
+                                await asyncio.sleep(2.0) # Prevent racing through missing tabs
                                 return []
                         else:
                             empty_market_count = 0
                             
                     # If we reach here, we timed out
+                    if hasattr(self, "is_cancelled") and self.is_cancelled():
+                        return []
                     self.log(f"Smart Refresh: Timed out waiting for ANY odds on {label}. Reloading page...")
                     page_reloaded = True
                     await page.reload(wait_until="domcontentloaded", timeout=30000)
@@ -938,6 +943,8 @@ class OddsPortalScraperNode(BaseNode):
                     return []
 
                 except Exception as e:
+                    if hasattr(self, "is_cancelled") and self.is_cancelled():
+                        return []
                     if not page_reloaded and attempt == 0:
                         self.log(f"Smart Refresh: Error clicking {label}. Reloading page...")
                         page_reloaded = True
