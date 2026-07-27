@@ -1199,9 +1199,8 @@ class OddsPortalScraperNode(BaseNode):
                 }
                 """)
                     if ou_data and len(ou_data.keys()) > 0:
-                        break
-                        
                         extracted_row.update(ou_data)
+                        break
                 break
             except Exception as e:
                 break
