@@ -1,0 +1,14 @@
+Report Builder Node
+
+Intelligently converts raw or messy text into beautifully styled interactive HTML reports using Local AI.
+
+Parameters:
+- markdownColumn (String): The text column containing markdown/raw text to format.
+- formattingEngine (String): Execution engine ("Standard Parser (Fast)", "AI Assistant (Intelligent)").
+- aiModel (String): The HuggingFace text model to use if AI Assistant is selected.
+- execution_mode (String): CPU or GPU execution target.
+- gpu_vram (String): Maximum VRAM to allocate.
+- precision (String): Floating point precision for the model (FP16/FP32).
+- reportTheme (String): Light or Dark UI theme for the injected HTML.
+
+Schema Output: Appends a `__vibe_html_payload__` column containing the rendered HTML report.

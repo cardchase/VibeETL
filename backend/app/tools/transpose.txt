@@ -1,0 +1,8 @@
+Transpose Node
+
+Transposes/rotates the incoming dataset, swapping rows and columns.
+
+Parameters:
+- headerColumn (String): Selects the column to use as the new column headers (Optional).
+
+Schema Output: Yields a transposed DataFrame where the original columns become rows, and rows become columns.
