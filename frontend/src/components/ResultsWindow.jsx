@@ -6,7 +6,7 @@ import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
-const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style = {} }) => {
+const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, activeTabId, style = {} }) => {
   const [activeTab, setActiveTab] = useState('data'); // 'logs' or 'data'
   const [selectedPort, setSelectedPort] = useState(null);
   const [prevNodeId, setPrevNodeId] = useState(null);
@@ -200,7 +200,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
         {/* Selected Node Summary */}
         <div className="results-summary">
           {selectedNode ? (
-            status === 'success' ? (
+            status === 'success' || status === 'running' ? (
               <span>
                 {isInspectingUpstream && (
                   <span style={{ color: '#8b5cf6', fontWeight: 'bold', marginRight: 8, padding: '2px 6px', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: '4px' }}>
@@ -263,7 +263,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                   <p style={{ fontSize: '0.85rem', marginTop: 5, maxWidth: '500px' }}>{error}</p>
                 </div>
               )
-            ) : status === 'success' ? (
+            ) : status === 'success' || status === 'running' ? (
               previewData.length > 0 && schema.some(c => c.name === '__vibe_html_payload__') ? (
                 <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', padding: '20px', overflow: 'hidden', alignItems: 'flex-start', boxSizing: 'border-box' }}>
                   <div style={{ 
@@ -355,7 +355,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                         className="copy-logs-btn" 
                         onClick={async () => {
                           try {
-                            const res = await fetch(`http://localhost:8000/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}`);
+                            const res = await fetch(`http://localhost:8000/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}&session_id=${activeTabId}`);
                             if (!res.ok) {
                               const errData = await res.json();
                               alert(`Download failed: ${errData.detail || res.statusText}`);
@@ -467,8 +467,8 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
               <div style={{ color: 'var(--text-muted)' }}>Console is empty. Run the workflow to generate logs.</div>
             ) : (
               <>
-                {!selectedNode && globalLogs.length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
+                {globalLogs.length > 0 && (
+                  <div style={{ marginBottom: selectedNode ? 20 : 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8 }}>
                       <div style={{ color: 'var(--color-accent)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <FileText size={12} /> GLOBAL ENGINE SYSTEM LOGS
@@ -479,22 +479,24 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, style 
                       </button>
                     </div>
                     {globalLogs.map((log, idx) => (
-                      <div key={`g-${idx}`} className={`log-entry ${typeof log === 'string' && (log.includes('failed') || log.includes('Error')) ? 'error' : ''}`}>
-                        [{new Date().toLocaleTimeString()}] {log}
+                      <div key={`g-${idx}`} className={`log-entry ${typeof log === 'string' && (log.includes('failed') || log.includes('ERROR')) ? 'error' : ''}`}>
+                        {log}
                       </div>
                     ))}
                   </div>
                 )}
                 {selectedNode && (
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--color-inout)', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--color-inout)', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8, marginTop: globalLogs.length > 0 ? 16 : 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Terminal size={12} /> SELECTED NODE LOGS ({selectedNode.data?.label || selectedNode.id})
                       </div>
-                      <button className="copy-logs-btn" onClick={handleCopyLogs}>
-                        {copied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
-                        {copied ? "Copied" : "Copy Logs"}
-                      </button>
+                      {globalLogs.length === 0 && (
+                        <button className="copy-logs-btn" onClick={handleCopyLogs}>
+                          {copied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
+                          {copied ? "Copied" : "Copy Logs"}
+                        </button>
+                      )}
                     </div>
                     {nodeLogs.length > 0 ? (
                       nodeLogs.map((log, idx) => (

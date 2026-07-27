@@ -8,12 +8,16 @@ def parse_formula_to_polars(expression_str: str) -> str:
     Parses an Alteryx-style compute expression into a Polars eval string.
     E.g. "[Salary] * 1.10" -> "(pl.col('Salary') * 1.10)"
     """
+    # Auto-fix common syntax typos before bracket replacement
+    polars_str = re.sub(r'(?i)\btostr\s*\[', 'ToString([', expression_str)
+    polars_str = re.sub(r'(?i)\btonumber\s*\[', 'ToNumber([', polars_str)
+
     def replace_bracket(match):
         col_name = match.group(1)
         col_name = col_name.replace('"', '\\"')
         return f'pl.col("{col_name}")'
         
-    polars_str = re.sub(r'\[(.*?)\]', replace_bracket, expression_str)
+    polars_str = re.sub(r'\[(.*?)\]', replace_bracket, polars_str)
     polars_str = re.sub(r'\bAND\b', '&', polars_str, flags=re.IGNORECASE)
     polars_str = re.sub(r'\bOR\b', '|', polars_str, flags=re.IGNORECASE)
     
@@ -29,21 +33,23 @@ def verify_safe_formula_expression(polars_str: str) -> None:
     
     # Explicit list of permitted top-level names inside the formula canvas execution frame
     allowed_names = {'pl', 'ToString', 'ToNumber', 'IIF', 'IF', 'datetime'}
+    forbidden_calls = {'eval', 'exec', 'open', 'compile', '__import__', 'os', 'subprocess', 'shutil', 'requests', 'sys', 'builtins', 'globals', 'locals', 'getattr', 'setattr', 'delattr', 'hasattr'}
     
     try:
         tree = ast.parse(polars_str)
         for node in ast.walk(tree):
             # Block any attribute chaining trickery on the datetime module (e.g., datetime.os)
             if isinstance(node, ast.Attribute):
+                if node.attr.startswith('__'):
+                    raise SecurityError(f"Restricted attribute access intercepted: '{node.attr}'")
                 if isinstance(node.value, ast.Name) and node.value.id == 'datetime':
                     if node.attr not in {'date', 'datetime', 'time', 'timedelta', 'strptime'}:
                         raise SecurityError(f"Restricted datetime attribute blocked: '{node.attr}'")
             
             # Intercept explicit dangerous builtins or hidden lookups
             if isinstance(node, ast.Name):
-                 if node.id not in allowed_names and not node.id.islower():
-                     if node.id in {'eval', 'exec', 'open', 'compile', '__import__', 'os', 'subprocess', 'shutil', 'requests'}:
-                         raise SecurityError(f"Restricted execution call intercepted: '{node.id}'")
+                 if node.id in forbidden_calls or node.id.startswith('__'):
+                     raise SecurityError(f"Restricted execution call intercepted: '{node.id}'")
     except SecurityError as se:
         raise se
     except Exception:

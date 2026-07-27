@@ -15,23 +15,6 @@ class FileInputNode(BaseNode):
     1. Create a new method (e.g., `_parse_json(self, file_path: str) -> pl.DataFrame`).
     2. Register the extension mapping inside `_get_parser_registry()`.
     """
-import os
-import polars as pl
-import pdfplumber
-import pandas as pd
-from typing import Dict, Any, Callable
-from app.tools.base import BaseNode
-from app.utils.semantic_profiler import profile_and_cast_df
-
-class FileInputNode(BaseNode):
-    """
-    FileInputNode ingests data from local files.
-    
-    COMMUNITY EXTENSIBILITY GUIDE:
-    To add support for a new file type (e.g., JSON, Parquet):
-    1. Create a new method (e.g., `_parse_json(self, file_path: str) -> pl.DataFrame`).
-    2. Register the extension mapping inside `_get_parser_registry()`.
-    """
     
     MANIFEST = {
         "id": "fileInput",
@@ -41,7 +24,7 @@ class FileInputNode(BaseNode):
         "description": "Read data from local CSV, Excel, PDF, Text, or Word files.",
         "ui_schema": [
             {"field": "filePath", "type": "string", "label": "File Path / Name", "default": ""},
-            {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "pdf", "text", "word"], "default": "auto"},
+            {"field": "fileType", "type": "select", "label": "File Type", "options": ["auto", "csv", "excel", "parquet", "pdf", "text", "word"], "default": "auto"},
             {"field": "process_local", "type": "boolean", "label": "Process Media Locally (OCR/Parse vs AI Pass-through)", "default": True},
             {"field": "unleash_hardware", "type": "boolean", "label": "🚀 Unleash Maximum Local Memory (Bypass Frontend Safeguards)", "default": False}
         ]
@@ -115,9 +98,26 @@ class FileInputNode(BaseNode):
                 self.log(f"Error concatenating files: {e}")
                 raise ValueError(f"Could not combine files. They may have incompatible schemas: {e}")
                 
+        # Apply user-defined schema overrides
+        schema_overrides = self.parameters.get("schemaOverrides", {})
+        if schema_overrides:
+            self.log(f"Applying schema overrides: {schema_overrides}")
+            cast_exprs = []
+            for col, t in schema_overrides.items():
+                if col in combined_df.columns:
+                    target_type = str(t).lower()
+                    if "int" in target_type:
+                        cast_exprs.append(pl.col(col).cast(pl.Int64, strict=False))
+                    elif "percent" in target_type:
+                        expr = pl.col(col).cast(pl.Utf8)
+                        expr = expr.str.replace_all(r'[%]', '').cast(pl.Float64, strict=False) / 100.0
+                        cast_exprs.append(expr)
+            if cast_exprs:
+                combined_df = combined_df.with_columns(cast_exprs)
+                
         # Run Semantic Profiler to detect Currency, Percentages, and Accounting formats
         self.log("Running Semantic Data Profiler...")
-        final_df, semantic_meta = profile_and_cast_df(combined_df)
+        final_df, semantic_meta = profile_and_cast_df(combined_df, ignore_cols=list(schema_overrides.keys()) if schema_overrides else None)
         if semantic_meta:
             self.log(f"Detected semantic types: {semantic_meta}")
             
@@ -144,6 +144,7 @@ class FileInputNode(BaseNode):
         return {
             "csv": self._parse_csv,
             "excel": self._parse_excel,
+            "parquet": self._parse_parquet,
             "pdf": self._parse_pdf,
             "text": self._parse_txt,
             "word": self._parse_word
@@ -153,6 +154,7 @@ class FileInputNode(BaseNode):
         """Map file extensions to registered parser types."""
         if ext == ".csv": return "csv"
         if ext in [".xls", ".xlsx", ".xlsm", ".xlsb", ".ods"]: return "excel"
+        if ext in [".parquet", ".arrow"]: return "parquet"
         if ext == ".pdf": return "pdf"
         if ext == ".txt": return "text"
         if ext in [".doc", ".docx"]: return "word"
@@ -186,6 +188,12 @@ class FileInputNode(BaseNode):
             df = pl.read_excel(file_path, engine="calamine")
             
         self.log(f"Successfully read Excel. Row count: {df.height}, Column count: {df.width}")
+        return df
+
+    def _parse_parquet(self, file_path: str) -> pl.DataFrame:
+        self.log(f"Parsing Parquet file: {file_path}")
+        df = pl.read_parquet(file_path)
+        self.log(f"Successfully read Parquet. Row count: {df.height}, Column count: {df.width}")
         return df
 
     def _parse_pdf(self, file_path: str) -> pl.DataFrame:
@@ -288,3 +296,4 @@ class FileInputNode(BaseNode):
             
         self.log(f"Successfully read Word Doc. Row count: {df.height}, Column count: {df.width}")
         return df
+

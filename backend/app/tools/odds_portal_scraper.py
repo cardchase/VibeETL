@@ -89,7 +89,12 @@ class OddsPortalScraperNode(BaseNode):
         "name": "OddsPortal Scraper",
         "category": "source",
         "icon": "Database",
-        "description": "High-fidelity odds harvesting from active React DOM states."
+        "description": "High-fidelity odds harvesting from active React DOM states.",
+        "ui_schema": [
+            {"field": "targetUrl", "type": "text", "label": "Target URL", "default": "https://www.oddsportal.com/football/england/premier-league/results/"},
+            {"field": "maxWorkers", "type": "number", "label": "Max Concurrent Workers", "default": 2},
+            {"field": "headless", "type": "toggle", "label": "Run in Headless Mode", "default": True}
+        ]
     }
 
     def execute(self, inputs: Dict[str, Any]) -> pl.DataFrame:
@@ -129,9 +134,10 @@ class OddsPortalScraperNode(BaseNode):
         is_match = "/h2h/" in url or re.search(r'-[a-zA-Z0-9]{8}/(?:#.*)?$', url)
         
         async with async_playwright() as p:
+            headless_mode = str(self.parameters.get("headless", "true")).lower() == "true"
             # We use an authentic user agent to avoid trivial bot blocking
             browser = await p.chromium.launch(
-                headless=False,
+                headless=headless_mode,
                 args=['--no-sandbox', '--disable-setuid-sandbox']
             )
             context = await browser.new_context(
@@ -191,7 +197,7 @@ class OddsPortalScraperNode(BaseNode):
                         self.log(f"Found {len(match_links)} matches. Starting concurrent extraction ({max_workers} at a time)...")
                         semaphore = asyncio.Semaphore(max_workers)
                         
-                        async def process_match(match_url):
+                        async def process_match(match_url, original_idx, is_retry=False):
                             if hasattr(self, "is_cancelled") and self.is_cancelled():
                                 return None
                             async with semaphore:
@@ -201,85 +207,101 @@ class OddsPortalScraperNode(BaseNode):
                                 try:
                                     page = await context.new_page()
                                     await Stealth().apply_stealth_async(page)
-                                    return await self.execute_interception_engine(page, match_url)
+                                    if is_retry:
+                                        # Wait slightly longer on retries
+                                        await asyncio.sleep(2.0)
+                                    res = await self.execute_interception_engine(page, match_url)
+                                    if res:
+                                        res["_original_order"] = original_idx
+                                        res["_season_order"] = s_idx
+                                    return res
                                 except Exception as e:
                                     if hasattr(self, "is_cancelled") and self.is_cancelled():
+                                        return None
+                                    if "TargetClosedError" in str(type(e)):
                                         return None
                                     raise
                                 finally:
                                     if page:
                                         try:
-                                            await asyncio.sleep(0.5) # Allow visual transition
+                                            await asyncio.sleep(0.5 if not is_retry else 1.5) # Allow visual transition
                                             await page.close()
                                             await asyncio.sleep(0.5) # Wait before next page
                                         except:
                                             pass
                                             
-                        tasks = [asyncio.create_task(process_match(link)) for link in match_links]
+                        tasks = [asyncio.create_task(process_match(link, i)) for i, link in enumerate(match_links)]
+                        retry_queue = []
                         
-                        for completed_task in asyncio.as_completed(tasks):
-                            if hasattr(self, "is_cancelled") and self.is_cancelled():
-                                self.log("Cancellation detected, aborting extraction loop.")
-                                for t in tasks:
-                                    t.cancel()
-                                break
-                            try:
-                                r = await completed_task
-                                if isinstance(r, dict):
-                                    all_valid_rows.append(r)
-                                    
-                                    # Send sequential update to cache manager so UI data tab updates in real-time
-                                    partial_df = pl.DataFrame(all_valid_rows, schema=schema) if all_valid_rows else pl.DataFrame()
-                                    sid = getattr(self, "session_id", "default")
-                                    
-                                    status_str = r.get("Match_Status", "N/A")
-                                    ft_score = f"{r.get('FT_HomeScore')}-{r.get('FT_AwayScore')}" if r.get('FT_HomeScore') is not None else "N/A"
-                                    match_title = f"{r.get('HomeTeam', 'Unknown')} vs {r.get('AwayTeam', 'Unknown')}"
-                                    self.log(f"Extracted Match [{len(all_valid_rows)}]: {match_title} | URL: {r.get('URL', 'Unknown')} | Status: {status_str} | Score: {ft_score}")
-                                    
-                                    cache_manager.get_cache(sid).set_node_partial_result(
-                                        self.node_id, partial_df, self.logs
-                                    )
-                                    
-                                    # Auto-save CSV logic
-                                    if auto_save_csv:
-                                        csv_buffer.append(r)
-                                        if len(csv_buffer) >= auto_save_batch_size:
-                                            try:
-                                                import os
-                                                df_batch = pl.DataFrame(csv_buffer, schema=schema)
-                                                if os.path.exists(auto_save_csv):
-                                                    with open(auto_save_csv, mode='ab') as f:
-                                                        df_batch.write_csv(f, include_header=False)
-                                                else:
-                                                    df_batch.write_csv(auto_save_csv)
-                                                self.log(f"Auto-saved batch of {len(csv_buffer)} rows to CSV.")
-                                                csv_buffer.clear()
-                                            except Exception as e:
-                                                self.log(f"Error auto-saving to CSV: {e}")
-                            except Exception as e:
-                                if not (hasattr(self, "is_cancelled") and self.is_cancelled()):
-                                    self.log(f"Error extracting match: {e}")
-                                    if "closed" in str(e).lower():
-                                        raise e
-                                    
-                    # Final flush of the remaining buffered rows if any
-                    if auto_save_csv and csv_buffer:
-                        try:
-                            import os
-                            df_batch = pl.DataFrame(csv_buffer, schema=schema)
-                            if os.path.exists(auto_save_csv):
-                                with open(auto_save_csv, mode='ab') as f:
-                                    df_batch.write_csv(f, include_header=False)
-                            else:
-                                df_batch.write_csv(auto_save_csv)
-                            self.log(f"Auto-saved final batch of {len(csv_buffer)} rows to CSV.")
-                            csv_buffer.clear()
-                        except Exception as e:
-                            self.log(f"Error auto-saving final batch to CSV: {e}")
-                                    
+                        async def consume_tasks(current_tasks, is_retry=False):
+                            for completed_task in asyncio.as_completed(current_tasks):
+                                if hasattr(self, "is_cancelled") and self.is_cancelled():
+                                    self.log("Cancellation detected, aborting extraction loop.")
+                                    for t in current_tasks:
+                                        t.cancel()
+                                    break
+                                try:
+                                    r = await completed_task
+                                    if isinstance(r, dict):
+                                        needs_retry = False
+                                        if not is_retry:
+                                            critical_cols = ["FT_HomeOdds", "DNB_Home", "DC_FT_1X", "BTTS_Yes"]
+                                            missing_count = sum(1 for col in critical_cols if r.get(col) is None)
+                                            if missing_count > 0:
+                                                needs_retry = True
+                                                
+                                        if needs_retry:
+                                            self.log(f"Match [{r.get('HomeTeam', 'Unknown')} vs {r.get('AwayTeam', 'Unknown')}] missing critical data. Queued for deep recursive retry.")
+                                            retry_queue.append({'url': r.get("URL"), 'idx': r.get("_original_order")})
+                                        else:
+                                            all_valid_rows.append(r)
+                                            # Sort chronologically (latest to oldest matches) via season index then original index
+                                            all_valid_rows.sort(key=lambda x: (x.get("_season_order", 0), x.get("_original_order", 999999)))
+                                            
+                                            # Send sequential update to cache manager so UI data tab updates in real-time
+                                            # Exclude _original_order and _season_order from final output schema
+                                            clean_rows = [{k: v for k, v in row.items() if k not in ["_original_order", "_season_order"]} for row in all_valid_rows]
+                                            partial_df = pl.DataFrame(clean_rows, schema=schema) if clean_rows else pl.DataFrame()
+                                            sid = getattr(self, "session_id", "default")
+                                            
+                                            status_str = r.get("Match_Status", "N/A")
+                                            ft_score = f"{r.get('FT_HomeScore')}-{r.get('FT_AwayScore')}" if r.get('FT_HomeScore') is not None else "N/A"
+                                            match_title = f"{r.get('HomeTeam', 'Unknown')} vs {r.get('AwayTeam', 'Unknown')}"
+                                            retry_tag = " [RETRY PASS]" if is_retry else ""
+                                            self.log(f"Extracted Match [{len(all_valid_rows)}]{retry_tag}: {match_title} | URL: {r.get('URL', 'Unknown')} | Status: {status_str} | Score: {ft_score}")
+                                            
+                                            cache_manager.get_cache(sid).set_node_partial_result(
+                                                self.node_id, partial_df, self.logs
+                                            )
+                                            
+                                            # Auto-save CSV logic: overwrite completely each time to ensure perfect sort order
+                                            if auto_save_csv:
+                                                try:
+                                                    import os
+                                                    partial_df.write_csv(auto_save_csv)
+                                                    self.log(f"Auto-saved up to {len(clean_rows)} rows to CSV (Sorted).")
+                                                except Exception as e:
+                                                    self.log(f"Error auto-saving to CSV: {e}")
+                                except Exception as e:
+                                    if not (hasattr(self, "is_cancelled") and self.is_cancelled()):
+                                        self.log(f"Error extracting match: {e}")
+                                        if "closed" in str(e).lower():
+                                            raise e
+
+                        # Pass 1: Initial Scrape
+                        await consume_tasks(tasks, is_retry=False)
+                        
+                        # Pass 2: Recursive Deep Scrape for missing data
+                        if retry_queue and not (hasattr(self, "is_cancelled") and self.is_cancelled()):
+                            self.log(f"Starting Recursive Retry Pass for {len(retry_queue)} matches with missing critical data...")
+                            retry_tasks = [asyncio.create_task(process_match(item['url'], item['idx'], is_retry=True)) for item in retry_queue]
+                            await consume_tasks(retry_tasks, is_retry=True)
+                            
                     await competition_page.close()
-                    return all_valid_rows
+                    
+                    # Clean out sorting metadata before returning
+                    clean_rows = [{k: v for k, v in row.items() if k not in ["_original_order", "_season_order"]} for row in all_valid_rows]
+                    return clean_rows
             except Exception as e:
                 if hasattr(self, "is_cancelled") and self.is_cancelled():
                     self.log("Pipeline execution aborted gracefully due to cancellation signal.")
@@ -387,9 +409,24 @@ class OddsPortalScraperNode(BaseNode):
                 # Filter for match links
                 new_links_count = 0
                 
+                base_url = competition_url.split('/results')[0].split('/standings')[0]
+                if not base_url.endswith('/'):
+                    base_url += '/'
+
                 for l in links:
                     if l == competition_url or "outrights" in l or "results" in l or "standings" in l:
                         continue
+
+                    if "/h2h/" in l:
+                        match = re.search(r'/h2h/([a-zA-Z0-9-]+)-[a-zA-Z0-9]{8}/([a-zA-Z0-9-]+)-[a-zA-Z0-9]{8}/#([a-zA-Z0-9]{8})', l)
+                        if match:
+                            home_slug = match.group(1)
+                            away_slug = match.group(2)
+                            match_id = match.group(3)
+                            canonical_url = f"{base_url}{home_slug}-{away_slug}-{match_id}/"
+                            l = canonical_url
+                        else:
+                            continue
                     
                     # Ensure the match link matches the ID pattern (8 alphanumeric chars hash)
                     if re.search(r'-[a-zA-Z0-9]{8}/?(?:[?#].*)?$', l):
@@ -725,13 +762,16 @@ class OddsPortalScraperNode(BaseNode):
                     // Note on Fractional Odds: The regex is strictly bound to `\\d{1,3}` (max 3 digits) 
                     // to prevent it from accidentally mathematically converting calendar years (e.g., '2026/2027')
                     // found in page headers into fractional odds and parsing them into massive floats.
-                    if (t.match(/^[+-]?\\d+\\.\\d+$/)) {{ // Decimal (1, 2 or 3+ decimals)
-                        extracted.push(parseFloat(t));
-                    }} else if (t.match(/^\\d{1,3}\\/\\d{1,3}$/)) {{ // Fractional
-                        let p = t.split('/');
+                    
+                    let cleanT = t.replace(/[^0-9+.\\-\\/]/g, ''); // Strip arrows/symbols
+                    
+                    if (cleanT.match(/^[+-]?\\d+\\.\\d+$/)) {{ // Decimal (1, 2 or 3+ decimals)
+                        extracted.push(parseFloat(cleanT));
+                    }} else if (cleanT.match(/^\\d{1,3}\\/\\d{1,3}$/)) {{ // Fractional
+                        let p = cleanT.split('/');
                         extracted.push((parseFloat(p[0]) / parseFloat(p[1])) + 1);
-                    }} else if (t.match(/^[+-]\\d+$/)) {{ // American
-                        let num = parseFloat(t);
+                    }} else if (cleanT.match(/^[+-]\\d+$/)) {{ // American
+                        let num = parseFloat(cleanT);
                         if (num > 0) extracted.push((num / 100) + 1);
                         else extracted.push((100 / Math.abs(num)) + 1);
                     }}
@@ -756,8 +796,9 @@ class OddsPortalScraperNode(BaseNode):
                         let oddsArr = Array.from(oddsNodes).map(n => {{
                             let t = n.innerText.trim();
                             if (t === '-') return null;
-                            let match = t.match(/^[+-]?\\d+\\.\\d+$/);
-                            return match ? parseFloat(t) : null;
+                            let cleanT = t.replace(/[^0-9+.\\-\\/]/g, '');
+                            let match = cleanT.match(/^[+-]?\\d+\\.\\d+$/);
+                            return match ? parseFloat(cleanT) : null;
                         }});
                         
                         // ONLY accept odds if it matches the expected count for the market!
@@ -774,10 +815,7 @@ class OddsPortalScraperNode(BaseNode):
                     }}
                 }}
                 
-                // If the table physically loaded, but absolutely NO bookmaker has valid odds
-                if (!foundAnyModernOdds) {{
-                    return {{ status: "rows_present_no_odds", odds: [] }};
-                }}
+                // We do NOT return rows_present_no_odds here, because we want to try the fallback generic extraction!
             }}
             
             // --- 2. FALLBACK GENERIC EXTRACTION ---
@@ -810,6 +848,10 @@ class OddsPortalScraperNode(BaseNode):
             }}
             if (anyOddsFound && fallbackOdds) {{
                 return {{ status: "loaded", odds: fallbackOdds }};
+            }}
+            
+            if (modernRows.length > 0 && !anyOddsFound) {{
+                return {{ status: "rows_present_no_odds", odds: [] }};
             }}
 
             // Check if market is explicitly empty
@@ -937,12 +979,12 @@ class OddsPortalScraperNode(BaseNode):
                             return state["odds"]
                         elif state["status"] == "empty_market":
                             empty_market_count += 1
-                            if empty_market_count >= 15: # Enforce a full 15-second wait before trusting 'empty'
+                            if empty_market_count >= 30: # Enforce a full 30-second wait before trusting 'empty'
                                 await asyncio.sleep(2.0) # Prevent racing through missing tabs
                                 return []
                         elif state["status"] == "rows_present_no_odds":
                             rows_present_count += 1
-                            if rows_present_count >= 5: # If rows are present for 5s but no odds populate, it's padlocked
+                            if rows_present_count >= 15: # If rows are present for 15s but no odds populate, it's padlocked
                                 return []
                         else:
                             empty_market_count = 0
@@ -1047,12 +1089,12 @@ class OddsPortalScraperNode(BaseNode):
                     state = await page.evaluate(get_evaluate_tab_state(["Over/Under"], None))
                     if state["status"] == "empty_market":
                         empty_ou_count += 1
-                        if empty_ou_count >= 15:
+                        if empty_ou_count >= 30:
                             break
                     else:
                         empty_ou_count = 0
 
-                if empty_ou_count >= 15:
+                if empty_ou_count >= 30:
                     break
                 
                 # Expand all the goal-line accordions so we can see the bookmaker odds
@@ -1120,7 +1162,12 @@ class OddsPortalScraperNode(BaseNode):
                                 let tokens = text.split(/\s+/);
                                 for (let txt of tokens) {
                                     if (txt.includes('%') || txt.toLowerCase().includes('payout')) continue;
-                                    if (txt === '-' || txt.match(/^[+-]?\d+\.\d+$/)) odds.push(txt);
+                                    if (txt === '-') {
+                                        odds.push(txt);
+                                    } else {
+                                        let cleanTxt = txt.replace(/[^0-9+.\\-]/g, '');
+                                        if (cleanTxt.match(/^[+-]?\d+\.\d+$/)) odds.push(cleanTxt);
+                                    }
                                 }
                                 if (odds.length >= 2) {
                                     over = odds[0] === '-' ? null : parseFloat(odds[0]);

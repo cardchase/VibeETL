@@ -1,4 +1,5 @@
 import polars as pl
+import pandas as pd
 from typing import Dict, Any, List
 from app.tools.base import BaseNode
 
@@ -64,8 +65,23 @@ class SelectNode(BaseNode):
                 
                 # Safely cast the column type with protective bounds
                 if target_type:
-                    pl_type = self._map_to_polars_type(target_type)
-                    expr = expr.cast(pl_type, strict=False)
+                    target_type_low = target_type.lower()
+                    if "currency" in target_type_low:
+                        expr = expr.cast(pl.Utf8).str.replace_all(r'[\$,\s]', '').str.replace(r'^\((.*)\)$', r'-${1}').cast(pl.Float64, strict=False)
+                    elif "percent" in target_type_low:
+                        expr = expr.cast(pl.Utf8).str.replace_all(r'[%]', '').cast(pl.Float64, strict=False) / 100.0
+                    elif "datetime" in target_type_low:
+                        formats = ["%d %b %Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y %H:%M:%S"]
+                        expr = pl.coalesce([expr.cast(pl.Utf8).str.to_datetime(format=f, strict=False) for f in formats])
+                    elif "date" in target_type_low:
+                        formats = ["%d %b %Y", "%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y"]
+                        expr = pl.coalesce([expr.cast(pl.Utf8).str.to_date(format=f, strict=False) for f in formats])
+                    elif "time" in target_type_low:
+                        formats = ["%H:%M:%S", "%I:%M %p", "%H:%M"]
+                        expr = pl.coalesce([expr.cast(pl.Utf8).str.to_time(format=f, strict=False) for f in formats])
+                    else:
+                        pl_type = self._map_to_polars_type(target_type)
+                        expr = expr.cast(pl_type, strict=False)
                     
                 # Apply alias if rename differs from original name
                 if rename and rename != name:
@@ -95,4 +111,10 @@ class SelectNode(BaseNode):
             return pl.Float64
         elif type_str in ["boolean", "bool"]:
             return pl.Boolean
+        elif "datetime" in type_str:
+            return pl.Datetime
+        elif "date" in type_str:
+            return pl.Date
+        elif "time" in type_str:
+            return pl.Time
         return pl.String

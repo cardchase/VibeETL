@@ -12,7 +12,7 @@ const CATEGORY_TITLES = {
   'misc': 'Miscellaneous'
 };
 
-const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode }) => {
+const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode, isChatOpen, onToggleChat }) => {
   const fileInputRef = useRef(null);
   const dropdownRef = useRef(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -434,8 +434,25 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
             </div>
           )}
         </button>
+
+        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+        <button 
+          className="run-button" 
+          style={{ 
+            background: isChatOpen ? '#ede9fe' : 'var(--bg-secondary)', 
+            color: isChatOpen ? '#7c3aed' : 'var(--text-primary)', 
+            border: `1px solid ${isChatOpen ? '#c4b5fd' : 'var(--border-color)'}`,
+            fontWeight: 600
+          }} 
+          onClick={onToggleChat} 
+          title="Toggle AI Assistant"
+        >
+          <span style={{ fontSize: '14px', marginRight: '4px' }}>✨</span>
+          <span>AI Chat</span>
+        </button>
         
-        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)' }} />
+        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
 
         <label className="auto-run-label" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none' }} title="Toggle automatic execution on parameter changes">
           <input
@@ -490,10 +507,12 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
           <button
             className="run-button"
             onClick={async () => {
-              try {
-                await fetch('http://localhost:8000/api/cancel', { method: 'POST' });
-              } catch (e) {
-                console.error("Failed to cancel pipeline:", e);
+              if (window.confirm("Are you sure you want to stop the workflow execution?")) {
+                try {
+                  await fetch(`http://localhost:8000/api/cancel?session_id=${window.sessionId}`, { method: 'POST' });
+                } catch (e) {
+                  console.error("Failed to cancel pipeline:", e);
+                }
               }
             }}
             style={{ background: '#ef4444', color: 'white', border: '1px solid #dc2626' }}

@@ -188,7 +188,7 @@ const CustomNode = ({ id, data, selected, type }) => {
       {/* Node Labels floating underneath the square box */}
       <div className="node-labels-container">
         <div className="node-label-main" style={{ textAlign: 'center' }}>
-          {data?.label || 'Node'} {data?.executionIndex ? `[${data.executionIndex}]` : ''}
+          {data?.label || 'Node'} {id.match(/_(\d+)$/) ? `[${id.match(/_(\d+)$/)[1]}]` : ''}
         </div>
         {description && (
           <div className="node-label-sub" title={description}>

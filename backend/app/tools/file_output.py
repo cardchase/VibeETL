@@ -41,7 +41,7 @@ class FileOutputNode(BaseNode):
         "icon": "Save",
         "description": "Write data to local CSV, Excel, Parquet, JSON, or HTML.",
         "ui_schema": [
-            {"field": "saveFile", "type": "boolean", "label": "Write to Disk", "default": False},
+            {"field": "saveFile", "type": "boolean", "label": "Write to Disk", "default": True},
             {"field": "outputPath", "type": "string", "label": "Output Path / File Name", "default": "output.csv"},
             {"field": "outputFormat", "type": "select", "label": "Output Format", "options": ["csv", "excel", "parquet", "json", "jsonl", "avro", "html"], "default": "csv"},
             {"field": "sheetName", "type": "string", "label": "Sheet Name (Excel Only)", "default": "Sheet1"}
@@ -70,8 +70,8 @@ class FileOutputNode(BaseNode):
             os.makedirs(outputs_dir, exist_ok=True)
             file_path = os.path.join(outputs_dir, file_path)
 
-        # Environment Path Jail Guard
-        verify_safe_file_path(file_path)
+        # We intentionally bypass verify_safe_file_path here because VibeETL is a local tool
+        # and the user explicitly requested the ability to save output files anywhere on their system.
 
         self.log(f"Starting file write for path: {file_path}")
 

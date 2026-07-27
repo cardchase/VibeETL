@@ -9,16 +9,18 @@ def verify_safe_filter_expression(polars_str: str) -> None:
     module lookups, or file escapes before evaluation.
     """
     # Explicit blocklist of dangerous keywords
-    forbidden_calls = {'eval', 'exec', 'open', 'system', 'subprocess', 'getattr', '__import__', 'os', 'shutil', 'requests'}
+    forbidden_calls = {'eval', 'exec', 'open', 'system', 'subprocess', 'getattr', '__import__', 'os', 'shutil', 'requests', 'compile', 'sys', 'builtins', 'globals', 'locals', 'setattr', 'delattr', 'hasattr'}
     
     import ast
     try:
         tree = ast.parse(polars_str)
         for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id in forbidden_calls:
-                raise SecurityError(f"Restricted execution keyword intercepted: '{node.id}'")
-            if isinstance(node, ast.Attribute) and node.attr in forbidden_calls:
-                raise SecurityError(f"Restricted attribute call intercepted: '{node.attr}'")
+            if isinstance(node, ast.Name):
+                if node.id in forbidden_calls or node.id.startswith('__'):
+                    raise SecurityError(f"Restricted execution keyword intercepted: '{node.id}'")
+            if isinstance(node, ast.Attribute):
+                if node.attr in forbidden_calls or node.attr.startswith('__'):
+                    raise SecurityError(f"Restricted attribute call intercepted: '{node.attr}'")
     except SyntaxError:
         raise ValueError("Security Intercept: Malformed custom expression syntax geometry. This may indicate an obfuscated injection attempt.")
 

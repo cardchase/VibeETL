@@ -1,8 +1,8 @@
 import polars as pl
 import re
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 
-def profile_and_cast_df(df: pl.DataFrame) -> Tuple[pl.DataFrame, Dict[str, str]]:
+def profile_and_cast_df(df: pl.DataFrame, ignore_cols: List[str] = None) -> Tuple[pl.DataFrame, Dict[str, str]]:
     """
     Scans a Polars DataFrame for semantic types (Currency, Percentages, Accounting formats).
     Casts them to physical numeric types and returns the updated DataFrame and a metadata dict.
@@ -14,8 +14,11 @@ def profile_and_cast_df(df: pl.DataFrame) -> Tuple[pl.DataFrame, Dict[str, str]]
     # Matches: $100, $ 100, 1,000.50, ($1,000.50), (100)
     currency_usd_pattern = r'^\s*\(?\s*\$?\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*\)?\s*$'
     percentage_pattern = r'^\s*-?\d+(?:\.\d+)?\s*%\s*$'
+    ignore_cols = ignore_cols or []
     
     for col in df.columns:
+        if col in ignore_cols:
+            continue
         dtype = df.schema[col]
         expr = pl.col(col)
         

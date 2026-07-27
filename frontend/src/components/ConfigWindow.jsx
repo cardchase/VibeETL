@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Upload, Check, AlertCircle, Database, Link, X, Plus, ChevronUp, ChevronDown } from 'lucide-react';
+import FormulaEditor from './FormulaEditor';
 
 
 const SafeInput = React.forwardRef(({ value, checked, onChange, onBlur, type, ...props }, ref) => {
@@ -165,7 +166,6 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   const [nodeToAdd, setNodeToAdd] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [excelSheets, setExcelSheets] = useState([]);
-  const [formulaSuggestion, setFormulaSuggestion] = useState(null);
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -185,31 +185,40 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   const parameters = data?.parameters || {};
   const toolDef = availableTools.find(t => t.id === type);
 
-  // Fetch excel sheets list dynamically when file changes
+  // Dynamic file scan for schema and excel sheets
   useEffect(() => {
     if (isValidNode && type === 'fileInput' && parameters.filePath) {
-      const isExcel = parameters.fileType === 'excel' || 
-                      (parameters.fileType === 'auto' && (parameters.filePath.endsWith('.xlsx') || parameters.filePath.endsWith('.xls') || parameters.filePath.endsWith('.ods')));
-      if (isExcel) {
-        fetch(`http://127.0.0.1:8000/api/excel/sheets?filePath=${encodeURIComponent(parameters.filePath)}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data && Array.isArray(data.sheets)) {
-              setExcelSheets(data.sheets);
-            } else {
-              setExcelSheets([]);
-            }
-          })
-          .catch(() => {
-            setExcelSheets([]);
-          });
-      } else {
+      fetch('http://127.0.0.1:8000/api/tools/file-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: parameters.filePath })
+      })
+      .then(res => {
+        if (!res.ok) throw new Error('Scan failed');
+        return res.json();
+      })
+      .then(data => {
+        if (data.excel_sheets && Array.isArray(data.excel_sheets)) {
+          setExcelSheets(data.excel_sheets);
+        } else {
+          setExcelSheets([]);
+        }
+        // Update node schema blueprint if changed
+        if (data.schema_blueprint) {
+           onUpdateParams(id, {
+             ...parameters,
+             detectedSchema: data.schema_blueprint
+           });
+        }
+      })
+      .catch((err) => {
+        console.warn('File scan warning:', err);
         setExcelSheets([]);
-      }
+      });
     } else {
       setExcelSheets([]);
     }
-  }, [isValidNode, type, parameters.filePath, parameters.fileType]);
+  }, [isValidNode, type, parameters.filePath]);
 
   // Helper: check if we have upstream columns
   const hasUpstreamColumns = Array.isArray(upstreamSchema) && upstreamSchema.length > 0;
@@ -234,8 +243,10 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           const existing = currentCols.find((c) => c && c.name === col.name);
           return {
             name: col.name,
+            originalType: col.type || 'Unknown',
             keep: existing ? existing.keep : true,
             rename: existing ? existing.rename : col.name,
+            type: existing ? existing.type : '',
           };
         });
 
@@ -429,11 +440,28 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
     const csvDelimiter = parameters.csvDelimiter || ',';
     const csvHeader = parameters.csvHeader !== false;
     const excelSheet = parameters.excelSheet || '';
+    const detectedSchema = parameters.detectedSchema || [];
+    const schemaOverrides = parameters.schemaOverrides || {};
+
+    const handleSchemaOverride = (colName, newType) => {
+      onUpdateParams(id, {
+        ...parameters,
+        schemaOverrides: {
+          ...schemaOverrides,
+          [colName]: newType
+        }
+      });
+    };
+
+    const isCsv = fileType === 'csv' || (fileType === 'auto' && filePath.endsWith('.csv'));
+    const isExcel = fileType === 'excel' || (fileType === 'auto' && (filePath.endsWith('.xlsx') || filePath.endsWith('.xls') || filePath.endsWith('.ods')));
+    const isParquet = fileType === 'parquet' || (fileType === 'auto' && (filePath.endsWith('.parquet') || filePath.endsWith('.arrow')));
+    const isPdf = fileType === 'pdf' || (fileType === 'auto' && filePath.endsWith('.pdf'));
 
     return (
       <>
         <div className="form-group">
-          <label className="form-label">Source File</label>
+          <label className="form-label">Local File Path / Select File</label>
           <div
             className="file-upload-zone"
             onDragOver={onDragOver}
@@ -443,14 +471,14 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <Upload />
             <div className="file-upload-text">
               {uploading ? (
-                'Uploading file...'
+                'Processing file...'
               ) : filePath ? (
                 <div style={{ color: 'var(--color-success)', fontWeight: 600 }}>
                   <Check size={14} style={{ display: 'inline', marginRight: 4 }} />
-                  {filePath}
+                  {filePath.split(/[/\\]/).pop()}
                 </div>
               ) : (
-                'Click or drag file here (CSV, XLSX, PDF)'
+                'Click to select or drag a file here'
               )}
             </div>
             <SafeInput
@@ -468,13 +496,33 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         </div>
 
         <div className="form-group">
-          <label className="form-label">Or Local Absolute Path</label>
-          <SafeInput
-            type="text"
-            placeholder="C:/data/file.csv"
-            value={filePath}
-            onChange={(e) => handleParamChange('filePath', e.target.value)}
-          />
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <SafeInput
+              type="text"
+              placeholder="C:/data/file.csv"
+              value={filePath}
+              onChange={(e) => handleParamChange('filePath', e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ padding: '6px 12px', fontSize: '0.75rem', height: '32px' }}
+              onClick={async () => {
+                try {
+                  const res = await fetch('http://127.0.0.1:8000/api/pick_open_file');
+                  const data = await res.json();
+                  if (data.file_path) {
+                    handleParamChange('filePath', data.file_path);
+                  }
+                } catch (e) {
+                  console.error("Failed to pick file", e);
+                }
+              }}
+            >
+              Browse...
+            </button>
+          </div>
         </div>
 
         <div className="form-group">
@@ -483,14 +531,15 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <option value="auto">Auto-detect</option>
             <option value="csv">CSV (Comma-Separated)</option>
             <option value="excel">Excel Spreadsheet</option>
+            <option value="parquet">Parquet / Arrow</option>
             <option value="pdf">PDF Document (Tables)</option>
             <option value="text">Text File (.txt)</option>
             <option value="word">Word Document (.docx)</option>
           </SafeSelect>
         </div>
 
-        {fileType === 'csv' || (fileType === 'auto' && filePath.endsWith('.csv')) ? (
-          <>
+        {isCsv ? (
+          <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', marginBottom: '16px' }}>
             <div className="form-group">
               <label className="form-label">CSV Delimiter</label>
               <SafeSelect
@@ -514,36 +563,45 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 First row contains headers
               </label>
             </div>
-          </>
-        ) : null}
-
-        {fileType === 'excel' || (fileType === 'auto' && (filePath.endsWith('.xlsx') || filePath.endsWith('.xls') || filePath.endsWith('.ods'))) ? (
-          <div className="form-group">
-            <label className="form-label">Sheet Name</label>
-            {excelSheets.length > 0 ? (
-              <SafeSelect
-                value={excelSheet}
-                onChange={(e) => handleParamChange('excelSheet', e.target.value)}
-              >
-                <option value="">-- First Sheet (Default) --</option>
-                {excelSheets.map((sheet) => (
-                  <option key={sheet} value={sheet}>
-                    {sheet}
-                  </option>
-                ))}
-              </SafeSelect>
-            ) : (
-              <SafeInput
-                type="text"
-                placeholder="Leave empty for first sheet"
-                value={excelSheet}
-                onChange={(e) => handleParamChange('excelSheet', e.target.value)}
-              />
-            )}
           </div>
         ) : null}
 
-        {fileType === 'pdf' || (fileType === 'auto' && filePath.endsWith('.pdf')) ? (
+        {isExcel ? (
+          <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', marginBottom: '16px' }}>
+            <div className="form-group">
+              <label className="form-label">Sheet Name</label>
+              {excelSheets.length > 0 ? (
+                <SafeSelect
+                  value={excelSheet}
+                  onChange={(e) => handleParamChange('excelSheet', e.target.value)}
+                >
+                  <option value="">-- First Sheet (Default) --</option>
+                  {excelSheets.map((sheet) => (
+                    <option key={sheet} value={sheet}>
+                      {sheet}
+                    </option>
+                  ))}
+                </SafeSelect>
+              ) : (
+                <SafeInput
+                  type="text"
+                  placeholder="Leave empty for first sheet"
+                  value={excelSheet}
+                  onChange={(e) => handleParamChange('excelSheet', e.target.value)}
+                />
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {isParquet ? (
+          <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--color-success)', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)', marginBottom: '16px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Database size={16} />
+            <span style={{ fontWeight: 600 }}>Native Arrow Format - Optimization Locked</span>
+          </div>
+        ) : null}
+
+        {isPdf ? (
           <div className="form-group">
             <label className="form-label">PDF Extraction Mode</label>
             <SafeSelect
@@ -555,6 +613,52 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             </SafeSelect>
           </div>
         ) : null}
+
+        {detectedSchema.length > 0 && (
+          <div style={{ marginTop: '10px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              Schema Blueprint Matrix
+            </div>
+            <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-primary)', zIndex: 1, borderBottom: '1px solid var(--border-color)' }}>
+                  <tr>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 500, color: 'var(--text-muted)' }}>Column Name</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 500, color: 'var(--text-muted)' }}>Data Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detectedSchema.map((col, idx) => {
+                    const currentType = schemaOverrides[col.name] || col.type;
+                    return (
+                      <tr key={`${col.name}-${idx}`} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '8px 12px', color: 'var(--text-primary)', fontWeight: 500 }}>{col.name}</td>
+                        <td style={{ padding: '4px 12px' }}>
+                          <SafeSelect
+                            value={currentType}
+                            onChange={(e) => handleSchemaOverride(col.name, e.target.value)}
+                            style={{ padding: '4px', fontSize: '0.7rem', width: '100%', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-secondary)' }}
+                          >
+                            <option value={col.type}>{col.type} (Auto)</option>
+                            <option value="String">String / Text</option>
+                            <option value="Int64">Integer</option>
+                            <option value="Float64">Float / Decimal</option>
+                            <option value="Boolean">Boolean</option>
+                            <option value="Datetime">Datetime</option>
+                            <option value="Date">Date</option>
+                            <option value="Time">Time</option>
+                            <option value="Currency">Currency (USD)</option>
+                            <option value="Percentage">Percentage</option>
+                          </SafeSelect>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </>
     );
   };
@@ -594,60 +698,6 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         : 'No condition configured';
 
     // Autocomplete logic for custom expression
-    const handleExpressionChange = (e) => {
-      const val = e.target.value;
-      const cursor = e.target.selectionStart;
-      handleParamChange('customExpression', val);
-
-      const lastOpen = val.lastIndexOf('[', cursor - 1);
-      const lastClose = val.lastIndexOf(']', cursor - 1);
-
-      if (lastOpen !== -1 && lastOpen > lastClose) {
-        const partial = val.substring(lastOpen + 1, cursor).toLowerCase();
-        const options = upstreamSchema
-          .map(c => c.name)
-          .filter(name => name.toLowerCase().includes(partial));
-        
-        if (options.length > 0) {
-          setFormulaSuggestion({ partial, startIndex: lastOpen, cursorIndex: cursor, options });
-        } else {
-          setFormulaSuggestion(null);
-        }
-      } else {
-        setFormulaSuggestion(null);
-      }
-    };
-
-    const applySuggestion = (colName) => {
-      if (!formulaSuggestion) return;
-      const exp = customExpression;
-      const before = exp.substring(0, formulaSuggestion.startIndex);
-      const after = exp.substring(formulaSuggestion.cursorIndex);
-      
-      const newExp = before + '[' + colName + ']' + after;
-      handleParamChange('customExpression', newExp);
-      setFormulaSuggestion(null);
-      
-      if (textareaRef.current) {
-         setTimeout(() => {
-            textareaRef.current.focus();
-            const newCursor = before.length + colName.length + 2;
-            textareaRef.current.setSelectionRange(newCursor, newCursor);
-         }, 0);
-      }
-    };
-
-    const handleExpressionKeyDown = (e) => {
-      if (formulaSuggestion && formulaSuggestion.options.length > 0) {
-        if (e.key === 'Tab' || e.key === 'Enter') {
-          e.preventDefault();
-          applySuggestion(formulaSuggestion.options[0]);
-        } else if (e.key === 'Escape') {
-          setFormulaSuggestion(null);
-        }
-      }
-    };
-
     let examples = [];
     if (hasUpstreamColumns) {
       const stringCols = upstreamSchema.filter(c => c.type === 'String').map(c => c.name);
@@ -697,32 +747,13 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         {filterType === 'custom' ? (
           <div className="form-group" style={{ position: 'relative' }}>
             <label className="form-label">Custom Expression</label>
-            <SafeTextarea
-              ref={textareaRef}
-              className="custom-expression-input"
-              style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', resize: 'vertical' }}
+            <FormulaEditor
               value={customExpression}
-              onChange={handleExpressionChange}
-              onKeyDown={handleExpressionKeyDown}
+              onChange={(e) => handleParamChange('customExpression', e.target.value)}
+              columns={upstreamSchema || []}
               placeholder="e.g. [Department] == 'HR' AND [Age] > 30"
-              rows={3}
+              height="80px"
             />
-            {formulaSuggestion && (
-              <div className="autocomplete-suggestions" style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px', zIndex: 10, maxHeight: '150px', overflowY: 'auto' }}>
-                {formulaSuggestion.options.map((opt, i) => (
-                  <div 
-                    key={opt} 
-                    style={{ padding: '6px 10px', fontSize: '0.8rem', cursor: 'pointer', background: i === 0 ? 'var(--color-primary-alpha)' : 'transparent', color: 'var(--text-primary)' }}
-                    onClick={() => applySuggestion(opt)}
-                  >
-                    {opt}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 8 }}>
-              Suggestions: type '[' to see available columns.
-            </div>
           </div>
         ) : (
           <>
@@ -909,74 +940,89 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         <div className="form-group">
           <label className="form-label">Select / Rename Columns</label>
           {columns.length > 0 ? (
-            <div style={{ background: 'var(--bg-secondary)', padding: '0', borderRadius: '6px', border: '1px solid var(--border-color)', overflowX: 'auto' }}>
-              <table style={{ width: '100%', fontSize: '0.65rem', borderCollapse: 'collapse', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
-                    <th style={{ padding: '6px 8px', width: '30px', textAlign: 'center', fontWeight: 600 }}>Move</th>
-                    <th style={{ padding: '6px 8px', width: '30px', textAlign: 'center' }}>
-                       <SafeInput 
-                         type="checkbox" 
-                         title="Select/Deselect All"
-                         checked={columns.length > 0 && columns.every(c => c.keep)}
-                         onChange={(e) => {
-                           const updatedCols = columns.map(c => ({ ...c, keep: e.target.checked }));
-                           handleParamChange('columns', updatedCols);
-                         }}
-                         style={{ accentColor: 'var(--color-accent)' }}
-                       />
-                    </th>
-                    <th style={{ padding: '6px 8px', fontWeight: 600 }}>Field</th>
-                    <th style={{ padding: '6px 8px', fontWeight: 600 }}>Type</th>
-                    <th style={{ padding: '6px 8px', fontWeight: 600 }}>Rename</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {columns.map((col, idx) => (
-                    <tr key={col.name} style={{ borderBottom: '1px dotted var(--border-color)', opacity: col.keep ? 1 : 0.5, transition: 'opacity 0.2s', background: col.keep ? 'transparent' : 'rgba(0,0,0,0.02)' }}>
-                      <td style={{ padding: '2px 4px', width: '30px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0px' }}>
-                          <button onClick={() => handleColumnMove(idx, 'up')} disabled={idx === 0} style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'not-allowed' : 'pointer', color: idx === 0 ? 'var(--text-muted)' : 'var(--text-secondary)', padding: 0 }}><ChevronUp size={14} /></button>
-                          <button onClick={() => handleColumnMove(idx, 'down')} disabled={idx === columns.length - 1} style={{ background: 'transparent', border: 'none', cursor: idx === columns.length - 1 ? 'not-allowed' : 'pointer', color: idx === columns.length - 1 ? 'var(--text-muted)' : 'var(--text-secondary)', padding: 0 }}><ChevronDown size={14} /></button>
+            <div style={{ background: 'var(--bg-secondary)', padding: '0', borderRadius: '6px', border: '1px solid var(--border-color)', overflowX: 'auto', overflowY: 'hidden' }}>
+              <div style={{ minWidth: '400px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '30px 30px 1.2fr 1.8fr 1.2fr', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-primary)', padding: '6px 8px', fontWeight: 600, fontSize: '0.65rem' }}>
+                  <div style={{ textAlign: 'center' }}>Move</div>
+                  <div style={{ textAlign: 'center', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                     <SafeInput 
+                       type="checkbox" 
+                       title="Select/Deselect All"
+                       checked={columns.length > 0 && columns.every(c => c.keep)}
+                       onChange={(e) => {
+                         const updatedCols = columns.map(c => ({ ...c, keep: e.target.checked }));
+                         handleParamChange('columns', updatedCols);
+                       }}
+                       style={{ accentColor: 'var(--color-accent)' }}
+                     />
+                  </div>
+                  <div>Field</div>
+                  <div>Type Lineage</div>
+                  <div>Rename</div>
+                </div>
+                <div>
+                  {columns.map((col, idx) => {
+                    const isMutated = col.keep && (col.rename !== col.name || col.type);
+                    const rowBackground = col.keep ? (isMutated ? 'rgba(245, 158, 11, 0.08)' : 'transparent') : 'rgba(0,0,0,0.02)';
+                    
+                    return (
+                      <div key={col.name} style={{ display: 'grid', gridTemplateColumns: '30px 30px 1.2fr 1.8fr 1.2fr', borderBottom: '1px dotted var(--border-color)', opacity: col.keep ? 1 : 0.5, transition: 'opacity 0.2s, background 0.2s', background: rowBackground, alignItems: 'center', padding: '4px 8px', fontSize: '0.65rem' }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0px' }}>
+                            <button onClick={() => handleColumnMove(idx, 'up')} disabled={idx === 0} style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'not-allowed' : 'pointer', color: idx === 0 ? 'var(--text-muted)' : 'var(--text-secondary)', padding: 0 }}><ChevronUp size={14} /></button>
+                            <button onClick={() => handleColumnMove(idx, 'down')} disabled={idx === columns.length - 1} style={{ background: 'transparent', border: 'none', cursor: idx === columns.length - 1 ? 'not-allowed' : 'pointer', color: idx === columns.length - 1 ? 'var(--text-muted)' : 'var(--text-secondary)', padding: 0 }}><ChevronDown size={14} /></button>
+                          </div>
                         </div>
-                      </td>
-                      <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                        <SafeInput
-                          type="checkbox"
-                          checked={col.keep}
-                          onChange={(e) => handleColumnToggle(idx, 'keep', e.target.checked)}
-                          style={{ accentColor: 'var(--color-accent)' }}
-                        />
-                      </td>
-                      <td style={{ padding: '6px 8px', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px' }} title={col.name}>{col.name}</td>
-                      <td style={{ padding: '4px 8px' }}>
-                        <SafeSelect
-                          style={{ width: '85px', fontSize: '0.65rem', padding: '2px 4px', background: 'transparent', border: '1px solid transparent', borderRadius: '4px', color: 'var(--text-secondary)', outline: 'none', cursor: col.keep ? 'pointer' : 'not-allowed' }}
-                          value={col.type || ''}
-                          onChange={(e) => handleColumnToggle(idx, 'type', e.target.value)}
-                          disabled={!col.keep}
-                        >
-                          <option value="">Keep Type</option>
-                          <option value="String">String</option>
-                          <option value="Int64">Int64</option>
-                          <option value="Float64">Float64</option>
-                          <option value="Boolean">Boolean</option>
-                        </SafeSelect>
-                      </td>
-                      <td style={{ padding: '4px 8px' }}>
-                        <SafeInput
-                          type="text"
-                          style={{ width: '100%', fontSize: '0.65rem', padding: '4px 6px', background: col.keep ? 'var(--bg-primary)' : 'transparent', border: col.keep ? '1px solid var(--border-color)' : '1px solid transparent', borderRadius: '4px', color: 'var(--text-primary)', outline: 'none' }}
-                          placeholder="Rename..."
-                          value={col.rename || ''}
-                          onChange={(e) => handleColumnToggle(idx, 'rename', e.target.value)}
-                          disabled={!col.keep}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <div style={{ textAlign: 'center', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                          <SafeInput
+                            type="checkbox"
+                            checked={col.keep}
+                            onChange={(e) => handleColumnToggle(idx, 'keep', e.target.checked)}
+                            style={{ accentColor: 'var(--color-accent)' }}
+                          />
+                        </div>
+                        <div style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: '8px', display: 'flex', alignItems: 'center', gap: '4px' }} title={col.name}>
+                          {isMutated && <span style={{display:'inline-block', width:6, height:6, borderRadius:'50%', background:'var(--color-warning)', flexShrink: 0}}/>}
+                          <span style={{overflow: 'hidden', textOverflow: 'ellipsis'}}>{col.name}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                          <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '2px 4px', borderRadius: '4px', border: '1px solid var(--border-color)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                            {col.originalType || 'Unknown'}
+                          </span>
+                          <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>➔</span>
+                          <SafeSelect
+                            style={{ flex: 1, minWidth: '85px', fontSize: '0.65rem', padding: '2px 4px', background: 'transparent', border: '1px solid transparent', borderRadius: '4px', color: 'var(--text-secondary)', outline: 'none', cursor: col.keep ? 'pointer' : 'not-allowed' }}
+                            value={col.type || ''}
+                            onChange={(e) => handleColumnToggle(idx, 'type', e.target.value)}
+                            disabled={!col.keep}
+                          >
+                            <option value="">Keep Original</option>
+                            <option value="String">String</option>
+                            <option value="Int64">Int64</option>
+                            <option value="Float64">Float64</option>
+                            <option value="Boolean">Boolean</option>
+                            <option value="Datetime">Datetime</option>
+                            <option value="Date">Date</option>
+                            <option value="Time">Time</option>
+                            <option value="Currency">Currency (USD)</option>
+                            <option value="Percentage">Percentage</option>
+                          </SafeSelect>
+                        </div>
+                        <div>
+                          <SafeInput
+                            type="text"
+                            style={{ width: '100%', fontSize: '0.65rem', padding: '4px 6px', background: 'transparent', border: '1px solid transparent', borderBottom: col.rename !== col.name ? '1px solid var(--color-warning)' : '1px solid transparent', borderRadius: '2px', color: 'var(--text-primary)', outline: 'none', transition: 'all 0.2s' }}
+                            placeholder="Rename..."
+                            value={col.rename || ''}
+                            onChange={(e) => handleColumnToggle(idx, 'rename', e.target.value)}
+                            disabled={!col.keep}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           ) : (
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
@@ -1191,18 +1237,48 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Output Path / File Name</label>
-          <SafeInput
-            type="text"
-            placeholder="output.csv or C:/data/output.csv"
-            value={outputPath}
-            onChange={(e) => handleParamChange('outputPath', e.target.value)}
-          />
+          <div
+            className="file-upload-zone"
+            onClick={async () => {
+              try {
+                const res = await fetch('http://127.0.0.1:8000/api/pick_save_file');
+                const data = await res.json();
+                if (data.file_path) {
+                  handleParamChange('outputPath', data.file_path);
+                }
+              } catch (e) {
+                console.error("Failed to pick file", e);
+              }
+            }}
+          >
+            <Upload />
+            <div className="file-upload-text">
+              {outputPath ? (
+                <div style={{ color: 'var(--color-success)', fontWeight: 600 }}>
+                  <Check size={14} style={{ display: 'inline', marginRight: 4 }} />
+                  {outputPath.split(/[/\\]/).pop()}
+                </div>
+              ) : (
+                'Click to choose save location...'
+              )}
+            </div>
+          </div>
+          {outputPath && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', wordBreak: 'break-all' }}>
+              {outputPath}
+            </div>
+          )}
         </div>
 
         <div className="form-group">
           <label className="form-label">Output Format</label>
           <SafeSelect value={outputFormat} onChange={(e) => handleParamChange('outputFormat', e.target.value)}>
             <option value="csv">CSV (Comma-Separated)</option>
+            <option value="excel">Excel (.xlsx)</option>
+            <option value="parquet">Parquet (.parquet)</option>
+            <option value="json">JSON (.json)</option>
+            <option value="jsonl">JSON Lines (.jsonl)</option>
+            <option value="avro">Avro (.avro)</option>
             <option value="html">HTML (Interactive)</option>
           </SafeSelect>
         </div>
@@ -1386,61 +1462,6 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
       examples = ['[Column1] + [Column2]', '[Name] + " " + [Surname]', '[Salary] * 1.1'];
     }
 
-    const handleExpressionChange = (e) => {
-      const val = e.target.value;
-      const cursor = e.target.selectionStart;
-      handleParamChange('expression', val);
-
-      // Check if cursor is inside a bracket
-      const lastOpen = val.lastIndexOf('[', cursor - 1);
-      const lastClose = val.lastIndexOf(']', cursor - 1);
-
-      if (lastOpen !== -1 && lastOpen > lastClose) {
-        const partial = val.substring(lastOpen + 1, cursor).toLowerCase();
-        const options = upstreamSchema
-          .map(c => c.name)
-          .filter(name => name.toLowerCase().includes(partial));
-        
-        if (options.length > 0) {
-          setFormulaSuggestion({ partial, startIndex: lastOpen, cursorIndex: cursor, options });
-        } else {
-          setFormulaSuggestion(null);
-        }
-      } else {
-        setFormulaSuggestion(null);
-      }
-    };
-
-    const applySuggestion = (colName) => {
-      if (!formulaSuggestion) return;
-      const exp = parameters.expression || '';
-      const before = exp.substring(0, formulaSuggestion.startIndex);
-      const after = exp.substring(formulaSuggestion.cursorIndex);
-      
-      const newExp = before + '[' + colName + ']' + after;
-      handleParamChange('expression', newExp);
-      setFormulaSuggestion(null);
-      
-      if (textareaRef.current) {
-         setTimeout(() => {
-            textareaRef.current.focus();
-            const newCursor = before.length + colName.length + 2;
-            textareaRef.current.setSelectionRange(newCursor, newCursor);
-         }, 0);
-      }
-    };
-
-    const handleExpressionKeyDown = (e) => {
-      if (formulaSuggestion && formulaSuggestion.options.length > 0) {
-        if (e.key === 'Tab' || e.key === 'Enter') {
-          e.preventDefault();
-          applySuggestion(formulaSuggestion.options[0]);
-        } else if (e.key === 'Escape') {
-          setFormulaSuggestion(null);
-        }
-      }
-    };
-
     return (
       <>
         {!hasUpstreamColumns && (
@@ -1464,31 +1485,12 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group" style={{ position: 'relative' }}>
           <label className="form-label">Formula Expression</label>
-          <SafeTextarea
-            ref={textareaRef}
-            placeholder="Type formula here..."
+          <FormulaEditor
             value={expression}
-            onChange={handleExpressionChange}
-            onKeyDown={handleExpressionKeyDown}
-            style={{ fontFamily: 'var(--font-mono)', minHeight: '100px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', fontSize: '0.75rem', width: '100%', resize: 'vertical' }}
+            onChange={(e) => handleParamChange('expression', e.target.value)}
+            columns={upstreamSchema || []}
+            height="150px"
           />
-          {formulaSuggestion && formulaSuggestion.options.length > 0 && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg-secondary)', border: '1px solid var(--color-accent)', borderRadius: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', maxHeight: '120px', overflowY: 'auto', marginTop: '-2px' }}>
-              {formulaSuggestion.options.map((opt, i) => (
-                <div 
-                  key={opt}
-                  onClick={() => applySuggestion(opt)}
-                  style={{ padding: '6px 10px', fontSize: '0.7rem', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', cursor: 'pointer', background: i === 0 ? 'rgba(59, 130, 246, 0.1)' : 'transparent', borderBottom: '1px solid var(--border-color)' }}
-                >
-                  <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>[</span>{opt}<span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>]</span>
-                  {i === 0 && <span style={{ float: 'right', fontSize: '0.6rem', color: 'var(--text-muted)' }}>Press Tab/Enter</span>}
-                </div>
-              ))}
-            </div>
-          )}
-          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-            Type "[" to autocomplete columns. Supports standard Polars expression math.
-          </span>
         </div>
 
         <div className="form-group" style={{ marginTop: '16px' }}>
@@ -2266,27 +2268,210 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
     );
   };
 
+  const renderOddsPortalScraperConfig = () => {
+    const isUpcoming = parameters.scrapeMode === 'upcoming';
+    const isSingleMatch = parameters.scrapeMode === 'single_match';
+
+    const handleUrlBlur = (e) => {
+      const val = e.target.value;
+      if (!val) return;
+      const updates = { targetUrl: val };
+      if (val.includes('/results/')) {
+        updates.scrapeMode = 'historical';
+      } else if (val.split('/').filter(Boolean).length > 4 && !val.includes('/results/')) {
+        updates.scrapeMode = 'single_match';
+      }
+      handleMultipleParamsChange(updates);
+    };
+
+    return (
+      <div className="config-panel">
+        <div className="form-group">
+          <label className="form-label">OddsPortal URL</label>
+          <SafeInput
+            type="text"
+            value={parameters.targetUrl || ''}
+            onChange={(e) => handleParamChange('targetUrl', e.target.value)}
+            onBlur={handleUrlBlur}
+            placeholder="Paste OddsPortal link here..."
+          />
+        </div>
+        
+        <div style={{ marginTop: '16px' }}>
+          <label className="form-label checkbox-label" style={{ fontWeight: 600, color: 'var(--color-accent)' }}>
+            <SafeInput
+              type="checkbox"
+              checked={!!parameters.scrapeAllSeasons}
+              onChange={(e) => handleParamChange('scrapeAllSeasons', e.target.checked)}
+            />
+            Scrape All Historical Seasons
+          </label>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginLeft: '24px', marginTop: '4px' }}>
+            If checked, the scraper will automatically navigate backwards through all available seasons for this league.
+          </div>
+        </div>
+
+        <div className="form-group" style={{ marginTop: '16px' }}>
+          <label className="form-label">Emergency Backup CSV (For long scrapes)</label>
+          <div
+            className="file-upload-zone"
+            onClick={async () => {
+              try {
+                const res = await fetch('http://127.0.0.1:8000/api/pick_save_file');
+                const data = await res.json();
+                if (data.file_path) {
+                  handleParamChange('autoSaveCsvPath', data.file_path);
+                }
+              } catch (e) {
+                console.error("Failed to pick file", e);
+              }
+            }}
+          >
+            <Upload />
+            <div className="file-upload-text">
+              {parameters.autoSaveCsvPath ? (
+                <div style={{ color: 'var(--color-success)', fontWeight: 600 }}>
+                  <Check size={14} style={{ display: 'inline', marginRight: 4 }} />
+                  {parameters.autoSaveCsvPath.split(/[/\\]/).pop()}
+                </div>
+              ) : (
+                <>Click to select CSV destination (Optional)</>
+              )}
+            </div>
+          </div>
+          {parameters.autoSaveCsvPath && (
+            <div style={{ marginTop: '8px' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '4px', wordBreak: 'break-all' }}>
+                {parameters.autoSaveCsvPath}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                <label className="form-label" style={{ margin: 0, fontSize: '0.7rem' }}>Batch Size (Rows)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value={parameters.autoSaveBatchSize || 10}
+                  onChange={(e) => handleParamChange('autoSaveBatchSize', Number(e.target.value))}
+                  style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="form-group" style={{ marginTop: '16px' }}>
+          <label className="form-label checkbox-label" style={{ fontWeight: 600, color: 'var(--color-accent)' }}>
+            <SafeInput
+              type="checkbox"
+              checked={parameters.headless !== false}
+              onChange={(e) => handleParamChange('headless', e.target.checked)}
+            />
+            Run in Headless Mode
+          </label>
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
+          <div style={{ flex: 1 }}>
+            <label className="form-label">Max Concurrent Tabs</label>
+            <SafeInput
+              type="number"
+              min="1"
+              max="20"
+              value={parameters.maxWorkers || 2}
+              onChange={(e) => handleParamChange('maxWorkers', Number(e.target.value))}
+              style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+            />
+          </div>
+        </div>
+
+        <div className="form-group" style={{ marginTop: '16px' }}>
+          <label className="form-label checkbox-label" style={{ fontWeight: 600, color: 'var(--color-accent)' }}>
+            <SafeInput
+              type="checkbox"
+              checked={!!parameters.use_llm_parsing}
+              onChange={(e) => handleParamChange('use_llm_parsing', e.target.checked)}
+            />
+            Use AI Parsing (Uses Gemini API Tokens for 60+ markets)
+          </label>
+        </div>
+
+        <div className="form-group" style={{ marginTop: '16px' }}>
+          <div style={{ 
+            background: 'rgba(10, 132, 255, 0.1)', border: '1px solid rgba(10, 132, 255, 0.3)', 
+            borderRadius: '6px', padding: '10px', color: 'var(--text-primary)', 
+            fontSize: '0.75rem', textAlign: 'center', fontWeight: 500 
+          }}>
+            ⚙️ Bet365 Master Schema Matrix: Engaged<br/>
+            <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', fontWeight: 'normal', marginTop: '4px', display: 'block' }}>
+              (Scraping All 1X2, DNB, DC, HT/FT, OU & BTTS Splits)
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderDynamicForm = (uiSchema) => {
     return uiSchema.map((fieldDef, idx) => {
       const val = parameters[fieldDef.field] !== undefined ? parameters[fieldDef.field] : fieldDef.default;
+
+      if (fieldDef.type === 'boolean') {
+        return (
+          <div key={fieldDef.field} className="form-group">
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <SafeInput
+                type="checkbox"
+                checked={val === true || val === 'true'}
+                onChange={(e) => handleParamChange(fieldDef.field, e.target.checked)}
+                style={{ accentColor: 'var(--color-accent)' }}
+              />
+              {fieldDef.label}
+            </label>
+            {fieldDef.description && <small className="form-text">{fieldDef.description}</small>}
+          </div>
+        );
+      }
 
       if (fieldDef.type === 'string' || fieldDef.type === 'text') {
         return (
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
-            <SafeInput
-              type="text"
-              value={val}
-              onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
-            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <SafeInput
+                type="text"
+                value={val}
+                onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}
+                style={{ flex: 1 }}
+              />
+              {fieldDef.field === 'outputPath' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', height: '32px' }}
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('http://127.0.0.1:8000/api/pick_save_file');
+                      const data = await res.json();
+                      if (data.file_path) {
+                        handleParamChange(fieldDef.field, data.file_path);
+                      }
+                    } catch (e) {
+                      console.error("Failed to pick file", e);
+                    }
+                  }}
+                >
+                  Browse...
+                </button>
+              )}
+            </div>
           </div>
         );
       }
 
-      if (fieldDef.type === 'number') {
+      if (type === 'number') {
         return (
           <div key={idx} className="form-group">
-            <label className="form-label">{fieldDef.label}</label>
+            <label className="form-label">{label}</label>
             <SafeInput
               type="number"
               value={val}
@@ -2328,49 +2513,70 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           const cursor = e.target.selectionStart;
           handleParamChange(fieldDef.field, newVal);
 
-          // Check for autocomplete trigger (e.g. df[" or pl.col(")
-          const lastOpen = Math.max(newVal.lastIndexOf('["', cursor - 1), newVal.lastIndexOf("['", cursor - 1));
-          
-          if (lastOpen !== -1 && cursor > lastOpen + 1) {
-            const partial = newVal.substring(lastOpen + 2, cursor).toLowerCase();
-            // Don't show if they already closed the bracket/quote
-            const closedQuoteIndex = Math.max(newVal.indexOf('"]', lastOpen), newVal.indexOf("']", lastOpen));
-            if (closedQuoteIndex !== -1 && closedQuoteIndex < cursor) {
-                setFormulaSuggestion(null);
+          // Check for column autocomplete trigger (Alteryx style brackets: '[')
+          const lastBracket = newVal.lastIndexOf('[', cursor - 1);
+          let insideBracket = false;
+          if (lastBracket !== -1) {
+            const closedBracket = newVal.indexOf(']', lastBracket);
+            if (closedBracket === -1 || closedBracket >= cursor) {
+              insideBracket = true;
+              const partial = newVal.substring(lastBracket + 1, cursor).toLowerCase();
+              const options = (upstreamSchema || [])
+                .map(c => c.name)
+                .filter(name => name.toLowerCase().includes(partial))
+                .map(name => ({ type: 'column', value: name }));
+              
+              if (options.length > 0) {
+                setFormulaSuggestion({ field: fieldDef.field, partial, startIndex: lastBracket, cursorIndex: cursor, options });
                 return;
+              }
             }
-
-            const options = (upstreamSchema || [])
-              .map(c => c.name)
-              .filter(name => name.toLowerCase().includes(partial));
-            
-            if (options.length > 0) {
-              setFormulaSuggestion({ field: fieldDef.field, partial, startIndex: lastOpen, cursorIndex: cursor, options });
-            } else {
-              setFormulaSuggestion(null);
-            }
-          } else {
-            setFormulaSuggestion(null);
           }
+
+          // Check for function autocomplete trigger (Typing letters)
+          if (!insideBracket) {
+            const wordMatch = newVal.substring(0, cursor).match(/[a-zA-Z]+$/);
+            if (wordMatch) {
+              const partial = wordMatch[0].toLowerCase();
+              const availableFunctions = ['ToString', 'ToNumber', 'IIF', 'IF', 'datetime'];
+              const options = availableFunctions
+                .filter(f => f.toLowerCase().startsWith(partial) && f.toLowerCase() !== partial)
+                .map(f => ({ type: 'function', value: f }));
+                
+              if (options.length > 0) {
+                const startIndex = cursor - wordMatch[0].length;
+                setFormulaSuggestion({ field: fieldDef.field, partial, startIndex, cursorIndex: cursor, options });
+                return;
+              }
+            }
+          }
+
+          setFormulaSuggestion(null);
         };
 
-        const applySug = (colName) => {
+        const applySug = (suggestionObj) => {
           if (!formulaSuggestion) return;
           const exp = val;
           const before = exp.substring(0, formulaSuggestion.startIndex);
           const after = exp.substring(formulaSuggestion.cursorIndex);
-          const quote = exp.substring(formulaSuggestion.startIndex + 1, formulaSuggestion.startIndex + 2); // ' or "
           
-          // Complete the syntax automatically
-          const newExp = before + '[' + quote + colName + quote + ']' + after;
+          let newExp = '';
+          let newCursor = 0;
+
+          if (suggestionObj.type === 'column') {
+            newExp = before + '[' + suggestionObj.value + ']' + after;
+            newCursor = before.length + suggestionObj.value.length + 2;
+          } else if (suggestionObj.type === 'function') {
+            newExp = before + suggestionObj.value + '(' + after;
+            newCursor = before.length + suggestionObj.value.length + 1;
+          }
+          
           handleParamChange(fieldDef.field, newExp);
           setFormulaSuggestion(null);
           
           if (textareaRef.current) {
              setTimeout(() => {
                 textareaRef.current.focus();
-                // move cursor after the closing bracket
-                const newCursor = before.length + colName.length + 5;
                 textareaRef.current.setSelectionRange(newCursor, newCursor);
              }, 0);
           }
@@ -2419,22 +2625,26 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
               }}>
                 <div style={{ padding: '4px 8px', fontSize: '0.65rem', background: 'var(--bg-primary)', borderBottom: '1px solid var(--border-color)', fontWeight: 'bold' }}>
-                  Select Column
+                  Suggestions
                 </div>
                 {formulaSuggestion.options.map(opt => (
                   <div 
-                    key={opt}
+                    key={opt.value}
                     onClick={() => applySug(opt)}
                     style={{
                       padding: '6px 12px',
                       cursor: 'pointer',
                       fontSize: '0.75rem',
-                      fontFamily: 'monospace'
+                      fontFamily: 'monospace',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
                     }}
-                    onMouseEnter={(e) => e.target.style.background = 'var(--color-primary)'}
-                    onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--color-primary)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
-                    {opt}
+                    <span>{opt.value}</span>
+                    <span style={{color: 'var(--text-muted)', fontSize: '0.6rem'}}>{opt.type}</span>
                   </div>
                 ))}
               </div>
@@ -2585,6 +2795,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
          type === 'visualization' ? renderVisualizationConfig() :
          type === 'join' ? renderJoinConfig() :
          type === 'summarize' ? renderSummarizeConfig() :
+         type === 'odds_portal_scraper' ? renderOddsPortalScraperConfig() :
          (toolDef && toolDef.ui_schema) ? renderDynamicForm(toolDef.ui_schema) : null}
       </div>
     </div>

@@ -9,7 +9,7 @@ import {
   SelectionMode,
   Panel
 } from '@xyflow/react';
-import { Hand, MousePointer, Search, X, Box, Wand } from 'lucide-react';
+import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Copy, ClipboardPaste, Trash2 } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
 import ContainerNode from './ContainerNode';
@@ -104,6 +104,23 @@ const CanvasContent = ({
 }) => {
   const reactFlowWrapper = useRef(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
+  const [isPanMode, setIsPanMode] = useState(true);
+  const [isCopied, setIsCopied] = useState(false);
+  const [menuConfig, setMenuConfig] = useState({ visible: false, x: 0, y: 0, type: null, nodeId: null });
+
+  const handleCopy = () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true }));
+  };
+  const handlePaste = () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true }));
+  };
+  const handleDelete = () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }));
+  };
+  const handleSelectAll = () => {
+    const changes = nodes.map(n => ({ id: n.id, type: 'select', selected: true }));
+    onNodesChange(changes);
+  };
 
   useEffect(() => {
     const handleFitView = () => {
@@ -160,6 +177,7 @@ const CanvasContent = ({
   );
 
   const onNodeClick = useCallback((event, node) => {
+    setMenuConfig({ visible: false, x: 0, y: 0, type: null, nodeId: null });
     onNodeSelect(node);
     if (onEdgeSelect) onEdgeSelect(null);
   }, [onNodeSelect, onEdgeSelect]);
@@ -172,6 +190,7 @@ const CanvasContent = ({
   const [lastClickedPosition, setLastClickedPosition] = useState(null);
 
   const onPaneClick = useCallback((event) => {
+    setMenuConfig({ visible: false, x: 0, y: 0, type: null, nodeId: null });
     onNodeSelect(null);
     if (onEdgeSelect) onEdgeSelect(null);
     
@@ -184,7 +203,6 @@ const CanvasContent = ({
     }
   }, [onNodeSelect, onEdgeSelect, screenToFlowPosition]);
 
-  const [isPanMode, setIsPanMode] = useState(true);
 
   // Listen for add node events from ToolPalette
   useEffect(() => {
@@ -192,20 +210,22 @@ const CanvasContent = ({
       const type = e.detail.type;
       if (reactFlowWrapper.current) {
         let position;
+        let anchorNodeId = null;
         
         const selectedNodes = nodes.filter(n => n.selected);
         if (selectedNodes.length > 0) {
           // If a node is explicitly selected, place it to the right of that node
           const refNode = selectedNodes[selectedNodes.length - 1];
+          anchorNodeId = refNode.id;
           position = {
-            x: refNode.position.x + 250,
+            x: refNode.position.x + (refNode.width || 150) + 60,
             y: refNode.position.y
           };
         } else if (nodes.length > 0) {
           // If no node is selected, place it to the right of the right-most node
           const rightMostNode = nodes.reduce((prev, current) => (prev.position.x > current.position.x) ? prev : current);
           position = {
-            x: rightMostNode.position.x + 250,
+            x: rightMostNode.position.x + (rightMostNode.width || 150) + 60,
             y: rightMostNode.position.y
           };
         } else {
@@ -217,11 +237,11 @@ const CanvasContent = ({
           });
         }
         
-        // Prevent stacking - Find closest available area "1 tool apart" (Alteryx style)
+        // Prevent stacking via Vertical Deflection
         let conflict = true;
-        let offsetMultiplier = 0;
+        let loopCounter = 0;
         
-        while (conflict && offsetMultiplier < 20) {
+        while (conflict && loopCounter < 50) {
           // eslint-disable-next-line no-loop-func
           conflict = nodes.some(n => 
             Math.abs(n.position.x - position.x) < 160 && 
@@ -229,16 +249,16 @@ const CanvasContent = ({
           );
           
           if (conflict) {
-            offsetMultiplier++;
-            // Shift exactly "1 tool apart" to the right
+            loopCounter++;
+            // Shift exactly "1 tool height + spacing" downward
             position = {
-              x: position.x + 200,
-              y: position.y
+              x: position.x,
+              y: position.y + (80) + 60
             };
           }
         }
 
-        onAddNode(type, position);
+        onAddNode(type, position, anchorNodeId);
       }
     };
     window.addEventListener('vibe-add-node', handleAddNodeEvent);
@@ -271,49 +291,92 @@ const CanvasContent = ({
           <MousePointer size={14} />
           <span>Select Box</span>
         </button>
+        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
+        <button
+          className="mode-btn"
+          onClick={handleSelectAll}
+          title="Select All Nodes"
+        >
+          <CheckSquare size={14} />
+          <span>Select All</span>
+        </button>
+
+        <button
+          className="mode-btn"
+          onClick={handlePaste}
+          title="Paste Nodes"
+        >
+          <ClipboardPaste size={14} />
+          <span>Paste</span>
+        </button>
 
         {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
           <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
         )}
         {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
-          <button
-            className="mode-btn"
-            onClick={() => {
-              const selectedNodes = nodes.filter(n => n.selected && n.type !== 'container');
-              if (selectedNodes.length === 0) return;
-              
-              // Calculate bounding box
-              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-              selectedNodes.forEach(n => {
-                if (n.position.x < minX) minX = n.position.x;
-                if (n.position.y < minY) minY = n.position.y;
-                if (n.position.x + (n.width || 150) > maxX) maxX = n.position.x + (n.width || 150);
-                if (n.position.y + (n.height || 60) > maxY) maxY = n.position.y + (n.height || 60);
-              });
+          <>
+            <button
+              className="mode-btn"
+              onClick={() => {
+                handleCopy();
+                setIsCopied(true);
+                setTimeout(() => setIsCopied(false), 1500);
+              }}
+              title="Copy Selected Nodes"
+            >
+              {isCopied ? <Check size={14} style={{ color: 'var(--color-success)' }} /> : <Copy size={14} />}
+              <span style={isCopied ? { color: 'var(--color-success)', fontWeight: 600 } : {}}>
+                {isCopied ? 'Copied!' : 'Copy'}
+              </span>
+            </button>
+            <button
+              className="mode-btn"
+              onClick={handleDelete}
+              title="Delete Selected Nodes"
+              style={{ color: '#ef4444' }}
+            >
+              <Trash2 size={14} />
+              <span>Delete</span>
+            </button>
+            <button
+              className="mode-btn"
+              onClick={() => {
+                const selectedNodes = nodes.filter(n => n.selected && n.type !== 'container');
+                if (selectedNodes.length === 0) return;
+                
+                // Calculate bounding box
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                selectedNodes.forEach(n => {
+                  if (n.position.x < minX) minX = n.position.x;
+                  if (n.position.y < minY) minY = n.position.y;
+                  if (n.position.x + (n.width || 150) > maxX) maxX = n.position.x + (n.width || 150);
+                  if (n.position.y + (n.height || 60) > maxY) maxY = n.position.y + (n.height || 60);
+                });
 
-              // Add padding
-              minX -= 40;
-              minY -= 60; // Extra for header
-              maxX += 40;
-              maxY += 40;
+                // Add padding
+                minX -= 40;
+                minY -= 60; // Extra for header
+                maxX += 40;
+                maxY += 40;
 
-              // Fire custom event to create container and group nodes
-              window.dispatchEvent(new CustomEvent('vibe-create-container', {
-                detail: {
-                  x: minX,
-                  y: minY,
-                  width: maxX - minX,
-                  height: maxY - minY,
-                  childIds: selectedNodes.map(n => n.id)
-                }
-              }));
-            }}
-            title="Group selected nodes into a Container"
-            style={{ color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.1)' }}
-          >
-            <Box size={14} />
-            <span>Put in Container</span>
-          </button>
+                // Fire custom event to create container and group nodes
+                window.dispatchEvent(new CustomEvent('vibe-create-container', {
+                  detail: {
+                    x: minX,
+                    y: minY,
+                    width: maxX - minX,
+                    height: maxY - minY,
+                    childIds: selectedNodes.map(n => n.id)
+                  }
+                }));
+              }}
+              title="Group selected nodes into a container"
+              style={{ color: '#2563eb', fontWeight: 600, background: 'rgba(37, 99, 235, 0.1)' }}
+            >
+              <Box size={14} />
+              <span>Put in Container</span>
+            </button>
+          </>
         )}
       </div>
 
@@ -340,13 +403,13 @@ const CanvasContent = ({
         snapGrid={[16, 16]}
         panOnDrag={isPanMode}
         selectionOnDrag={!isPanMode}
-        selectionMode={SelectionMode.Full}
+        selectionMode={SelectionMode.Partial}
         connectionRadius={50}
         fitView
-        fitViewOptions={{ maxZoom: 1.1, padding: 0.2 }}
-        defaultViewport={{ x: 50, y: 50, zoom: 1.1 }}
+        fitViewOptions={{ maxZoom: 1.0, padding: 0.1 }}
+        defaultViewport={{ x: 50, y: 50, zoom: 1.0 }}
       >
-        <Controls showInteractive={false} style={{ bottom: 15, left: 15 }} />
+        <Controls showInteractive={false} style={{ bottom: 15, left: 15 }} fitViewOptions={{ maxZoom: 1.0, padding: 0.1 }} />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="rgba(0, 0, 0, 0.08)" />
         <FindNodePanel nodes={nodes} onNodeSelect={onNodeSelect} />
       </ReactFlow>

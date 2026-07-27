@@ -1,5 +1,6 @@
 from app.tools.base import BaseNode
 from app.tools.file_input import FileInputNode
+from app.tools.text_input import TextInputNode
 from app.tools.filter import FilterNode
 from app.tools.sort import SortNode
 from app.tools.select import SelectNode
@@ -33,9 +34,12 @@ from app.tools.gcs_input import GCSInputNode
 from app.tools.gcs_output import GCSOutputNode
 from app.tools.google_sheets_input import GoogleSheetsInputNode
 from app.tools.google_sheets_output import GoogleSheetsOutputNode
+from app.tools.odds_portal_scraper import OddsPortalScraperNode
+from app.tools.transpose import TransposeNode
 
 NODE_CLASSES = {
     "fileInput": FileInputNode,
+    "textInput": TextInputNode,
     "databaseInput": DatabaseInputExecutor,
     "databaseOutput": DatabaseOutputExecutor,
     "fileOutput": FileOutputNode,
@@ -50,6 +54,7 @@ NODE_CLASSES = {
     "imageCaption": ImageCaptionNode,
     "pivot": PivotNode,
     "unpivot": UnpivotNode,
+    "transpose": TransposeNode,
     "union": UnionNode,
     "data_cleansing": CleansingNode,
     "formula": FormulaNode,
@@ -67,5 +72,6 @@ NODE_CLASSES = {
     "gcs_out": GCSOutputNode,
     "google_sheets_in": GoogleSheetsInputNode,
     "google_sheets_out": GoogleSheetsOutputNode,
-    "fieldInfo": FieldInfoNode
+    "fieldInfo": FieldInfoNode,
+    "odds_portal_scraper": OddsPortalScraperNode
 }

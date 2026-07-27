@@ -63,6 +63,15 @@ class PipelineCache:
                                 col_meta["semantic_type"] = semantic_metadata[name]
                             schema.append(col_meta)
                         preview_rows = preview_df.to_dicts()
+                        
+                        import math
+                        def sanitize_nan(val):
+                            if isinstance(val, float) and math.isnan(val):
+                                return None
+                            return val
+                            
+                        preview_rows = [{k: sanitize_nan(v) for k, v in row.items()} for row in preview_rows]
+                        
                         ports_data[port] = {
                             "schema": schema,
                             "preview": preview_rows,
@@ -103,6 +112,15 @@ class PipelineCache:
                             col_meta["semantic_type"] = semantic_metadata[name]
                         schema.append(col_meta)
                 preview_rows = preview_df.to_dicts() if serialization_df is not None else []
+                
+                # Sanitize NaN values to None to prevent FastAPI JSON serialization crashes
+                import math
+                def sanitize_nan(val):
+                    if isinstance(val, float) and math.isnan(val):
+                        return None
+                    return val
+                
+                preview_rows = [{k: sanitize_nan(v) for k, v in row.items()} for row in preview_rows]
 
                 self._cache[node_id] = {
                     "status": "success",
@@ -117,6 +135,21 @@ class PipelineCache:
                 }
                 self._cache[node_id]["_df"] = df
                 self._node_statuses[node_id] = "success"
+
+    def set_node_partial_result(self, node_id: str, df: Any, logs: List[str] = None):
+        """
+        Updates the cache with a partial result for sequential UI updates.
+        Maintains the node status as 'running'.
+        """
+        if logs is None:
+            logs = []
+        # Leverage existing logic to format schema and previews
+        self.set_node_result(node_id, df, 0, logs)
+        # Revert status to running
+        with self._lock:
+            if node_id in self._cache:
+                self._cache[node_id]["status"] = "running"
+            self._node_statuses[node_id] = "running"
 
     def set_node_error(self, node_id: str, error_msg: str, duration_ms: float, logs: List[str]):
         with self._lock:
@@ -213,9 +246,26 @@ class PipelineCache:
                 payload[node_id] = {
                     "status": status,
                     "row_count": node_data.get("row_count"),
+                    "column_count": node_data.get("column_count"),
+                    "preview": node_data.get("preview"),
+                    "schema": node_data.get("schema"),
+                    "logs": node_data.get("logs", []),
                     "ports": node_data.get("ports")
                 }
             return payload
 
-# Global singleton cache instance
-cache = PipelineCache()
+class CacheManager:
+    def __init__(self):
+        self._caches: Dict[str, PipelineCache] = {}
+        self._lock = threading.Lock()
+
+    def get_cache(self, session_id: str) -> PipelineCache:
+        if not session_id:
+            session_id = "default"
+        with self._lock:
+            if session_id not in self._caches:
+                self._caches[session_id] = PipelineCache()
+            return self._caches[session_id]
+
+# Global singleton cache manager instance
+cache_manager = CacheManager()
