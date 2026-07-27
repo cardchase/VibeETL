@@ -712,7 +712,7 @@ class OddsPortalScraperNode(BaseNode):
             }}
 
             let extractOddsFromText = (txt) => {{
-                let tokens = txt.split(/\s+/);
+                let tokens = txt.split(/\\s+/);
                 let extracted = [];
                 for (let t of tokens) {{
                     if (t.includes('%') || t.toLowerCase().includes('payout') || t.toLowerCase().includes('average')) continue;
@@ -722,15 +722,15 @@ class OddsPortalScraperNode(BaseNode):
                     }}
                     
                     // Regex Extractors for Valid Odds Formats
-                    // Note on Fractional Odds: The regex is strictly bound to `\d{1,3}` (max 3 digits) 
+                    // Note on Fractional Odds: The regex is strictly bound to `\\d{1,3}` (max 3 digits) 
                     // to prevent it from accidentally mathematically converting calendar years (e.g., '2026/2027')
                     // found in page headers into fractional odds and parsing them into massive floats.
-                    if (t.match(/^[+-]?\d+\.\d+$/)) {{ // Decimal (1, 2 or 3+ decimals)
+                    if (t.match(/^[+-]?\\d+\\.\\d+$/)) {{ // Decimal (1, 2 or 3+ decimals)
                         extracted.push(parseFloat(t));
-                    }} else if (t.match(/^\d{1,3}\/\d{1,3}$/)) {{ // Fractional
+                    }} else if (t.match(/^\\d{1,3}\\/\\d{1,3}$/)) {{ // Fractional
                         let p = t.split('/');
                         extracted.push((parseFloat(p[0]) / parseFloat(p[1])) + 1);
-                    }} else if (t.match(/^[+-]\d+$/)) {{ // American
+                    }} else if (t.match(/^[+-]\\d+$/)) {{ // American
                         let num = parseFloat(t);
                         if (num > 0) extracted.push((num / 100) + 1);
                         else extracted.push((100 / Math.abs(num)) + 1);
@@ -1087,12 +1087,6 @@ class OddsPortalScraperNode(BaseNode):
                 for _ in range(60):
                     await page.wait_for_timeout(500)
                     ou_data = await page.evaluate(r"""
-                
-                content = await page.content()
-                with open("scraper_ou_dom.html", "w", encoding="utf-8") as f:
-                    f.write(content)
-
-                ou_data = await page.evaluate(r"""
                 () => {
                     let results = {};
                     
@@ -1207,7 +1201,7 @@ class OddsPortalScraperNode(BaseNode):
                     if ou_data and len(ou_data.keys()) > 0:
                         break
                         
-                extracted_row.update(ou_data)
+                        extracted_row.update(ou_data)
                 break
             except Exception as e:
                 break
