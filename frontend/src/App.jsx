@@ -261,6 +261,8 @@ function App() {
   
   const [nodes, setNodes, onNodesChangeCore] = useNodesState(activeTab.nodes || []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeTab.edges || []);
+  const currentViewportRef = React.useRef(activeTab.viewport || { x: 50, y: 50, zoom: 1.0 });
+
   const [isRunningMap, setIsRunningMap] = useState({});
   const isRunning = isRunningMap[activeTabId] || false;
   const setIsRunning = useCallback((val, tabId = activeTabId) => {
@@ -283,6 +285,7 @@ function App() {
       setEdges(tab.edges || []);
       setResults(tab.results || {});
       setGlobalLogs(tab.globalLogs || []);
+      currentViewportRef.current = tab.viewport || { x: 50, y: 50, zoom: 1.0 };
       setIsDirty(tab.isDirty || false);
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
@@ -861,7 +864,7 @@ function App() {
     if (newTabId === activeTabId) return;
     setTabs(prev => prev.map(t => {
       if (t.id === activeTabId) {
-        return { ...t, nodes, edges, results, globalLogs, isDirty };
+        return { ...t, nodes, edges, results, globalLogs, isDirty, viewport: currentViewportRef.current };
       }
       return t;
     }));
@@ -870,11 +873,11 @@ function App() {
 
   const handleAddTab = useCallback(() => {
     setTabs(prev => {
-      const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty } : t);
+      const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty, viewport: currentViewportRef.current } : t);
       const newTabId = `tab-${Date.now()}`;
       const existingNames = currentSaved.map(t => t.name);
       const uniqueName = getUniqueTabName(`Workflow ${currentSaved.length + 1}`, existingNames);
-      const newTab = { id: newTabId, name: uniqueName, nodes: [], edges: [], results: {}, globalLogs: [], isDirty: false };
+      const newTab = { id: newTabId, name: uniqueName, nodes: [], edges: [], results: {}, globalLogs: [], isDirty: false, viewport: { x: 50, y: 50, zoom: 1.0 } };
       setActiveTabId(newTabId);
       return [...currentSaved, newTab];
     });
@@ -1804,11 +1807,11 @@ function App() {
         const loaded = JSON.parse(e.target.result);
         if (loaded.nodes && loaded.edges) {
           setTabs(prev => {
-            const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty } : t);
+            const currentSaved = prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, results, globalLogs, isDirty, viewport: currentViewportRef.current } : t);
             const newTabId = `tab-${Date.now()}`;
             const existingNames = currentSaved.map(t => t.name);
             const newTabName = getUniqueTabName(file.name.replace('.json', ''), existingNames);
-            const newTab = { id: newTabId, name: newTabName, nodes: loaded.nodes, edges: loaded.edges, results: {}, globalLogs: ['Workflow loaded successfully.'], isDirty: false };
+            const newTab = { id: newTabId, name: newTabName, nodes: loaded.nodes, edges: loaded.edges, results: {}, globalLogs: ['Workflow loaded successfully.'], isDirty: false, viewport: { x: 50, y: 50, zoom: 1.0 } };
             setActiveTabId(newTabId);
             return [...currentSaved, newTab];
           });
@@ -1919,6 +1922,10 @@ function App() {
             <ErrorBoundary>
               <Canvas
                 key={activeTabId}
+                initialViewport={currentViewportRef.current}
+                onMoveEnd={(e, viewport) => {
+                  currentViewportRef.current = viewport;
+                }}
                 nodes={nodes}
                 edges={edges}
                 nodeTypes={nodeTypes}

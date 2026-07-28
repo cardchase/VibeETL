@@ -101,6 +101,8 @@ const CanvasContent = ({
   onNodesDelete,
   onEdgesDelete,
   onNodeDragStop,
+  initialViewport,
+  onMoveEnd,
 }) => {
   const reactFlowWrapper = useRef(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
@@ -391,6 +393,7 @@ const CanvasContent = ({
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
         onNodeDragStop={onNodeDragStop}
+        onMoveEnd={onMoveEnd}
         onNodesDelete={(nodes) => {
           const activeTag = document.activeElement?.tagName;
           if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
@@ -405,11 +408,9 @@ const CanvasContent = ({
         selectionOnDrag={!isPanMode}
         selectionMode={SelectionMode.Partial}
         connectionRadius={50}
-        fitView
-        fitViewOptions={{ maxZoom: 1.0, padding: 0.1 }}
-        defaultViewport={{ x: 50, y: 50, zoom: 1.0 }}
+        defaultViewport={initialViewport || { x: 50, y: 50, zoom: 1.0 }}
       >
-        <Controls showInteractive={false} style={{ bottom: 15, left: 15 }} fitViewOptions={{ maxZoom: 1.0, padding: 0.1 }} />
+        <Controls showInteractive={false} style={{ bottom: 15, left: 15 }} />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="rgba(0, 0, 0, 0.08)" />
         <FindNodePanel nodes={nodes} onNodeSelect={onNodeSelect} />
       </ReactFlow>
