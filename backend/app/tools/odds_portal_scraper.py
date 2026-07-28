@@ -571,7 +571,7 @@ class OddsPortalScraperNode(BaseNode):
                 await page.wait_for_timeout(2500)
                 
                 current_url = page.url
-                if '/football/' not in current_url.lower() or '/h2h/' in current_url.lower():
+                if '/football/' not in current_url.lower() and '/h2h/' not in current_url.lower():
                     self.log(f"Warning: URL redirected to unexpected page layout ({current_url}). Skipping to prevent infinite tab polling.")
                     extracted_row["_skip_retry"] = True
                     return extracted_row
@@ -622,7 +622,12 @@ class OddsPortalScraperNode(BaseNode):
             let h1 = document.querySelector('h1');
             if (h1) {
                 let h1Text = cleanText(h1.innerText);
-                if (h1Text.includes(' - ')) {
+                if (h1Text.includes(' vs ')) {
+                    let parts = h1Text.split(' vs ');
+                    if (!res.HomeTeam) res.HomeTeam = parts[0].trim();
+                    let awayPart = parts[1].replace(/\s*(Odds|Scores|H2H|-).*$/i, '').trim();
+                    if (!res.AwayTeam) res.AwayTeam = awayPart;
+                } else if (h1Text.includes(' - ')) {
                     let parts = h1Text.split(' - ');
                     if (!res.HomeTeam) res.HomeTeam = parts[0].trim();
                     if (!res.AwayTeam) res.AwayTeam = parts[1].replace(/\s*(Odds|Scores|H2H).*$/i, '').trim();
