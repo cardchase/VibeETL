@@ -9,7 +9,7 @@ import {
   SelectionMode,
   Panel
 } from '@xyflow/react';
-import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Copy, ClipboardPaste, Trash2 } from 'lucide-react';
+import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Check, Copy, ClipboardPaste, Trash2 } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
 import ContainerNode from './ContainerNode';
@@ -324,7 +324,7 @@ const CanvasContent = ({
               }}
               title="Copy Selected Nodes"
             >
-              {isCopied ? <Check size={14} style={{ color: 'var(--color-success)' }} /> : <Copy size={14} />}
+              {isCopied ? <CheckSquare size={14} style={{ color: 'var(--color-success)' }} /> : <Copy size={14} />}
               <span style={isCopied ? { color: 'var(--color-success)', fontWeight: 600 } : {}}>
                 {isCopied ? 'Copied!' : 'Copy'}
               </span>

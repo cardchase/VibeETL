@@ -293,6 +293,7 @@ function App() {
   const activeTabIdRef = React.useRef(activeTabId);
   React.useEffect(() => {
     activeTabIdRef.current = activeTabId;
+    window.sessionId = activeTabId; // Sync global sessionId for older components like ToolPalette and CustomNode
   }, [activeTabId]);
 
   const onNodesChange = useCallback((changes) => {
@@ -1531,75 +1532,157 @@ function App() {
     return () => clearTimeout(delayDebounceFn);
   }, [dagConfigStr, autoRun]);
 
-  // Live polling of execution status
+  // Live polling of execution status for ALL running tabs
   React.useEffect(() => {
-    let intervalId;
-    if (isRunning) {
-      intervalId = setInterval(() => {
-        fetch(`${API_BASE}/api/status?session_id=${activeTabId}`)
+    const runningTabIds = Object.keys(isRunningMap).filter(id => isRunningMap[id]);
+    if (runningTabIds.length === 0) return;
+
+    const intervalId = setInterval(() => {
+      runningTabIds.forEach(tabId => {
+        fetch(`${API_BASE}/api/status?session_id=${tabId}`)
           .then(res => res.json())
-        .then(data => {
-          if (data.statuses) {
-            // Stream partial results for nodes that are running
-            setResults(prevResults => {
-              let updated = false;
-              const nextResults = { ...prevResults };
-              
-              for (const [nodeId, payload] of Object.entries(data.statuses)) {
-                if (payload.status === 'running' && payload.preview) {
-                  // Update if row count changed OR logs length changed to ensure real-time log streaming
-                  const currentLogsCount = nextResults[nodeId] && nextResults[nodeId].logs ? nextResults[nodeId].logs.length : 0;
-                  const newLogsCount = payload.logs ? payload.logs.length : 0;
+          .then(data => {
+            if (!data) return;
+            
+            if (tabId === activeTabIdRef.current) {
+              if (data.statuses) {
+                // Stream partial results for nodes that are running
+                setResults(prevResults => {
+                  let updated = false;
+                  const nextResults = { ...prevResults };
                   
-                  if (!nextResults[nodeId] || nextResults[nodeId].row_count !== payload.row_count || currentLogsCount !== newLogsCount) {
-                    nextResults[nodeId] = {
-                      schema: payload.schema,
-                      preview: payload.preview,
-                      row_count: payload.row_count,
-                      column_count: payload.column_count,
-                      logs: payload.logs || [],
-                      ports: payload.ports
-                    };
-                    updated = true;
+                  for (const [nodeId, payload] of Object.entries(data.statuses)) {
+                    if (payload.status === 'running' && payload.preview) {
+                      const currentLogsCount = nextResults[nodeId] && nextResults[nodeId].logs ? nextResults[nodeId].logs.length : 0;
+                      const newLogsCount = payload.logs ? payload.logs.length : 0;
+                      
+                      if (!nextResults[nodeId] || nextResults[nodeId].row_count !== payload.row_count || currentLogsCount !== newLogsCount) {
+                        nextResults[nodeId] = {
+                          schema: payload.schema,
+                          preview: payload.preview,
+                          row_count: payload.row_count,
+                          column_count: payload.column_count,
+                          logs: payload.logs || [],
+                          ports: payload.ports
+                        };
+                        updated = true;
+                      }
+                    }
+                  }
+                  return updated ? nextResults : prevResults;
+                });
+
+                setNodes((nds) => {
+                  let changed = false;
+                  const nextNds = nds.map((node) => {
+                    const nodePayload = data.statuses[node.id];
+                    if (!nodePayload) return node;
+                    const currentStatus = nodePayload.status;
+
+                    if (currentStatus && node.data?.status !== currentStatus) {
+                      // Avoid reverting a finished node to running due to stale polling
+                      if ((node.data?.status === 'success' || node.data?.status === 'error') && currentStatus === 'running') {
+                        return node;
+                      }
+                      
+                      changed = true;
+                      return { 
+                        ...node, 
+                        data: { 
+                          ...node.data, 
+                          status: currentStatus,
+                          resultSummary: currentStatus === 'success' ? {
+                            row_count: nodePayload.row_count,
+                            ports: nodePayload.ports
+                          } : node.data.resultSummary
+                        } 
+                      };
+                    }
+                    return node;
+                  });
+                  return changed ? nextNds : nds;
+                });
+              }
+              if (data.global_logs) {
+                setGlobalLogs(prev => JSON.stringify(prev) !== JSON.stringify(data.global_logs) ? data.global_logs : prev);
+              }
+            } else {
+              // Update background tabs silently
+              setTabs(prev => prev.map(t => {
+                if (t.id !== tabId) return t;
+                
+                let nextResults = { ...(t.results || {}) };
+                let resultsUpdated = false;
+                
+                if (data.statuses) {
+                  for (const [nodeId, payload] of Object.entries(data.statuses)) {
+                    if (payload.status === 'running' && payload.preview) {
+                      const currentLogsCount = nextResults[nodeId] && nextResults[nodeId].logs ? nextResults[nodeId].logs.length : 0;
+                      const newLogsCount = payload.logs ? payload.logs.length : 0;
+                      
+                      if (!nextResults[nodeId] || nextResults[nodeId].row_count !== payload.row_count || currentLogsCount !== newLogsCount) {
+                        nextResults[nodeId] = {
+                          schema: payload.schema,
+                          preview: payload.preview,
+                          row_count: payload.row_count,
+                          column_count: payload.column_count,
+                          logs: payload.logs || [],
+                          ports: payload.ports
+                        };
+                        resultsUpdated = true;
+                      }
+                    }
                   }
                 }
-              }
-              return updated ? nextResults : prevResults;
-            });
+                
+                let nextNodes = t.nodes || [];
+                let nodesUpdated = false;
+                if (data.statuses) {
+                  nextNodes = nextNodes.map((node) => {
+                    const nodePayload = data.statuses[node.id];
+                    if (!nodePayload) return node;
+                    const currentStatus = nodePayload.status;
 
-            setNodes((nds) => nds.map((node) => {
-              const nodePayload = data.statuses[node.id];
-              if (!nodePayload) return node;
-              const currentStatus = nodePayload.status;
-
-              // Only update if it exists and changed, and don't overwrite if node is already success/error 
-              // (because /api/execute response might have beaten the polling!)
-              if (currentStatus && node.data?.status !== currentStatus && node.data?.status !== 'success' && node.data?.status !== 'error') {
-                return { 
-                  ...node, 
-                  data: { 
-                    ...node.data, 
-                    status: currentStatus,
-                    resultSummary: currentStatus === 'success' ? {
-                      row_count: nodePayload.row_count,
-                      ports: nodePayload.ports
-                    } : null
-                  } 
+                    if (currentStatus && node.data?.status !== currentStatus) {
+                      if ((node.data?.status === 'success' || node.data?.status === 'error') && currentStatus === 'running') {
+                        return node;
+                      }
+                      nodesUpdated = true;
+                      return { 
+                        ...node, 
+                        data: { 
+                          ...node.data, 
+                          status: currentStatus,
+                          resultSummary: currentStatus === 'success' ? {
+                            row_count: nodePayload.row_count,
+                            ports: nodePayload.ports
+                          } : node.data.resultSummary
+                        } 
+                      };
+                    }
+                    return node;
+                  });
+                }
+                
+                if (!resultsUpdated && !nodesUpdated && JSON.stringify(t.globalLogs) === JSON.stringify(data.global_logs)) {
+                  return t; // no change
+                }
+                
+                return {
+                  ...t,
+                  globalLogs: data.global_logs || t.globalLogs,
+                  results: resultsUpdated ? nextResults : t.results,
+                  nodes: nextNodes
                 };
-              }
-              return node;
-            }));
-          }
-          if (data.global_logs) {
-            setGlobalLogs(data.global_logs);
-          }
-        })
-        .catch(err => console.error("Polling error:", err));
-      }, 250);
-    }
+              }));
+            }
+          })
+          .catch(err => console.error("Polling error for tab", tabId, ":", err));
+      });
+    }, 250);
 
     return () => clearInterval(intervalId);
-  }, [isRunning, setNodes]);
+  }, [isRunningMap, setNodes, setTabs]);
 
   // Synchronize edge styles with their source node's execution status
   React.useEffect(() => {

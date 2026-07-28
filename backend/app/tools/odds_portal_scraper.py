@@ -13,6 +13,7 @@ Core features:
 """
 import asyncio
 import re
+import os
 from typing import Dict, Any, List
 import polars as pl
 from tabulate import tabulate
@@ -191,6 +192,18 @@ class OddsPortalScraperNode(BaseNode):
                         
                     all_valid_rows = []
                     csv_buffer = []
+                    scraped_urls = set()
+                    
+                    if auto_save_csv:
+                        if os.path.exists(auto_save_csv):
+                            try:
+                                existing_df = pl.read_csv(auto_save_csv)
+                                if "URL" in existing_df.columns:
+                                    scraped_urls = set(existing_df["URL"].to_list())
+                                    all_valid_rows = existing_df.to_dicts()
+                                    self.log(f"Resuming from {auto_save_csv}: Loaded {len(all_valid_rows)} existing matches.")
+                            except Exception as e:
+                                self.log(f"Warning: Could not read existing CSV for resume: {e}")
                     
                     for s_idx, season_url in enumerate(season_urls):
                         if hasattr(self, "is_cancelled") and self.is_cancelled():
@@ -199,8 +212,13 @@ class OddsPortalScraperNode(BaseNode):
                         self.log(f"--- Processing Season {s_idx+1}/{len(season_urls)}: {season_url} ---")
                         match_links = await self.extract_match_links(competition_page, season_url)
                         
+                        original_len = len(match_links)
+                        match_links = [m for m in match_links if m not in scraped_urls]
+                        if len(match_links) < original_len:
+                            self.log(f"Skipping {original_len - len(match_links)} matches already scraped in this season.")
+                        
                         max_workers = int(self.parameters.get("maxWorkers", 1))
-                        self.log(f"Found {len(match_links)} matches. Starting concurrent extraction ({max_workers} at a time)...")
+                        self.log(f"Found {len(match_links)} new matches to scrape. Starting concurrent extraction ({max_workers} at a time)...")
                         semaphore = asyncio.Semaphore(max_workers)
                         
                         async def process_match(match_url, original_idx, is_retry=False):
@@ -251,9 +269,9 @@ class OddsPortalScraperNode(BaseNode):
                                     if isinstance(r, dict):
                                         needs_retry = False
                                         if not is_retry:
-                                            critical_cols = ["FT_HomeOdds", "DNB_Home", "DC_FT_1X", "BTTS_Yes"]
+                                            critical_cols = ["FT_HomeOdds", "DNB_Home", "DC_FT_1X", "BTTS_Yes", "OU25_Over"]
                                             missing_count = sum(1 for col in critical_cols if r.get(col) is None)
-                                            if missing_count > 0:
+                                            if missing_count > 0 and not r.get("_skip_retry"):
                                                 needs_retry = True
                                                 
                                         if needs_retry:
@@ -265,8 +283,8 @@ class OddsPortalScraperNode(BaseNode):
                                             all_valid_rows.sort(key=lambda x: (x.get("_season_order", 0), x.get("_original_order", 999999)))
                                             
                                             # Send sequential update to cache manager so UI data tab updates in real-time
-                                            # Exclude _original_order and _season_order from final output schema
-                                            clean_rows = [{k: v for k, v in row.items() if k not in ["_original_order", "_season_order"]} for row in all_valid_rows]
+                                            # Exclude _original_order, _season_order, and _skip_retry from final output schema
+                                            clean_rows = [{k: v for k, v in row.items() if k not in ["_original_order", "_season_order", "_skip_retry"]} for row in all_valid_rows]
                                             partial_df = pl.DataFrame(clean_rows, schema=schema) if clean_rows else pl.DataFrame()
                                             sid = getattr(self, "session_id", "default")
                                             
@@ -551,6 +569,13 @@ class OddsPortalScraperNode(BaseNode):
                 
                 # Give the DOM an extra moment to settle text nodes
                 await page.wait_for_timeout(2500)
+                
+                current_url = page.url
+                if '/football/' not in current_url.lower() or '/h2h/' in current_url.lower():
+                    self.log(f"Warning: URL redirected to unexpected page layout ({current_url}). Skipping to prevent infinite tab polling.")
+                    extracted_row["_skip_retry"] = True
+                    return extracted_row
+                
                 break
             except Exception as e:
                 if attempt == 2:
@@ -916,7 +941,10 @@ class OddsPortalScraperNode(BaseNode):
         async def navigate_and_scrape(main_tab_text, sub_tab_text: str = None, expected_odds_count: int = 3):
             nonlocal page_reloaded
             main_tab_texts = main_tab_text if isinstance(main_tab_text, list) else [main_tab_text]
-            label = f"['{'/'.join(main_tab_texts)}'] -> {sub_tab_text or 'Full Time'}"
+            
+            # Extract match slug for better logging (e.g., 'burnley-bournemouth-8GUFeHbJ')
+            match_slug = url.split('/')[-2] if len(url.split('/')) >= 2 else url
+            label = f"[{match_slug}] '{'/'.join(main_tab_texts)}' -> {sub_tab_text or 'Full Time'}"
             
             for attempt in range(2):
                 try:

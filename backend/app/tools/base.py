@@ -18,9 +18,11 @@ class BaseNode:
         self.logs: List[str] = []
 
     def log(self, message: str):
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         node_name = self.MANIFEST.get("name", self.node_id)
-        print(f"[NODE LOG - {node_name}] {message}")
-        self.logs.append(message)
+        print(f"[{timestamp}] [NODE LOG - {node_name}] {message}")
+        self.logs.append(f"[{timestamp}] {message}")
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         """
