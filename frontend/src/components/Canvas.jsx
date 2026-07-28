@@ -148,7 +148,7 @@ const CanvasContent = ({
         // screenX = nodeFlowX * zoom + viewportX  =>  96 = minX * newZoom + newX
         const newX = 96 - minX * newZoom;
         
-        setViewport({ x: newX, y, zoom: newZoom }, { duration: 800 });
+        setViewport({ x: newX, y, zoom: newZoom }, { duration: 0 });
         if (onMoveEnd) {
           onMoveEnd(null, { x: newX, y, zoom: newZoom });
         }

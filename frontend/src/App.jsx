@@ -1922,7 +1922,7 @@ function App() {
             <ErrorBoundary>
               <Canvas
                 key={activeTabId}
-                initialViewport={currentViewportRef.current}
+                initialViewport={activeTab?.viewport || { x: 50, y: 50, zoom: 1.0 }}
                 onMoveEnd={(e, viewport) => {
                   currentViewportRef.current = viewport;
                 }}
