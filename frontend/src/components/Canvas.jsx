@@ -127,10 +127,10 @@ const CanvasContent = ({
 
   useEffect(() => {
     const handleFitView = () => {
-      // 1. Initial quick fit to get correct vertical centering
-      fitView({ padding: 0.1, duration: 0 });
+      // 1. Initial quick fit to get correct vertical centering and zoom
+      fitView({ padding: 0.1, maxZoom: 1.0, duration: 0 });
       
-      // 2. Adjust it immediately to be left-aligned and zoomed out
+      // 2. Adjust it immediately to be left-aligned
       setTimeout(() => {
         const { x, y, zoom } = getViewport();
         const nodesList = getNodes();
@@ -141,8 +141,8 @@ const CanvasContent = ({
           if (n.position.x < minX) minX = n.position.x;
         });
         
-        // Zoom out by 20%
-        const newZoom = Math.max(0.1, zoom * 0.8);
+        // Use the optimal zoom calculated by fitView (capped at 1.0)
+        const newZoom = zoom;
         
         // 96px is approximately 1 inch. Calculate X so the leftmost node is at 96px.
         // screenX = nodeFlowX * zoom + viewportX  =>  96 = minX * newZoom + newX
