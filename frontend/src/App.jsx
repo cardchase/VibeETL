@@ -263,7 +263,18 @@ function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeTab.edges || []);
   const currentViewportRef = React.useRef(activeTab.viewport || { x: 50, y: 50, zoom: 1.0 });
 
-  const [isRunningMap, setIsRunningMap] = useState({});
+  const [isRunningMap, setIsRunningMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vibeetl_is_running_map');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {};
+  });
+  
+  useEffect(() => {
+    localStorage.setItem('vibeetl_is_running_map', JSON.stringify(isRunningMap));
+  }, [isRunningMap]);
+
   const isRunning = isRunningMap[activeTabId] || false;
   const setIsRunning = useCallback((val, tabId = activeTabId) => {
     setIsRunningMap(prev => ({ ...prev, [tabId]: typeof val === 'function' ? val(prev[tabId]) : val }));
