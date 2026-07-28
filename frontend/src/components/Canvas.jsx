@@ -2,6 +2,7 @@ import React, { useRef, useCallback, useState, useEffect } from 'react';
 import {
   ReactFlow,
   Controls,
+  ControlButton,
   Background,
   BackgroundVariant,
   useReactFlow,
@@ -9,7 +10,7 @@ import {
   SelectionMode,
   Panel
 } from '@xyflow/react';
-import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Check, Copy, ClipboardPaste, Trash2 } from 'lucide-react';
+import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Check, Copy, ClipboardPaste, Trash2, Maximize } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
 import ContainerNode from './ContainerNode';
@@ -105,7 +106,7 @@ const CanvasContent = ({
   onMoveEnd,
 }) => {
   const reactFlowWrapper = useRef(null);
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getViewport, setViewport, getNodes } = useReactFlow();
   const [isPanMode, setIsPanMode] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
   const [menuConfig, setMenuConfig] = useState({ visible: false, x: 0, y: 0, type: null, nodeId: null });
@@ -126,11 +127,36 @@ const CanvasContent = ({
 
   useEffect(() => {
     const handleFitView = () => {
-      fitView({ padding: 0.2, duration: 800 });
+      // 1. Initial quick fit to get correct vertical centering
+      fitView({ padding: 0.1, duration: 0 });
+      
+      // 2. Adjust it immediately to be left-aligned and zoomed out
+      setTimeout(() => {
+        const { x, y, zoom } = getViewport();
+        const nodesList = getNodes();
+        if (nodesList.length === 0) return;
+        
+        let minX = Infinity;
+        nodesList.forEach(n => {
+          if (n.position.x < minX) minX = n.position.x;
+        });
+        
+        // Zoom out by 20%
+        const newZoom = Math.max(0.1, zoom * 0.8);
+        
+        // 96px is approximately 1 inch. Calculate X so the leftmost node is at 96px.
+        // screenX = nodeFlowX * zoom + viewportX  =>  96 = minX * newZoom + newX
+        const newX = 96 - minX * newZoom;
+        
+        setViewport({ x: newX, y, zoom: newZoom }, { duration: 800 });
+        if (onMoveEnd) {
+          onMoveEnd(null, { x: newX, y, zoom: newZoom });
+        }
+      }, 50);
     };
     window.addEventListener('vibe-fit-view', handleFitView);
     return () => window.removeEventListener('vibe-fit-view', handleFitView);
-  }, [fitView]);
+  }, [fitView, getViewport, setViewport, getNodes, onMoveEnd]);
 
   const onDragOver = useCallback((event) => {
     event.preventDefault();
@@ -410,7 +436,11 @@ const CanvasContent = ({
         connectionRadius={50}
         defaultViewport={initialViewport || { x: 50, y: 50, zoom: 1.0 }}
       >
-        <Controls showInteractive={false} style={{ bottom: 15, left: 15 }} />
+        <Controls showInteractive={false} showFitView={false} style={{ bottom: 15, left: 15 }}>
+          <ControlButton onClick={() => window.dispatchEvent(new Event('vibe-fit-view'))} title="fit view">
+            <Maximize size={16} />
+          </ControlButton>
+        </Controls>
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="rgba(0, 0, 0, 0.08)" />
         <FindNodePanel nodes={nodes} onNodeSelect={onNodeSelect} />
       </ReactFlow>
