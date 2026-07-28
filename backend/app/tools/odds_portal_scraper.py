@@ -582,7 +582,7 @@ class OddsPortalScraperNode(BaseNode):
                 await page.wait_for_timeout(2500)
                 
                 current_url = page.url
-                if '/football/' not in current_url.lower() and '/h2h/' not in current_url.lower():
+                if '/football/' not in current_url.lower():
                     self.log(f"Warning: URL redirected to unexpected page layout ({current_url}). Skipping to prevent infinite tab polling.")
                     extracted_row["_skip_retry"] = True
                     return extracted_row
