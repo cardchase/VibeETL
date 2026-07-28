@@ -199,9 +199,20 @@ class OddsPortalScraperNode(BaseNode):
                             try:
                                 existing_df = pl.read_csv(auto_save_csv)
                                 if "URL" in existing_df.columns:
-                                    scraped_urls = set(existing_df["URL"].to_list())
-                                    all_valid_rows = existing_df.to_dicts()
-                                    self.log(f"Resuming from {auto_save_csv}: Loaded {len(all_valid_rows)} existing matches.")
+                                    if "HomeTeam" in existing_df.columns:
+                                        valid_df = existing_df.filter(
+                                            pl.col("HomeTeam").is_not_null() & 
+                                            (pl.col("HomeTeam") != "None") & 
+                                            (pl.col("HomeTeam") != "Unknown") &
+                                            (pl.col("HomeTeam") != "")
+                                        )
+                                    else:
+                                        valid_df = existing_df
+                                        
+                                    scraped_urls = set(valid_df["URL"].to_list())
+                                    all_valid_rows = valid_df.to_dicts()
+                                    discarded = len(existing_df) - len(valid_df)
+                                    self.log(f"Resuming from {auto_save_csv}: Loaded {len(all_valid_rows)} valid matches. Discarded {discarded} incomplete records to be retried.")
                             except Exception as e:
                                 self.log(f"Warning: Could not read existing CSV for resume: {e}")
                     
