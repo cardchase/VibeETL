@@ -288,6 +288,9 @@ class OddsPortalScraperNode(BaseNode):
                                         if needs_retry:
                                             self.log(f"Match [{r.get('HomeTeam', 'Unknown')} vs {r.get('AwayTeam', 'Unknown')}] missing critical data. Queued for deep recursive retry.")
                                             retry_queue.append({'url': r.get("URL"), 'idx': r.get("_original_order")})
+                                        elif r.get("_skip_retry"):
+                                            # Discard garbage row from skipped redirect URL
+                                            pass
                                         else:
                                             all_valid_rows.append(r)
                                             # Sort chronologically (latest to oldest matches) via season index then original index
@@ -333,6 +336,13 @@ class OddsPortalScraperNode(BaseNode):
                             await consume_tasks(retry_tasks, is_retry=True)
                             
                     await competition_page.close()
+                    
+                    self.log("=" * 60)
+                    self.log(f"SCRAPING COMPLETE | Processed {len(season_links)} Seasons")
+                    self.log(f"New Matches Successfully Extracted: {len(all_valid_rows) - len(scraped_urls)}")
+                    self.log(f"Historical Matches Preserved: {len(scraped_urls)}")
+                    self.log(f"Total Matches In Final Dataset: {len(all_valid_rows)}")
+                    self.log("=" * 60)
                     
                     # Clean out sorting metadata before returning
                     clean_rows = [{k: v for k, v in row.items() if k not in ["_original_order", "_season_order"]} for row in all_valid_rows]
