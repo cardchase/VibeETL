@@ -21,7 +21,9 @@ class BaseNode:
         import datetime
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         node_name = self.MANIFEST.get("name", self.node_id)
-        print(f"[{timestamp}] [NODE LOG - {node_name}] {message}")
+        sid = getattr(self, "session_id", "default")
+        
+        print(f"[{timestamp}] [{sid}] [NODE LOG - {node_name}] {message}")
         self.logs.append(f"[{timestamp}] {message}")
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
