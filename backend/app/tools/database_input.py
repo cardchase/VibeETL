@@ -98,7 +98,7 @@ class DatabaseInputExecutor(BaseNode):
                 "field": "query",
                 "label": "SQL Query",
                 "type": "textarea",
-                "default": "SELECT * FROM my_table LIMIT 1000",
+                "default": "SELECT * FROM my_table LIMIT 10000",
                 "placeholder": "SELECT * FROM..."
             }
         ]

@@ -1,4 +1,5 @@
 import os
+import fnmatch
 import polars as pl
 from typing import Dict, Any
 from app.tools.base import BaseNode
@@ -12,7 +13,8 @@ class FolderInputNode(BaseNode):
         "description": "Scans a local directory and outputs a dataset of all files. Useful for batch processing.",
         "ui_schema": [
             {"field": "folderPath", "type": "string", "label": "Folder Path", "default": ""},
-            {"field": "extensions", "type": "string", "label": "Allowed Extensions (comma-separated)", "default": "*"}
+            {"field": "extensions", "type": "string", "label": "File Pattern (comma-separated, e.g. *.csv)", "default": "*"},
+            {"field": "excludePattern", "type": "string", "label": "Exclude Pattern (comma-separated, e.g. *missed*, *.tmp)", "default": ""}
         ]
     }
 
@@ -36,12 +38,33 @@ class FolderInputNode(BaseNode):
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
             raise ValueError(f"Directory not found: {folder_path}")
 
-        # Parse extensions
-        allowed_exts = []
+        # Parse extensions/patterns
+        allowed_patterns = []
         if extensions_raw and extensions_raw != "*":
-            allowed_exts = [ext.strip().lower() for ext in extensions_raw.split(",")]
-            # ensure they start with dot
-            allowed_exts = [ext if ext.startswith(".") else f".{ext}" for ext in allowed_exts]
+            raw_patterns = [p.strip() for p in extensions_raw.split(",")]
+            for p in raw_patterns:
+                if "*" in p or "?" in p:
+                    # It's a glob pattern, keep as is
+                    allowed_patterns.append(p)
+                else:
+                    # It's a simple extension
+                    if p.startswith("."):
+                        allowed_patterns.append(f"*{p}")
+                    else:
+                        allowed_patterns.append(f"*.{p}")
+
+        exclude_raw = self.parameters.get("excludePattern", "").strip()
+        exclude_patterns = []
+        if exclude_raw:
+            raw_ex_patterns = [p.strip() for p in exclude_raw.split(",") if p.strip()]
+            for p in raw_ex_patterns:
+                if "*" in p or "?" in p:
+                    exclude_patterns.append(p)
+                else:
+                    if p.startswith("."):
+                        exclude_patterns.append(f"*{p}")
+                    else:
+                        exclude_patterns.append(f"*{p}*")
 
         results = []
         
@@ -55,8 +78,23 @@ class FolderInputNode(BaseNode):
             for file in files:
                 ext = os.path.splitext(file)[1].lower()
                 
-                if allowed_exts and ext not in allowed_exts:
-                    continue
+                if allowed_patterns:
+                    matched = False
+                    for pattern in allowed_patterns:
+                        if fnmatch.fnmatch(file.lower(), pattern.lower()):
+                            matched = True
+                            break
+                    if not matched:
+                        continue
+                        
+                if exclude_patterns:
+                    is_excluded = False
+                    for pattern in exclude_patterns:
+                        if fnmatch.fnmatch(file.lower(), pattern.lower()):
+                            is_excluded = True
+                            break
+                    if is_excluded:
+                        continue
                     
                 file_path = os.path.join(root, file)
                 

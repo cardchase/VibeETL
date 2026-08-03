@@ -44,7 +44,7 @@ Pop-Location
 try {
     # 3. Find Free Port for Backend
     Write-Host "[3/4] Finding free port for VibeETL Backend Engine..." -ForegroundColor Green
-    $BackendPort = 8000
+    $BackendPort = 8001
     while ($true) {
         $portInUse = Get-NetTCPConnection -LocalPort $BackendPort -ErrorAction SilentlyContinue
         if (-not $portInUse) {

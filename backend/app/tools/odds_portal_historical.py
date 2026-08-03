@@ -87,9 +87,9 @@ class OddsPortalScraperNode(BaseNode):
     """
     MANIFEST = {
         "id": "odds_portal_scraper",
-        "name": "OddsPortal Scraper",
+        "name": "OddsPortal Historical Scraper",
         "category": "source",
-        "icon": "Database",
+        "icon": "Target",
         "description": "High-fidelity odds harvesting from active React DOM states.",
         "ui_schema": [
             {"field": "targetUrl", "type": "text", "label": "Target URL", "default": "https://www.oddsportal.com/football/england/premier-league/results/"},
@@ -187,6 +187,8 @@ class OddsPortalScraperNode(BaseNode):
                             season_urls = [url]
                         else:
                             season_urls = await self.extract_season_links(competition_page, url)
+                            # Intelligence Upgrade: Sort chronologically to always explore latest data first.
+                            season_urls.sort(reverse=True)
                     else:
                         season_urls = [url]
                         
@@ -206,6 +208,12 @@ class OddsPortalScraperNode(BaseNode):
                                             (pl.col("HomeTeam") != "Unknown") &
                                             (pl.col("HomeTeam") != "")
                                         )
+                                        # Auto-Correction Mode: Any rows missing critical odds are dropped from 'valid_df'
+                                        # This forces them to be re-scraped when the spider finds their link.
+                                        critical_cols = ["FT_HomeOdds", "DNB_Home", "DC_FT_1X", "BTTS_Yes", "OU25_Over"]
+                                        for c in critical_cols:
+                                            if c in valid_df.columns:
+                                                valid_df = valid_df.filter(pl.col(c).is_not_null())
                                     else:
                                         valid_df = existing_df
                                         
@@ -216,12 +224,18 @@ class OddsPortalScraperNode(BaseNode):
                             except Exception as e:
                                 self.log(f"Warning: Could not read existing CSV for resume: {e}")
                     
+                    consecutive_fully_scraped_pages = 0
+                    
                     for s_idx, season_url in enumerate(season_urls):
                         if hasattr(self, "is_cancelled") and self.is_cancelled():
                             break
+                        if consecutive_fully_scraped_pages >= 2:
+                            self.log("✨ INTELLIGENCE ENGINE: Reached purely historical data (2 fully populated pages). Halting backward scan to save time.")
+                            break
                             
-                        self.log(f"--- Processing Season {s_idx+1}/{len(season_urls)}: {season_url} ---")
-                        match_links = await self.extract_match_links(competition_page, season_url)
+                        season_slug = season_url.split('football/')[-1] if 'football/' in season_url else season_url
+                        self.log(f"📅 [Season {s_idx+1}/{len(season_urls)}] Backward Scan: {season_slug}")
+                        match_links, consecutive_fully_scraped_pages = await self.extract_match_links(competition_page, season_url, scraped_urls, consecutive_fully_scraped_pages)
                         
                         original_len = len(match_links)
                         match_links = [m for m in match_links if m not in scraped_urls]
@@ -245,6 +259,10 @@ class OddsPortalScraperNode(BaseNode):
                                     if is_retry:
                                         # Wait slightly longer on retries
                                         await asyncio.sleep(2.0)
+                                    
+                                    match_slug = match_url.split('/')[-2] if '/' in match_url else match_url
+                                    tab_id = (original_idx % max_workers) + 1
+                                    self.log(f"⚡ [Tab {tab_id}] Extracting Data: {match_slug}")
                                     res = await self.execute_interception_engine(page, match_url)
                                     if res:
                                         res["_original_order"] = original_idx
@@ -286,7 +304,8 @@ class OddsPortalScraperNode(BaseNode):
                                                 needs_retry = True
                                                 
                                         if needs_retry:
-                                            self.log(f"Match [{r.get('HomeTeam', 'Unknown')} vs {r.get('AwayTeam', 'Unknown')}] missing critical data. Queued for deep recursive retry.")
+                                            match_title = f"{r.get('HomeTeam', 'Unknown')} vs {r.get('AwayTeam', 'Unknown')}"
+                                            self.log(f"⚠️ [Incomplete] {match_title} missing critical odds data. Added to auto-correction queue.")
                                             retry_queue.append({'url': r.get("URL"), 'idx': r.get("_original_order")})
                                         elif r.get("_skip_retry"):
                                             # Discard garbage row from skipped redirect URL
@@ -305,8 +324,9 @@ class OddsPortalScraperNode(BaseNode):
                                             status_str = r.get("Match_Status", "N/A")
                                             ft_score = f"{r.get('FT_HomeScore')}-{r.get('FT_AwayScore')}" if r.get('FT_HomeScore') is not None else "N/A"
                                             match_title = f"{r.get('HomeTeam', 'Unknown')} vs {r.get('AwayTeam', 'Unknown')}"
-                                            retry_tag = " [RETRY PASS]" if is_retry else ""
-                                            self.log(f"Extracted Match [{len(all_valid_rows)}]{retry_tag}: {match_title} | URL: {r.get('URL', 'Unknown')} | Status: {status_str} | Score: {ft_score}")
+                                            retry_tag = "🛠️ [CORRECTED]" if is_retry else "✅"
+                                            tab_id = (r.get('_original_order', 0) % max_workers) + 1
+                                            self.log(f"{retry_tag} [Tab {tab_id}] [Saved] {match_title} | Status: {status_str} | Score: {ft_score}")
                                             
                                             cache_manager.get_cache(sid).set_node_partial_result(
                                                 self.node_id, partial_df, self.logs
@@ -316,7 +336,9 @@ class OddsPortalScraperNode(BaseNode):
                                             if auto_save_csv:
                                                 try:
                                                     import os
-                                                    partial_df.write_csv(auto_save_csv)
+                                                    tmp_csv = auto_save_csv + ".tmp"
+                                                    partial_df.write_csv(tmp_csv)
+                                                    os.replace(tmp_csv, auto_save_csv)
                                                     self.log(f"Auto-saved up to {len(clean_rows)} rows to CSV (Sorted).")
                                                 except Exception as e:
                                                     self.log(f"Error auto-saving to CSV: {e}")
@@ -338,7 +360,7 @@ class OddsPortalScraperNode(BaseNode):
                     await competition_page.close()
                     
                     self.log("=" * 60)
-                    self.log(f"SCRAPING COMPLETE | Processed {len(season_links)} Seasons")
+                    self.log(f"SCRAPING COMPLETE | Processed {len(season_urls)} Seasons")
                     self.log(f"New Matches Successfully Extracted: {len(all_valid_rows) - len(scraped_urls)}")
                     self.log(f"Historical Matches Preserved: {len(scraped_urls)}")
                     self.log(f"Total Matches In Final Dataset: {len(all_valid_rows)}")
@@ -397,14 +419,15 @@ class OddsPortalScraperNode(BaseNode):
             return [base_url]
 
 
-    async def extract_match_links(self, page, competition_url: str) -> List[str]:
+    async def extract_match_links(self, page, competition_url: str, scraped_urls: set = None, consecutive_fully_scraped_pages: int = 0) -> tuple:
         max_retries = 3
         match_links = []
         seen_links = set()
+        if scraped_urls is None: scraped_urls = set()
 
         for attempt in range(max_retries):
             if hasattr(self, "is_cancelled") and self.is_cancelled():
-                return []
+                return [], consecutive_fully_scraped_pages
             try:
                 if attempt == 0:
                     response = await page.goto(competition_url, wait_until="domcontentloaded", timeout=30000)
@@ -426,7 +449,7 @@ class OddsPortalScraperNode(BaseNode):
                 no_matches = await page.evaluate("() => document.body.innerText.includes('Unfortunately, no matches can be displayed')")
                 if no_matches:
                     self.log("Detected 'no matches' message. This season has no data yet. Skipping...")
-                    return []
+                    return [], consecutive_fully_scraped_pages
                 
                 await page.wait_for_selector('a[href*="/h2h/"]', state="attached", timeout=15000)
             except Exception as e:
@@ -443,7 +466,7 @@ class OddsPortalScraperNode(BaseNode):
                 # Scroll to load lazy-loaded matches
                 for _ in range(5):
                     await page.evaluate("window.scrollBy(0, window.innerHeight)")
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(10000)
                 
                 # Scope to the main column to avoid sidebar (popular matches) pollution
                 links = await page.evaluate("""() => {
@@ -453,6 +476,8 @@ class OddsPortalScraperNode(BaseNode):
                 
                 # Filter for match links
                 new_links_count = 0
+                page_total_valid_links = 0
+                page_already_scraped_links = 0
                 
                 base_url = competition_url.split('/results')[0].split('/standings')[0]
                 if not base_url.endswith('/'):
@@ -475,12 +500,27 @@ class OddsPortalScraperNode(BaseNode):
                     
                     # Ensure the match link matches the ID pattern (8 alphanumeric chars hash)
                     if re.search(r'-[a-zA-Z0-9]{8}/?(?:[?#].*)?$', l):
+                        if "Aonqhgqt" in l:
+                            self.log(f"Blocked known honeypot match ID 'Aonqhgqt' from queue: {l}")
+                            continue
+                            
                         if l not in seen_links:
                             seen_links.add(l)
                             match_links.append(l)
                             new_links_count += 1
+                            page_total_valid_links += 1
+                            if l in scraped_urls:
+                                page_already_scraped_links += 1
                             
-                self.log(f"Found {new_links_count} new match links on page {page_num}. Total unique matches so far: {len(seen_links)}")
+                # Intelligence Check
+                if page_total_valid_links > 0 and page_total_valid_links == page_already_scraped_links:
+                    consecutive_fully_scraped_pages += 1
+                    self.log(f"⏭️  [Page {page_num}] 100% of matches ({page_total_valid_links}) are already in dataset. Consecutive full pages: {consecutive_fully_scraped_pages}")
+                    if consecutive_fully_scraped_pages >= 2:
+                        break
+                elif page_total_valid_links > 0:
+                    consecutive_fully_scraped_pages = 0
+                    self.log(f"🔍 [Page {page_num}] Found {page_total_valid_links - page_already_scraped_links} new/incomplete matches to scrape.")
                 
                 # Try clicking "Next" button
                 next_clicked = await page.evaluate("""
@@ -510,7 +550,7 @@ class OddsPortalScraperNode(BaseNode):
                 # Wait a bit before refreshing
                 await page.wait_for_timeout(2000)
                 
-        return match_links
+        return match_links, consecutive_fully_scraped_pages
 
     async def execute_interception_engine(self, page, url: str) -> Dict[str, Any]:
         """
@@ -605,7 +645,7 @@ class OddsPortalScraperNode(BaseNode):
         
         for selector in ['button:has-text("I Accept")', '#onetrust-accept-btn-handler', '.accept-choices']:
             try:
-                await page.click(selector, timeout=1000)
+                await page.click(selector, timeout=10000)
             except:
                 pass
                 
@@ -792,6 +832,16 @@ class OddsPortalScraperNode(BaseNode):
         }
         """)
         extracted_row.update(score_data)
+
+        # Honeypot / Garbage Data Check
+        match_country = re.search(r'oddsportal\.com/[^/]+/([^/]+)/', url)
+        if match_country and extracted_row.get("Country"):
+            url_country = re.sub(r'[^a-z0-9]', '', match_country.group(1).lower())
+            extracted_country = re.sub(r'[^a-z0-9]', '', extracted_row["Country"].lower())
+            if url_country and extracted_country and url_country != extracted_country:
+                self.log(f"HONEYPOT DETECTED: URL country '{url_country}' does not match page country '{extracted_country}'. Skipping match.")
+                extracted_row["_skip_retry"] = True
+                return extracted_row
 
         # Force the Season from the URL to be 100% accurate (e.g., 2024-2025)
         # as OddsPortal's breadcrumbs and JSON-LD can sometimes be mismatched or missing.
@@ -997,7 +1047,7 @@ class OddsPortalScraperNode(BaseNode):
                         more_tab = page.get_by_text(more_regex).filter(visible=True).first
                         if await more_tab.count() > 0:
                             await more_tab.click()
-                            await page.wait_for_timeout(1000)
+                            await page.wait_for_timeout(10000)
                             
                         # Check again with combined regex
                         target = page.get_by_text(main_regex).filter(visible=True).first
@@ -1059,12 +1109,12 @@ class OddsPortalScraperNode(BaseNode):
                             return []
                     
                     # 3. Smart poll for ANY data to render to confirm load status
-                    # We will wait up to 120 seconds (120 loops of 1000ms) for odds to appear.
+                    # We will wait up to 120 seconds (120 loops of 10000ms) for odds to appear.
                     # We will not instantly abort on empty_market, as OddsPortal flashes this while loading.
                     empty_market_count = 0
                     rows_present_count = 0
                     for _ in range(120):
-                        await page.wait_for_timeout(1000)
+                        await page.wait_for_timeout(10000)
                         state = await page.evaluate(get_evaluate_tab_state(main_tab_texts, sub_tab_text, expected_odds_count))
                         if state["status"] == "loaded":
                             return state["odds"]
@@ -1148,6 +1198,16 @@ class OddsPortalScraperNode(BaseNode):
                     await target.wait_for(timeout=5000)
                 except:
                     pass
+                
+                if await target.count() == 0:
+                    # Try clicking 'More' first
+                    more_regex = re.compile(r"^\s*More\s*$", re.I)
+                    more_tab = page.get_by_text(more_regex).filter(visible=True).first
+                    if await more_tab.count() > 0:
+                        await more_tab.click()
+                        await page.wait_for_timeout(3000)
+                    target = page.get_by_text(re.compile(r"^Over/Under$", re.I)).filter(visible=True).first
+
                 if await target.count() > 0:
                     await target.click(timeout=3000)
                 else:
@@ -1166,6 +1226,7 @@ class OddsPortalScraperNode(BaseNode):
                     has_rows = await page.evaluate("""
                         () => {
                             if (document.querySelectorAll('[data-testid="over-under-collapsed-row"]').length > 0) return true;
+                            if (document.querySelectorAll('[data-testid="over-under-expanded-row"]').length > 0) return true;
                             let hasLegacy = false;
                             document.querySelectorAll('div, span, p').forEach(b => {
                                 let text = b.innerText || '';

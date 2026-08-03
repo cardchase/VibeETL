@@ -171,3 +171,7 @@ Developers do **NOT** need to write any React/Javascript to build forms! Simply 
 <div align="center">
   <i>Built with ❤️ by the VibeETL Community.</i>
 </div>
+
+
+## Sports Analytics Suite (WIP)
+This branch contains the work-in-progress Sports Predictor suite, featuring dynamic OddsPortal scrapers (Upcoming & Historical) and intelligent match outcome Predictor pipelines.

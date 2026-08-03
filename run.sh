@@ -61,7 +61,7 @@ FRONTEND_PID=$!
 
 echo -e "\033[0;36m"
 echo "VibeETL has been launched!"
-echo "  - Backend Engine: http://127.0.0.1:8000"
+echo "  - Backend Engine: http://127.0.0.1:8001"
 echo "  - Frontend Portal: http://localhost:5173"
 echo ""
 echo "Press [Ctrl+C] to stop all services."

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Upload, Check, AlertCircle, Database, Link, X, Plus, ChevronUp, ChevronDown } from 'lucide-react';
+import { Settings, Upload, Check, AlertCircle, Database, Link, X, Plus, ChevronUp, ChevronDown, Trash2 } from 'lucide-react';
 import FormulaEditor from './FormulaEditor';
+import { API_BASE } from '../config';
 
 
 const SafeInput = React.forwardRef(({ value, checked, onChange, onBlur, type, ...props }, ref) => {
@@ -116,8 +117,8 @@ const getOperatorsForType = (type = '') => {
       { value: '>=', label: 'Greater Than or Equal (≥)' },
       { value: '<', label: 'Less Than (<)' },
       { value: '<=', label: 'Less Than or Equal (≤)' },
-      { value: 'is_null', label: 'Is Empty / Null' },
-      { value: 'is_not_null', label: 'Is Not Empty' }
+      { value: 'is_null', label: 'Is Null' },
+      { value: 'is_not_null', label: 'Is Not Null' }
     ];
   }
   
@@ -129,8 +130,8 @@ const getOperatorsForType = (type = '') => {
       { value: '>=', label: 'On or After (≥)' },
       { value: '<', label: 'Before (<)' },
       { value: '<=', label: 'On or Before (≤)' },
-      { value: 'is_null', label: 'Is Empty / Null' },
-      { value: 'is_not_null', label: 'Is Not Empty' }
+      { value: 'is_null', label: 'Is Null' },
+      { value: 'is_not_null', label: 'Is Not Null' }
     ];
   }
   
@@ -138,8 +139,8 @@ const getOperatorsForType = (type = '') => {
     return [
       { value: '==', label: 'Equals (=)' },
       { value: '!=', label: 'Does Not Equal (≠)' },
-      { value: 'is_null', label: 'Is Empty / Null' },
-      { value: 'is_not_null', label: 'Is Not Empty' }
+      { value: 'is_null', label: 'Is Null' },
+      { value: 'is_not_null', label: 'Is Not Null' }
     ];
   }
   
@@ -150,15 +151,21 @@ const getOperatorsForType = (type = '') => {
     { value: 'not_contains', label: 'Does Not Contain (text)' },
     { value: 'starts_with', label: 'Starts With (text)' },
     { value: 'ends_with', label: 'Ends With (text)' },
-    { value: 'is_null', label: 'Is Empty / Null' },
-    { value: 'is_not_null', label: 'Is Not Empty' }
+    { value: 'is_null', label: 'Is Null' },
+    { value: 'is_not_null', label: 'Is Not Null' },
+    { value: 'is_empty', label: 'Is Empty String ("")' },
+    { value: 'is_not_empty', label: 'Is Not Empty String' },
+    { value: 'is_blank', label: 'Is Blank (Null or Whitespace)' },
+    { value: 'is_not_blank', label: 'Is Not Blank' }
   ];
 };
 
 const OPERATOR_LABELS = {
-  '==': '=', '!=': '≠', '>': '>', '>=': '≥', '<': '<', '<=': '≤',
-  'contains': 'contains', 'not_contains': 'does not contain', 'starts_with': 'starts with', 'ends_with': 'ends with',
-  'is_null': 'is empty', 'is_not_null': 'is not empty'
+  '==': '==', '!=': '!=', '>': '>', '>=': '>=', '<': '<', '<=': '<=',
+  'contains': 'CONTAINS', 'not_contains': 'NOT CONTAINS', 'starts_with': 'STARTS WITH', 'ends_with': 'ENDS WITH',
+  'is_null': 'IS NULL', 'is_not_null': 'IS NOT NULL',
+  'is_empty': 'IS EMPTY', 'is_not_empty': 'IS NOT EMPTY',
+  'is_blank': 'IS BLANK', 'is_not_blank': 'IS NOT BLANK'
 };
 
 const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableTools = [], results = {}, nodes = [], edges = [], setNodes, style = {} }) => {
@@ -173,10 +180,36 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   const [sumColumn, setSumColumn] = useState('');
   const [sumAction, setSumAction] = useState('group_by');
   const [sumOutput, setSumOutput] = useState('');
+  const dragSumItemRef = useRef(null);
+  const dragSumOverItemRef = useRef(null);
   
   // Sort rule state
   const [sortColumn, setSortColumn] = useState('');
   const [sortOrder, setSortOrder] = useState('asc');
+
+  // Universal Drag & Drop Handlers for rule arrays
+  const dragItemRef = useRef(null);
+  const dragOverItemRef = useRef(null);
+
+  const handleDragStart = (e, position) => {
+    dragItemRef.current = position;
+  };
+
+  const handleDragEnter = (e, position) => {
+    dragOverItemRef.current = position;
+  };
+
+  const handleDropArray = (e, array, paramKey) => {
+    e.preventDefault();
+    if (dragItemRef.current === null || dragOverItemRef.current === null) return;
+    const newItems = [...array];
+    const dragItemContent = newItems[dragItemRef.current];
+    newItems.splice(dragItemRef.current, 1);
+    newItems.splice(dragOverItemRef.current, 0, dragItemContent);
+    dragItemRef.current = null;
+    dragOverItemRef.current = null;
+    onUpdateParams(id, { ...parameters, [paramKey]: newItems });
+  };
 
   const isValidNode = selectedNode && typeof selectedNode === 'object' && selectedNode.id;
   const id = isValidNode ? selectedNode.id : null;
@@ -265,105 +298,111 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
     const selectedNodes = nodes.filter(n => n.selected);
     if (selectedNodes.length > 1) {
       return (
-        <div className="config-sidebar" style={style}>
-          <div className="sidebar-header">
-            <span className="sidebar-title">
-              <Settings size={16} />
-              Multiple Tools Selected ({selectedNodes.length})
-            </span>
-          </div>
-          <div className="sidebar-content" style={{ padding: '15px' }}>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '15px' }}>
-              The following tools are currently selected:
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {selectedNodes.map(n => (
-                <div key={n.id} style={{ 
-                  padding: '10px', 
-                  background: 'var(--bg-secondary)', 
-                  border: '1px solid var(--border-color)', 
-                  borderRadius: '6px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  boxShadow: 'var(--shadow-sm)'
-                }}>
-                  <span style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    width: '28px', 
-                    height: '28px', 
-                    background: 'var(--bg-tertiary)', 
-                    borderRadius: '4px',
-                    color: 'var(--color-accent)'
+        <div className="config-sidebar" style={{ ...style, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <div className="sidebar-header">
+              <span className="sidebar-title">
+                <Settings size={16} />
+                Multiple Tools Selected ({selectedNodes.length})
+              </span>
+            </div>
+            <div className="sidebar-content" style={{ padding: '15px' }}>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '15px' }}>
+                The following tools are currently selected:
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {selectedNodes.map(n => (
+                  <div key={n.id} style={{ 
+                    padding: '10px', 
+                    background: 'var(--bg-secondary)', 
+                    border: '1px solid var(--border-color)', 
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    boxShadow: 'var(--shadow-sm)'
                   }}>
-                    <Settings size={14} />
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      {n.data?.parameters?.label || n.data?.label || n.type}
+                    <span style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      width: '28px', 
+                      height: '28px', 
+                      background: 'var(--bg-tertiary)', 
+                      borderRadius: '4px',
+                      color: 'var(--color-accent)'
+                    }}>
+                      <Settings size={14} />
+                    </span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {n.data?.parameters?.label || n.data?.label || n.type}
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        ID: {n.id}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      ID: {n.id}
-                    </div>
+                    <button 
+                      onClick={() => setNodes && setNodes(nds => nds.map(node => node.id === n.id ? { ...node, selected: false } : node))}
+                      title="Deselect"
+                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', borderRadius: '4px' }}
+                      onMouseOver={(e) => { e.currentTarget.style.color = 'var(--color-danger)'; e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; }}
+                      onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
-                  <button 
-                    onClick={() => setNodes && setNodes(nds => nds.map(node => node.id === n.id ? { ...node, selected: false } : node))}
-                    title="Deselect"
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', borderRadius: '4px' }}
-                    onMouseOver={(e) => { e.currentTarget.style.color = 'var(--color-danger)'; e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; }}
-                    onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent'; }}
+                ))}
+              </div>
+              
+              <div style={{ marginTop: '25px', padding: '15px', background: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '10px' }}>
+                  Add to Selection
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <select 
+                    value={nodeToAdd} 
+                    onChange={(e) => setNodeToAdd(e.target.value)}
+                    style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '0.75rem' }}
                   >
-                    <X size={14} />
+                    <option value="">-- Find a tool --</option>
+                    {nodes.filter(n => !n.selected).map(n => (
+                      <option key={n.id} value={n.id}>
+                        {n.data?.parameters?.label || n.data?.label || n.type} ({n.id})
+                      </option>
+                    ))}
+                  </select>
+                  <button 
+                    onClick={() => {
+                      if (nodeToAdd && setNodes) {
+                        setNodes(nds => nds.map(n => n.id === nodeToAdd ? { ...n, selected: true } : n));
+                        setNodeToAdd('');
+                      }
+                    }}
+                    disabled={!nodeToAdd}
+                    style={{ padding: '6px 12px', background: 'var(--color-accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: nodeToAdd ? 'pointer' : 'not-allowed', opacity: nodeToAdd ? 1 : 0.5, fontWeight: 500, fontSize: '0.75rem' }}
+                  >
+                    Add
                   </button>
                 </div>
-              ))}
-            </div>
-            
-            <div style={{ marginTop: '25px', padding: '15px', background: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '10px' }}>
-                Add to Selection
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <select 
-                  value={nodeToAdd} 
-                  onChange={(e) => setNodeToAdd(e.target.value)}
-                  style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '0.75rem' }}
-                >
-                  <option value="">-- Find a tool --</option>
-                  {nodes.filter(n => !n.selected).map(n => (
-                    <option key={n.id} value={n.id}>
-                      {n.data?.parameters?.label || n.data?.label || n.type} ({n.id})
-                    </option>
-                  ))}
-                </select>
-                <button 
-                  onClick={() => {
-                    if (nodeToAdd && setNodes) {
-                      setNodes(nds => nds.map(n => n.id === nodeToAdd ? { ...n, selected: true } : n));
-                      setNodeToAdd('');
-                    }
-                  }}
-                  disabled={!nodeToAdd}
-                  style={{ padding: '6px 12px', background: 'var(--color-accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: nodeToAdd ? 'pointer' : 'not-allowed', opacity: nodeToAdd ? 1 : 0.5, fontWeight: 500, fontSize: '0.75rem' }}
-                >
-                  Add
-                </button>
-              </div>
-            </div>
 
+            </div>
           </div>
+          
         </div>
       );
     }
 
     return (
-      <div className="config-sidebar" style={style}>
-        <div className="no-node-selected">
-          <Settings />
-          <p>Select a node on the canvas to configure its settings.</p>
+      <div className="config-sidebar" style={{ ...style, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div className="no-node-selected">
+            <Settings />
+            <p>Select a node on the canvas to configure its settings.</p>
+          </div>
         </div>
+        
       </div>
     );
   }
@@ -665,39 +704,97 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
   const renderFilterConfig = () => {
     const filterType = parameters.filterType || 'basic';
-    const column = parameters.column || '';
-    const operator = parameters.operator || '==';
-    const value = parameters.value || '';
+    let conditions = parameters.conditions;
+    
+    // Legacy migration
+    if (!conditions && parameters.column) {
+      conditions = [{ column: parameters.column, operator: parameters.operator || '==', value: parameters.value || '', logic: 'AND' }];
+      setTimeout(() => onUpdateParams(id, { ...parameters, conditions, column: undefined, operator: undefined, value: undefined }), 0);
+    }
+    
+    const currentConditions = conditions || [{ column: '', operator: '==', value: '', logic: 'AND' }];
     const customExpression = parameters.customExpression || '';
 
-    const selectedColObj = hasUpstreamColumns ? upstreamSchema.find(col => col.name === column) : null;
-    const colType = selectedColObj?.type || 'String';
-    const lowerType = colType.toLowerCase();
-    const validOperators = getOperatorsForType(colType);
+    let expressionPreview = 'No condition configured';
+    if (filterType === 'custom') {
+      expressionPreview = customExpression || 'No custom expression';
+    } else if (currentConditions.length > 0 && currentConditions[0].column) {
+      expressionPreview = currentConditions.map((cond, i) => {
+        const opLabel = OPERATOR_LABELS[cond.operator] || cond.operator;
+        let str = `[${cond.column}] ${opLabel}`;
+        if (cond.operator !== 'is_null' && cond.operator !== 'is_not_null') {
+          str += ` "${cond.value}"`;
+        }
+        return i > 0 ? ` ${cond.logic} ${str}` : str;
+      }).join('');
+    }
 
-    const handleColumnChange = (newCol) => {
-      const colObj = hasUpstreamColumns ? upstreamSchema.find(col => col.name === newCol) : null;
-      const targetType = colObj?.type || 'String';
-      const targetOperators = getOperatorsForType(targetType);
-      const currentOp = parameters.operator || '==';
-      const isOpValid = targetOperators.some(op => op.value === currentOp);
-
-      onUpdateParams(id, {
-        ...parameters,
-        column: newCol,
-        operator: isOpValid ? currentOp : '==',
-        value: ''
-      });
+    const handleConditionChange = (idx, field, val) => {
+      const newConditions = [...currentConditions];
+      newConditions[idx] = { ...newConditions[idx], [field]: val };
+      if (field === 'column') {
+        const colObj = hasUpstreamColumns ? upstreamSchema.find(col => col.name === val) : null;
+        const targetType = colObj?.type || 'String';
+        const targetOperators = getOperatorsForType(targetType);
+        const currentOp = newConditions[idx].operator;
+        if (!targetOperators.some(op => op.value === currentOp)) {
+          newConditions[idx].operator = '==';
+        }
+        newConditions[idx].value = '';
+      }
+      onUpdateParams(id, { ...parameters, conditions: newConditions });
     };
 
-    const opLabel = OPERATOR_LABELS[operator] || operator;
-    const expressionPreview = filterType === 'custom' 
-      ? customExpression || 'No custom expression'
-      : column 
-        ? `[${column}] ${opLabel} ${operator === 'is_null' || operator === 'is_not_null' ? '' : `"${value}"`}`.trim()
-        : 'No condition configured';
+    const addCondition = () => {
+      onUpdateParams(id, { ...parameters, conditions: [...currentConditions, { column: '', operator: '==', value: '', logic: 'AND' }] });
+    };
 
-    // Autocomplete logic for custom expression
+    const removeCondition = (idx) => {
+      const newConditions = currentConditions.filter((_, i) => i !== idx);
+      if (newConditions.length === 0) newConditions.push({ column: '', operator: '==', value: '', logic: 'AND' });
+      onUpdateParams(id, { ...parameters, conditions: newConditions });
+    };
+
+    const applyQuickFilter = (e) => {
+      const type = e.target.value;
+      if (!type) return;
+      e.target.value = ""; // Reset dropdown
+      
+      const newConditions = [];
+      const schema = upstreamSchema || [];
+      
+      if (type === 'drop_any_null') {
+        schema.forEach((col, i) => {
+          newConditions.push({ column: col.name, operator: 'is_not_null', value: '', logic: 'AND' });
+        });
+      } else if (type === 'drop_all_null') {
+        schema.forEach((col, i) => {
+          newConditions.push({ column: col.name, operator: 'is_not_null', value: '', logic: i === 0 ? 'AND' : 'OR' });
+        });
+      } else if (type === 'drop_any_blank') {
+        schema.forEach((col, i) => {
+          const isStr = (col.type || '').toLowerCase() === 'string';
+          newConditions.push({ column: col.name, operator: isStr ? 'is_not_blank' : 'is_not_null', value: '', logic: 'AND' });
+        });
+      } else if (type === 'drop_all_blank') {
+        schema.forEach((col, i) => {
+          const isStr = (col.type || '').toLowerCase() === 'string';
+          newConditions.push({ column: col.name, operator: isStr ? 'is_not_blank' : 'is_not_null', value: '', logic: i === 0 ? 'AND' : 'OR' });
+        });
+      } else if (type === 'drop_negatives') {
+        const numCols = schema.filter(c => c.type === 'Int64' || c.type === 'Float64');
+        numCols.forEach((col, i) => {
+          newConditions.push({ column: col.name, operator: '>=', value: '0', logic: 'AND' });
+        });
+      } else if (type === 'clear') {
+        newConditions.push({ column: '', operator: '==', value: '', logic: 'AND' });
+      }
+
+      if (newConditions.length > 0) {
+        onUpdateParams(id, { ...parameters, conditions: newConditions, filterType: 'basic' });
+      }
+    };
+
     let examples = [];
     if (hasUpstreamColumns) {
       const stringCols = upstreamSchema.filter(c => c.type === 'String').map(c => c.name);
@@ -720,11 +817,21 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         <div className="filter-expression-bar" style={{
           background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '6px',
           padding: '8px 12px', fontSize: '0.75rem', fontFamily: 'var(--font-mono)',
-          color: (filterType === 'custom' && customExpression) || (filterType === 'basic' && column) ? 'var(--color-prep)' : 'var(--text-muted)',
           display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px'
         }}>
-          <span style={{ fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)', fontSize: '0.65rem', textTransform: 'uppercase', background: 'var(--border-color)', padding: '2px 6px', borderRadius: '3px' }}>EXP</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{expressionPreview}</span>
+          <span style={{ fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)', fontSize: '0.65rem', textTransform: 'uppercase', background: 'var(--border-color)', padding: '2px 6px', borderRadius: '3px', flexShrink: 0 }}>EXP</span>
+          <input 
+            type="text" 
+            readOnly 
+            value={expressionPreview} 
+            style={{ 
+              background: 'transparent', border: 'none', color: (filterType === 'custom' && customExpression) || (filterType === 'basic' && currentConditions[0]?.column) ? 'var(--color-prep)' : 'var(--text-muted)',
+              width: '100%', outline: 'none', fontFamily: 'inherit', fontSize: 'inherit',
+              textOverflow: 'ellipsis'
+            }} 
+            onClick={(e) => e.target.select()}
+            title="Click to select expression"
+          />
         </div>
 
         {!hasUpstreamColumns && (
@@ -738,7 +845,56 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         <div className="form-group">
           <label className="form-label">Filter Type</label>
-          <SafeSelect value={filterType} onChange={(e) => handleParamChange('filterType', e.target.value)}>
+          <SafeSelect value={filterType} onChange={(e) => {
+            const newType = e.target.value;
+            if (newType === 'custom' && !customExpression && currentConditions.length > 0 && currentConditions[0].column) {
+              // Automatically port basic condition to custom expression if custom is empty
+              let autoPopulated = currentConditions.filter(c => c.column).map((cond, i) => {
+                let str = `[${cond.column}]`;
+                if (cond.operator === 'is_null') {
+                  str += ' IS NULL';
+                } else if (cond.operator === 'is_not_null') {
+                  str += ' IS NOT NULL';
+                } else if (cond.operator === 'is_empty') {
+                  str += " = ''";
+                } else if (cond.operator === 'is_not_empty') {
+                  str += " != ''";
+                } else if (cond.operator === 'is_blank') {
+                  str = `(TRIM(${str}) = '' OR ${str} IS NULL)`;
+                } else if (cond.operator === 'is_not_blank') {
+                  str = `TRIM(${str}) != '' AND ${str} IS NOT NULL`;
+                } else {
+                  const colObj = hasUpstreamColumns ? upstreamSchema.find(col => col.name === cond.column) : null;
+                  const colType = colObj?.type || 'String';
+                  const needsQuotes = colType === 'String' || colType.includes('Date');
+                  const val = needsQuotes ? `'${cond.value.replace(/'/g, "''")}'` : cond.value;
+                  
+                  if (cond.operator === '==') str += ` = ${val}`;
+                  else if (cond.operator === '!=') str += ` != ${val}`;
+                  else if (cond.operator === '>') str += ` > ${val}`;
+                  else if (cond.operator === '>=') str += ` >= ${val}`;
+                  else if (cond.operator === '<') str += ` < ${val}`;
+                  else if (cond.operator === '<=') str += ` <= ${val}`;
+                  else if (cond.operator === 'contains') {
+                    str += ` LIKE '%${cond.value.replace(/'/g, "''")}%'`;
+                  }
+                  else if (cond.operator === 'not_contains') {
+                    str += ` NOT LIKE '%${cond.value.replace(/'/g, "''")}%'`;
+                  }
+                  else if (cond.operator === 'starts_with') {
+                    str += ` LIKE '${cond.value.replace(/'/g, "''")}%'`;
+                  }
+                  else if (cond.operator === 'ends_with') {
+                    str += ` LIKE '%${cond.value.replace(/'/g, "''")}'`;
+                  }
+                }
+                return i > 0 ? `\n${cond.logic} ${str}` : str;
+              }).join('');
+              onUpdateParams(id, { ...parameters, filterType: newType, customExpression: autoPopulated });
+            } else {
+              handleParamChange('filterType', newType);
+            }
+          }}>
             <option value="basic">Basic Condition</option>
             <option value="custom">Custom Expression</option>
           </SafeSelect>
@@ -756,45 +912,135 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             />
           </div>
         ) : (
-          <>
-            <div className="form-group">
-              <label className="form-label">Column</label>
-              {hasUpstreamColumns ? (
-                <SafeSelect value={column} onChange={e => handleColumnChange(e.target.value)}>
-                  <option value="">-- Select Column --</option>
-                  {upstreamSchema.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </SafeSelect>
-              ) : (
-                <SafeInput type="text" value={column} onChange={e => handleColumnChange(e.target.value)} placeholder="Column name" />
-              )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Basic Conditions</span>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <select 
+                  onChange={applyQuickFilter}
+                  defaultValue=""
+                  style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: '4px', color: 'var(--text-secondary)', fontSize: '0.65rem', padding: '3px 8px', cursor: 'pointer', fontWeight: 600, outline: 'none' }}
+                >
+                  <option value="" disabled>Quick Filters</option>
+                  <option value="drop_any_null">Drop Any Nulls</option>
+                  <option value="drop_all_null">Drop All Nulls</option>
+                  <option value="drop_any_blank">Drop Any Blanks</option>
+                  <option value="drop_all_blank">Drop All Blanks</option>
+                  <option value="drop_negatives">Drop Negatives</option>
+                  <option value="clear">Clear All</option>
+                </select>
+                <button 
+                  onClick={addCondition}
+                  style={{ background: 'var(--color-prep)', border: 'none', borderRadius: '4px', color: 'white', fontSize: '0.65rem', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: 600, height: '100%' }}
+                >
+                  <Plus size={12} /> Add
+                </button>
+                <button 
+                  onClick={() => {
+                    onUpdateParams(id, { ...parameters, conditions: [{ column: '', operator: '==', value: '', logic: 'AND' }] }); 
+                  }}
+                  title="Clear All Conditions"
+                  style={{ background: 'transparent', border: '1px solid var(--border-color)', borderRadius: '4px', color: 'var(--text-secondary)', fontSize: '0.65rem', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: 600, height: '100%' }}
+                >
+                  <Trash2 size={12} /> Clear All
+                </button>
+              </div>
             </div>
+            
+            <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.7rem' }}>
+                <thead style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                  <tr>
+                    <th style={{ padding: '6px', width: '60px' }}>Logic</th>
+                    <th style={{ padding: '6px' }}>Column</th>
+                    <th style={{ padding: '6px', width: '100px' }}>Operator</th>
+                    <th style={{ padding: '6px' }}>Value</th>
+                    <th style={{ padding: '6px', width: '30px', textAlign: 'center' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentConditions.map((cond, idx) => {
+                    const colObj = hasUpstreamColumns ? upstreamSchema.find(col => col.name === cond.column) : null;
+                    const colType = colObj?.type || 'String';
+                    const lowerType = colType.toLowerCase();
+                    const validOperators = getOperatorsForType(colType);
 
-            <div className="form-group">
-              <label className="form-label">Operator</label>
-              <SafeSelect value={operator} onChange={(e) => handleParamChange('operator', e.target.value)}>
-                {validOperators?.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
-              </SafeSelect>
+                    return (
+                      <tr 
+                        key={idx} 
+                        draggable 
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragEnter={(e) => handleDragEnter(e, idx)}
+                        onDragEnd={(e) => handleDropArray(e, currentConditions, 'conditions')}
+                        onDragOver={(e) => e.preventDefault()}
+                        style={{ borderBottom: idx < currentConditions.length - 1 ? '1px solid var(--border-color)' : 'none', cursor: 'grab' }}
+                      >
+                        <td style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ color: 'var(--text-muted)', cursor: 'grab' }}>⋮⋮</span>
+                          {idx > 0 ? (
+                            <select 
+                              value={cond.logic} 
+                              onChange={e => handleConditionChange(idx, 'logic', e.target.value)}
+                              style={{ width: '100%', background: 'transparent', border: '1px solid transparent', color: 'var(--color-prep)', outline: 'none', fontWeight: 600, cursor: 'pointer', padding: '2px' }}
+                            >
+                              <option value="AND">AND</option>
+                              <option value="OR">OR</option>
+                            </select>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', padding: '2px 4px', display: 'block', textAlign: 'center' }}>WHERE</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '4px 6px' }}>
+                          {hasUpstreamColumns ? (
+                            <SafeSelect value={cond.column} onChange={e => handleConditionChange(idx, 'column', e.target.value)} style={{ padding: '4px', width: '100%', boxSizing: 'border-box' }}>
+                              <option value="">-- Select --</option>
+                              {upstreamSchema.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                            </SafeSelect>
+                          ) : (
+                            <SafeInput type="text" value={cond.column} onChange={e => handleConditionChange(idx, 'column', e.target.value)} placeholder="Column" style={{ padding: '4px', width: '100%', boxSizing: 'border-box' }} />
+                          )}
+                        </td>
+                        <td style={{ padding: '4px 6px' }}>
+                          <SafeSelect value={cond.operator} onChange={(e) => handleConditionChange(idx, 'operator', e.target.value)} style={{ padding: '4px', width: '100%', boxSizing: 'border-box' }}>
+                            {validOperators?.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
+                          </SafeSelect>
+                        </td>
+                        <td style={{ padding: '4px 6px' }}>
+                          {cond.operator === 'is_null' || cond.operator === 'is_not_null' ? (
+                            <div style={{ padding: '4px', color: 'var(--text-muted)', background: 'var(--bg-tertiary)', borderRadius: '4px', textAlign: 'center' }}>N/A</div>
+                          ) : colType === 'Boolean' ? (
+                            <SafeSelect value={cond.value} onChange={(e) => handleConditionChange(idx, 'value', e.target.value)} style={{ padding: '4px', width: '100%', boxSizing: 'border-box' }}>
+                              <option value="true">True</option>
+                              <option value="false">False</option>
+                            </SafeSelect>
+                          ) : (
+                            <SafeInput
+                              type={lowerType.includes('date') ? 'date' : 'text'}
+                              placeholder="Enter value"
+                              value={cond.value}
+                              onChange={(e) => handleConditionChange(idx, 'value', e.target.value)}
+                              style={{ padding: '4px', width: '100%', boxSizing: 'border-box' }}
+                            />
+                          )}
+                        </td>
+                        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+                          {currentConditions.length > 1 && (
+                            <button 
+                              onClick={() => removeCondition(idx)}
+                              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                              title="Remove condition"
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-
-            <div className="form-group">
-              <label className="form-label">Value</label>
-              {operator === 'is_null' || operator === 'is_not_null' ? (
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Not applicable</span>
-              ) : colType === 'Boolean' ? (
-                <SafeSelect value={value} onChange={(e) => handleParamChange('value', e.target.value)}>
-                  <option value="true">True</option>
-                  <option value="false">False</option>
-                </SafeSelect>
-              ) : (
-                <SafeInput
-                  type={lowerType.includes('date') ? 'date' : 'text'}
-                  placeholder="Enter value"
-                  value={value}
-                  onChange={(e) => handleParamChange('value', e.target.value)}
-                />
-              )}
-            </div>
-          </>
+          </div>
         )}
       </>
     );
@@ -838,8 +1084,19 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 </thead>
                 <tbody>
                   {currentRules.map((rule, idx) => (
-                    <tr key={idx} style={{ borderBottom: idx < currentRules.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
-                      <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                    <tr 
+                      key={idx} 
+                      draggable 
+                      onDragStart={(e) => handleDragStart(e, idx)}
+                      onDragEnter={(e) => handleDragEnter(e, idx)}
+                      onDragEnd={(e) => handleDropArray(e, currentRules, 'rules')}
+                      onDragOver={(e) => e.preventDefault()}
+                      style={{ borderBottom: idx < currentRules.length - 1 ? '1px solid var(--border-color)' : 'none', cursor: 'grab' }}
+                    >
+                      <td style={{ padding: '8px', color: 'var(--text-muted)' }}>
+                        <span style={{ color: 'var(--text-muted)', cursor: 'grab', marginRight: '4px' }}>⋮⋮</span>
+                        {idx + 1}
+                      </td>
                       <td style={{ padding: '8px', color: 'var(--text-primary)' }}>{rule.column}</td>
                       <td style={{ padding: '8px', color: 'var(--color-accent)', fontWeight: 600 }}>
                         {rule.order === 'desc' ? 'Descending' : 'Ascending'}
@@ -966,12 +1223,17 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                     const rowBackground = col.keep ? (isMutated ? 'rgba(245, 158, 11, 0.08)' : 'transparent') : 'rgba(0,0,0,0.02)';
                     
                     return (
-                      <div key={col.name} style={{ display: 'grid', gridTemplateColumns: '30px 30px 1.2fr 1.8fr 1.2fr', borderBottom: '1px dotted var(--border-color)', opacity: col.keep ? 1 : 0.5, transition: 'opacity 0.2s, background 0.2s', background: rowBackground, alignItems: 'center', padding: '4px 8px', fontSize: '0.65rem' }}>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0px' }}>
-                            <button onClick={() => handleColumnMove(idx, 'up')} disabled={idx === 0} style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'not-allowed' : 'pointer', color: idx === 0 ? 'var(--text-muted)' : 'var(--text-secondary)', padding: 0 }}><ChevronUp size={14} /></button>
-                            <button onClick={() => handleColumnMove(idx, 'down')} disabled={idx === columns.length - 1} style={{ background: 'transparent', border: 'none', cursor: idx === columns.length - 1 ? 'not-allowed' : 'pointer', color: idx === columns.length - 1 ? 'var(--text-muted)' : 'var(--text-secondary)', padding: 0 }}><ChevronDown size={14} /></button>
-                          </div>
+                      <div 
+                        key={col.name} 
+                        draggable 
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragEnter={(e) => handleDragEnter(e, idx)}
+                        onDragEnd={(e) => handleDropArray(e, columns, 'columns')}
+                        onDragOver={(e) => e.preventDefault()}
+                        style={{ display: 'grid', gridTemplateColumns: '30px 30px 1.2fr 1.8fr 1.2fr', borderBottom: '1px dotted var(--border-color)', opacity: col.keep ? 1 : 0.5, transition: 'opacity 0.2s, background 0.2s', background: rowBackground, alignItems: 'center', padding: '4px 8px', fontSize: '0.65rem', cursor: 'grab' }}
+                      >
+                        <div style={{ textAlign: 'center', color: 'var(--text-muted)', cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          ⋮⋮
                         </div>
                         <div style={{ textAlign: 'center', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                           <SafeInput
@@ -1241,7 +1503,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             className="file-upload-zone"
             onClick={async () => {
               try {
-                const res = await fetch('http://127.0.0.1:8000/api/pick_save_file');
+                const res = await fetch(`${API_BASE}/api/pick_save_file`);
                 const data = await res.json();
                 if (data.file_path) {
                   handleParamChange('outputPath', data.file_path);
@@ -1340,7 +1602,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         <div className="form-group">
           <label className="form-label">Columns to Cleanse</label>
           {hasUpstreamColumns ? (
-            <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '4px' }}>
+            <div style={{ minHeight: '100px', maxHeight: '500px', resize: 'vertical', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '4px' }}>
               {upstreamSchema.map((col) => (
                 <label key={col.name} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                   <SafeInput
@@ -1610,7 +1872,16 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           <label className="form-label">Extracted Output Columns</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
             {outputColumns.map((outCol, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div 
+                key={idx} 
+                draggable 
+                onDragStart={(e) => handleDragStart(e, idx)}
+                onDragEnter={(e) => handleDragEnter(e, idx)}
+                onDragEnd={(e) => handleDropArray(e, outputColumns, 'outputColumns')}
+                onDragOver={(e) => e.preventDefault()}
+                style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'grab' }}
+              >
+                <span style={{ color: 'var(--text-muted)', cursor: 'grab' }}>⋮⋮</span>
                 <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--color-accent)', width: '20px' }}>${idx+1}</span>
                 <SafeInput
                   type="text"
@@ -2179,6 +2450,25 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
       setSumOutput('');
     };
 
+    const handleSumDragStart = (e, position) => {
+      dragSumItemRef.current = position;
+    };
+  
+    const handleSumDragEnter = (e, position) => {
+      dragSumOverItemRef.current = position;
+    };
+  
+    const handleSumDrop = (e) => {
+      if (dragSumItemRef.current === null || dragSumOverItemRef.current === null) return;
+      const dragItemContent = currentActions[dragSumItemRef.current];
+      const newActions = [...currentActions];
+      newActions.splice(dragSumItemRef.current, 1);
+      newActions.splice(dragSumOverItemRef.current, 0, dragItemContent);
+      dragSumItemRef.current = null;
+      dragSumOverItemRef.current = null;
+      onUpdateParams(id, { ...parameters, actions: newActions });
+    };
+
     return (
       <div className="summarize-config">
         <div style={{ marginBottom: '16px' }}>
@@ -2198,8 +2488,21 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 </thead>
                 <tbody>
                   {currentActions.map((act, idx) => (
-                    <tr key={idx} style={{ borderBottom: idx < currentActions.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
-                      <td style={{ padding: '8px', color: 'var(--text-primary)' }}>{act.column}</td>
+                    <tr 
+                      key={idx} 
+                      draggable 
+                      onDragStart={(e) => handleSumDragStart(e, idx)}
+                      onDragEnter={(e) => handleSumDragEnter(e, idx)}
+                      onDragEnd={handleSumDrop}
+                      onDragOver={(e) => e.preventDefault()}
+                      style={{ borderBottom: idx < currentActions.length - 1 ? '1px solid var(--border-color)' : 'none', cursor: 'grab' }}
+                    >
+                      <td style={{ padding: '8px', color: 'var(--text-primary)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ color: 'var(--text-muted)', cursor: 'grab' }}>⋮⋮</span>
+                          {act.column}
+                        </div>
+                      </td>
                       <td style={{ padding: '8px', color: 'var(--color-accent)', fontWeight: 600 }}>{act.action}</td>
                       <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{act.output}</td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>
@@ -2287,7 +2590,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
     return (
       <div className="config-panel">
         <div className="form-group">
-          <label className="form-label">OddsPortal URL</label>
+          <label className="form-label">{type === 'odds_portal_upcoming' ? 'Upcoming Matches Target League URL' : 'OddsPortal URL'}</label>
           <SafeInput
             type="text"
             value={parameters.targetUrl || ''}
@@ -2297,19 +2600,21 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           />
         </div>
         
-        <div style={{ marginTop: '16px' }}>
-          <label className="form-label checkbox-label" style={{ fontWeight: 600, color: 'var(--color-accent)' }}>
-            <SafeInput
-              type="checkbox"
-              checked={!!parameters.scrapeAllSeasons}
-              onChange={(e) => handleParamChange('scrapeAllSeasons', e.target.checked)}
-            />
-            Scrape All Historical Seasons
-          </label>
-          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginLeft: '24px', marginTop: '4px' }}>
-            If checked, the scraper will automatically navigate backwards through all available seasons for this league.
+        {type !== 'odds_portal_upcoming' && (
+          <div style={{ marginTop: '16px' }}>
+            <label className="form-label checkbox-label" style={{ fontWeight: 600, color: 'var(--color-accent)' }}>
+              <SafeInput
+                type="checkbox"
+                checked={!!parameters.scrapeAllSeasons}
+                onChange={(e) => handleParamChange('scrapeAllSeasons', e.target.checked)}
+              />
+              Scrape All Historical Seasons
+            </label>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginLeft: '24px', marginTop: '4px' }}>
+              If checked, the scraper will automatically navigate backwards through all available seasons for this league.
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="form-group" style={{ marginTop: '16px' }}>
           <label className="form-label">Emergency Backup CSV (For long scrapes)</label>
@@ -2317,7 +2622,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             className="file-upload-zone"
             onClick={async () => {
               try {
-                const res = await fetch('http://127.0.0.1:8000/api/pick_save_file');
+                const res = await fetch(`${API_BASE}/api/pick_save_file`);
                 const data = await res.json();
                 if (data.file_path) {
                   handleParamChange('autoSaveCsvPath', data.file_path);
@@ -2450,7 +2755,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                   style={{ padding: '6px 12px', fontSize: '0.75rem', height: '32px' }}
                   onClick={async () => {
                     try {
-                      const res = await fetch('http://127.0.0.1:8000/api/pick_save_file');
+                      const res = await fetch(`${API_BASE}/api/pick_save_file`);
                       const data = await res.json();
                       if (data.file_path) {
                         handleParamChange(fieldDef.field, data.file_path);
@@ -2727,7 +3032,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
             {hasUpstreamColumns ? (
-              <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '4px' }}>
+              <div style={{ minHeight: '100px', maxHeight: '500px', resize: 'vertical', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '4px' }}>
                 {upstreamSchema.map((col) => (
                   <label key={col.name} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     <SafeInput
@@ -2760,44 +3065,47 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   };
 
   return (
-    <div className="config-sidebar" style={style}>
-      <div className="sidebar-header">
-        <span className="sidebar-title">
-          <Settings size={16} />
-          {getTitle()}
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button 
-            onClick={() => onUpdateParams(id, { ...parameters, isCached: !parameters.isCached })}
-            title={parameters.isCached ? "Uncache Node Output" : "Cache Node Output"}
-            style={{ 
-              background: 'none', border: 'none', cursor: 'pointer', 
-              color: parameters.isCached ? 'var(--color-accent)' : 'var(--text-muted)',
-              display: 'flex', alignItems: 'center', padding: '2px', borderRadius: '4px'
-            }}
-          >
-            <Database size={14} />
-          </button>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>ID: {id}</span>
+    <div className="config-sidebar" style={{ ...style, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div className="sidebar-header">
+          <span className="sidebar-title">
+            <Settings size={16} />
+            {getTitle()}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button 
+              onClick={() => onUpdateParams(id, { ...parameters, isCached: !parameters.isCached })}
+              title={parameters.isCached ? "Uncache Node Output" : "Cache Node Output"}
+              style={{ 
+                background: 'none', border: 'none', cursor: 'pointer', 
+                color: parameters.isCached ? 'var(--color-accent)' : 'var(--text-muted)',
+                display: 'flex', alignItems: 'center', padding: '2px', borderRadius: '4px'
+              }}
+            >
+              <Database size={14} />
+            </button>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>ID: {id}</span>
+          </div>
+        </div>
+        <div className="sidebar-content" style={{ flex: 1 }}>
+          {type === 'fileInput' ? renderFileInputConfig() :
+           type === 'filter' ? renderFilterConfig() :
+           type === 'sort' ? renderSortConfig() :
+           type === 'select' ? renderSelectConfig() :
+           type === 'browse' ? renderBrowseConfig() :
+           type === 'imageCaption' ? renderImageCaptionConfig() :
+           type === 'fileOutput' ? renderFileOutputConfig() :
+           type === 'regex' ? renderRegexConfig() :
+           type === 'data_cleansing' ? renderDataCleansingConfig() :
+           type === 'formula' ? renderFormulaConfig() :
+           type === 'visualization' ? renderVisualizationConfig() :
+           type === 'join' ? renderJoinConfig() :
+           type === 'summarize' ? renderSummarizeConfig() :
+           (type === 'odds_portal_scraper' || type === 'odds_portal_upcoming') ? renderOddsPortalScraperConfig() :
+           (toolDef && toolDef.ui_schema) ? renderDynamicForm(toolDef.ui_schema) : null}
         </div>
       </div>
-      <div className="sidebar-content">
-        {type === 'fileInput' ? renderFileInputConfig() :
-         type === 'filter' ? renderFilterConfig() :
-         type === 'sort' ? renderSortConfig() :
-         type === 'select' ? renderSelectConfig() :
-         type === 'browse' ? renderBrowseConfig() :
-         type === 'imageCaption' ? renderImageCaptionConfig() :
-         type === 'fileOutput' ? renderFileOutputConfig() :
-         type === 'regex' ? renderRegexConfig() :
-         type === 'data_cleansing' ? renderDataCleansingConfig() :
-         type === 'formula' ? renderFormulaConfig() :
-         type === 'visualization' ? renderVisualizationConfig() :
-         type === 'join' ? renderJoinConfig() :
-         type === 'summarize' ? renderSummarizeConfig() :
-         type === 'odds_portal_scraper' ? renderOddsPortalScraperConfig() :
-         (toolDef && toolDef.ui_schema) ? renderDynamicForm(toolDef.ui_schema) : null}
-      </div>
+      
     </div>
   );
 };

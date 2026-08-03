@@ -10,6 +10,7 @@ class PipelineCache:
         self._node_statuses: Dict[str, str] = {}
         self._global_cancel_flag: bool = False
         self._cancelled_nodes: set = set()
+        self._is_running: bool = False
 
     def cancel_pipeline(self):
         with self._lock:
@@ -55,7 +56,7 @@ class PipelineCache:
                 ports_data = {}
                 for port, port_df in df.items():
                     if port_df is not None:
-                        preview_df = port_df.head(1000)
+                        preview_df = port_df.head(100)
                         schema = []
                         for name, dtype in port_df.schema.items():
                             col_meta = {"name": name, "type": str(dtype)}
@@ -103,7 +104,7 @@ class PipelineCache:
                 # Use ui_payload for the frontend preview if provided, otherwise use the full df
                 serialization_df = ui_payload if ui_payload is not None else df
                 
-                preview_df = serialization_df.head(1000) if serialization_df is not None else pl.DataFrame()
+                preview_df = serialization_df.head(100) if serialization_df is not None else pl.DataFrame()
                 schema = []
                 if serialization_df is not None:
                     for name, dtype in serialization_df.schema.items():
@@ -237,6 +238,14 @@ class PipelineCache:
     def set_node_status(self, node_id: str, status: str):
         with self._lock:
             self._node_statuses[node_id] = status
+
+    def get_is_running(self) -> bool:
+        with self._lock:
+            return self._is_running
+
+    def set_is_running(self, val: bool):
+        with self._lock:
+            self._is_running = val
 
     def get_status_payload(self) -> Dict[str, Any]:
         with self._lock:

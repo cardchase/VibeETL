@@ -25,6 +25,18 @@ def verify_safe_filter_expression(polars_str: str) -> None:
         raise ValueError("Security Intercept: Malformed custom expression syntax geometry. This may indicate an obfuscated injection attempt.")
 
 def parse_to_polars_str(expr_str: str, schema: Dict[str, Any]) -> str:
+    # Pre-process multi-column function calls like is_not_null([A], [B])
+    def replace_is_not_null(m):
+        cols = re.findall(r'\[([^\]]+)\]', m.group(1))
+        return " AND ".join(f"[{c}] IS NOT NULL" for c in cols) if cols else m.group(0)
+        
+    def replace_is_null(m):
+        cols = re.findall(r'\[([^\]]+)\]', m.group(1))
+        return " AND ".join(f"[{c}] IS NULL" for c in cols) if cols else m.group(0)
+
+    expr_str = re.sub(r'(?i)\bis_not_null\s*\(([^)]+)\)', replace_is_not_null, expr_str)
+    expr_str = re.sub(r'(?i)\bis_null\s*\(([^)]+)\)', replace_is_null, expr_str)
+
     token_specification = [
         ('STRING',   r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\''), # Double or single quoted strings
         ('COLUMN',   r'\[[^\]]+\]'),                             # Bracketed column names [Col]
@@ -193,10 +205,89 @@ class FilterNode(BaseNode):
         ]
     }
 
+    def _build_condition_expr(self, column: str, operator: str, value_raw: Any, df: pl.DataFrame) -> pl.Expr:
+        if not column:
+            return pl.lit(True)
+            
+        if column not in df.columns:
+            from app.tools.base import SchemaCompatibilityError
+            raise SchemaCompatibilityError(
+                f"Schema Compatibility Error in 'filter' node: Required column '{column}' "
+                f"is missing from the upstream schema. Available columns are: {df.columns}."
+            )
+
+        col_type = df.schema[column]
+        value = value_raw
+        
+        if operator not in ["is_null", "is_not_null", "is_empty", "is_not_empty", "is_blank", "is_not_blank"]:
+            if str(value_raw).strip() == "":
+                return pl.lit(True)
+
+            try:
+                if col_type in [pl.Int64, pl.Int32, pl.Int16, pl.Int8, pl.UInt64, pl.UInt32, pl.UInt16, pl.UInt8]:
+                    value = int(value_raw)
+                elif col_type in [pl.Float64, pl.Float32]:
+                    value = float(value_raw)
+                elif isinstance(col_type, pl.Decimal) or str(col_type).startswith("Decimal"):
+                    import decimal
+                    value = decimal.Decimal(value_raw)
+                elif col_type == pl.Boolean:
+                    value = str(value_raw).lower() in ["true", "1", "yes", "t"]
+                elif col_type == pl.Date:
+                    from datetime import datetime
+                    value = datetime.strptime(value_raw, "%Y-%m-%d").date()
+                elif col_type == pl.Datetime:
+                    from datetime import datetime
+                    value = datetime.fromisoformat(value_raw)
+            except Exception as e:
+                self.log(f"Error: Could not cast value '{value_raw}' to {col_type}. Error: {e}")
+                raise ValueError(f"Invalid comparison value '{value_raw}' for column '{column}' of type {col_type}. Error: {e}")
+
+        if operator == "==":
+            return pl.col(column) == value
+        elif operator == "!=":
+            return pl.col(column) != value
+        elif operator == ">":
+            return pl.col(column) > value
+        elif operator == ">=":
+            return pl.col(column) >= value
+        elif operator == "<":
+            return pl.col(column) < value
+        elif operator == "<=":
+            return pl.col(column) <= value
+        elif operator == "contains":
+            return pl.col(column).cast(pl.String).str.contains(str(value))
+        elif operator == "not_contains":
+            return ~pl.col(column).cast(pl.String).str.contains(str(value))
+        elif operator == "starts_with":
+            return pl.col(column).cast(pl.String).str.starts_with(str(value))
+        elif operator == "ends_with":
+            return pl.col(column).cast(pl.String).str.ends_with(str(value))
+        elif operator == "is_null":
+            return pl.col(column).is_null()
+        elif operator == "is_not_null":
+            return pl.col(column).is_not_null()
+        elif operator == "is_empty":
+            return pl.col(column).cast(pl.String) == ""
+        elif operator == "is_not_empty":
+            return pl.col(column).cast(pl.String) != ""
+        elif operator == "is_blank":
+            return pl.col(column).is_null() | (pl.col(column).cast(pl.String).str.strip_chars() == "")
+        elif operator == "is_not_blank":
+            return pl.col(column).is_not_null() & (pl.col(column).cast(pl.String).str.strip_chars() != "")
+        else:
+            raise ValueError(f"Unsupported filter operator: {operator}")
+
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> Dict[str, pl.DataFrame]:
-        df = inputs.get("input")
-        if df is None:
-            raise ValueError("Awaiting connection: Filter node requires an incoming data stream.")
+        if not inputs:
+            self.log("No input DataFrame provided. Passing empty schema to True branch.")
+            return {"true": pl.DataFrame(), "false": pl.DataFrame()}
+            
+        df = list(inputs.values())[0]
+        
+        if df is None or (df.height == 0 and df.width == 0):
+            self.log("No input DataFrame provided. Passing empty schema to True branch.")
+            return {"true": pl.DataFrame(), "false": pl.DataFrame()}
 
         filter_type = self.parameters.get("filterType", "basic")
         
@@ -208,113 +299,70 @@ class FilterNode(BaseNode):
             
             self.log(f"Applying custom filter expression: {expr_str}")
             try:
-                polars_expr_str = parse_to_polars_str(expr_str, df.schema)
-                self.log(f"Compiled Polars expression: {polars_expr_str}")
+                # Convert [Column] to "Column" to support Alteryx-style brackets in SQL
+                sql_expr = re.sub(r'\[(.*?)\]', r'"\1"', expr_str)
+                formatted_sql = re.sub(r'(?i)\s+(AND|OR)\s+', r'\n\1 ', sql_expr)
+                self.log(f"Compiled SQL expression:\n{formatted_sql}")
                 
-                # AST Safety Check
-                verify_safe_filter_expression(polars_expr_str)
+                ctx = pl.SQLContext(df=df)
                 
-                # Lock down execution environment context
-                expr = eval(polars_expr_str, {"pl": pl, "__builtins__": {}})
-                true_expr_clean = expr.fill_null(False)
+                # True branch
+                true_df = ctx.execute(f"SELECT * FROM df WHERE {sql_expr}").collect()
                 
-                true_df = df.filter(true_expr_clean)
-                false_df = df.filter(~true_expr_clean)
+                # False branch (everything not in True branch, including NULLs which NOT normally ignores)
+                false_df = ctx.execute(f"SELECT * FROM df WHERE NOT ({sql_expr}) OR ({sql_expr}) IS NULL").collect()
                 
                 self.log(f"Custom filter applied. True branch: {true_df.height} rows, False branch: {false_df.height} rows.")
                 return {"true": true_df, "false": false_df}
-            except SecurityError as se:
-                self.log(f"Security Intervention: {se}")
-                raise ValueError(f"Security Alert: Malicious custom expression blocked. {se}")
             except Exception as e:
-                self.log(f"Error evaluating custom expression '{expr_str}': {e}")
+                self.log(f"Error evaluating custom SQL expression '{expr_str}': {e}")
                 raise ValueError(f"Invalid custom expression: {expr_str}. Error: {e}")
 
-        # Basic filter execution
-        column = self.parameters.get("column", "")
-        operator = self.parameters.get("operator", "==")
-        value_raw = self.parameters.get("value", "")
+        # Basic filter execution (supports multiple conditions)
+        conditions = self.parameters.get("conditions", [])
+        
+        # Backward compatibility for legacy single-condition structure
+        if not conditions and "column" in self.parameters:
+            conditions = [{
+                "column": self.parameters.get("column", ""),
+                "operator": self.parameters.get("operator", "=="),
+                "value": self.parameters.get("value", ""),
+                "logic": "AND"
+            }]
 
-        if not column:
-            self.log("No column specified for filter. Passing input data unchanged to True branch.")
+        if not conditions:
+            self.log("No conditions specified for filter. Passing input data unchanged to True branch.")
             return {"true": df, "false": pl.DataFrame(schema=df.schema)}
 
-        if column not in df.columns:
-            from app.tools.base import SchemaCompatibilityError
-            raise SchemaCompatibilityError(
-                f"Schema Compatibility Error in 'filter' node: Required column '{column}' "
-                f"is missing from the upstream schema. Available columns are: {df.columns}. "
-                f"Please ensure upstream tools output this column before filtering on it."
-            )
-
-        self.log(f"Applying basic filter: [{column}] {operator} '{value_raw}'")
-
-        # Cast target value to match the column data type
-        col_type = df.schema[column]
-        value = value_raw
+        self.log(f"Applying basic filter with {len(conditions)} condition(s).")
         
-        if operator not in ["is_null", "is_not_null"]:
-            if str(value_raw).strip() == "":
-                self.log("Warning: Comparison value is empty. Passing all data to true branch.")
-                return {"true": df, "false": pl.DataFrame(schema=df.schema)}
+        final_expr = None
+        for i, cond in enumerate(conditions):
+            col = cond.get("column", "")
+            op = cond.get("operator", "==")
+            val = cond.get("value", "")
+            logic = cond.get("logic", "AND")
+            
+            if not col:
+                continue
+                
+            cond_expr = self._build_condition_expr(col, op, val, df)
+            
+            if final_expr is None:
+                final_expr = cond_expr
+            else:
+                if logic == "OR":
+                    final_expr = final_expr | cond_expr
+                else:
+                    final_expr = final_expr & cond_expr
 
-            try:
-                # Check integer types (both signed and unsigned)
-                if col_type in [pl.Int64, pl.Int32, pl.Int16, pl.Int8, pl.UInt64, pl.UInt32, pl.UInt16, pl.UInt8]:
-                    value = int(value_raw)
-                # Check float types
-                elif col_type in [pl.Float64, pl.Float32]:
-                    value = float(value_raw)
-                # Check decimal types
-                elif isinstance(col_type, pl.Decimal) or str(col_type).startswith("Decimal"):
-                    import decimal
-                    value = decimal.Decimal(value_raw)
-                # Check boolean type
-                elif col_type == pl.Boolean:
-                    value = str(value_raw).lower() in ["true", "1", "yes", "t"]
-                # Check date / datetime types
-                elif col_type == pl.Date:
-                    from datetime import datetime
-                    value = datetime.strptime(value_raw, "%Y-%m-%d").date()
-                elif col_type == pl.Datetime:
-                    from datetime import datetime
-                    value = datetime.fromisoformat(value_raw)
-            except Exception as e:
-                self.log(f"Error: Could not cast value '{value_raw}' to {col_type}. Error: {e}")
-                raise ValueError(f"Invalid comparison value '{value_raw}' for column '{column}' of type {col_type}. Error: {e}")
+        if final_expr is None:
+            self.log("Conditions were empty or invalid. Passing input data unchanged to True branch.")
+            return {"true": df, "false": pl.DataFrame(schema=df.schema)}
 
-        # Apply operators
-        if operator == "==":
-            true_expr = pl.col(column) == value
-        elif operator == "!=":
-            true_expr = pl.col(column) != value
-        elif operator == ">":
-            true_expr = pl.col(column) > value
-        elif operator == ">=":
-            true_expr = pl.col(column) >= value
-        elif operator == "<":
-            true_expr = pl.col(column) < value
-        elif operator == "<=":
-            true_expr = pl.col(column) <= value
-        elif operator == "contains":
-            true_expr = pl.col(column).cast(pl.Utf8).str.contains(str(value))
-        elif operator == "not_contains":
-            true_expr = ~pl.col(column).cast(pl.Utf8).str.contains(str(value))
-        elif operator == "starts_with":
-            true_expr = pl.col(column).cast(pl.Utf8).str.starts_with(str(value))
-        elif operator == "ends_with":
-            true_expr = pl.col(column).cast(pl.Utf8).str.ends_with(str(value))
-        elif operator == "is_null":
-            true_expr = pl.col(column).is_null()
-        elif operator == "is_not_null":
-            true_expr = pl.col(column).is_not_null()
-        else:
-            raise ValueError(f"Unsupported filter operator: {operator}")
-
-        true_expr_clean = true_expr.fill_null(False)
-        
+        true_expr_clean = final_expr.fill_null(False)
         true_df = df.filter(true_expr_clean)
         false_df = df.filter(~true_expr_clean)
-
+        
         self.log(f"Filter applied. True branch: {true_df.height} rows, False branch: {false_df.height} rows.")
         return {"true": true_df, "false": false_df}

@@ -64,7 +64,7 @@ const FormulaEditor = ({ value, onChange, columns = [], height = "120px", placeh
         completionProviderRef.current.dispose();
       }
 
-      completionProviderRef.current = monaco.languages.registerCompletionItemProvider('python', {
+      completionProviderRef.current = monaco.languages.registerCompletionItemProvider('sql', {
         triggerCharacters: ['[', '.'],
         provideCompletionItems: (model, position) => {
           const textUntilPosition = model.getValueInRange({
@@ -178,21 +178,30 @@ const FormulaEditor = ({ value, onChange, columns = [], height = "120px", placeh
       scrollbar: { vertical: 'hidden', horizontal: 'hidden' },
       padding: { top: 8, bottom: 8 },
       fontSize: 12,
-      fontFamily: 'var(--font-mono)'
+      fontFamily: 'var(--font-mono)',
+      suggest: { maxVisibleSuggestionsCount: 15 }
     });
   };
 
   return (
-    <div style={{ 
-      border: '1px solid var(--border-color)', 
+    <div 
+      className="nodrag nopan"
+      onKeyDown={(e) => e.stopPropagation()}
+      style={{ 
+        border: '1px solid var(--border-color)', 
       borderRadius: '4px', 
       overflow: 'hidden',
       background: 'var(--bg-primary)',
-      height: height
+      height: height,
+      minHeight: '80px',
+      maxHeight: '600px',
+      resize: 'vertical',
+      display: 'flex',
+      flexDirection: 'column'
     }}>
       <Editor
         height="100%"
-        defaultLanguage="python"
+        defaultLanguage="sql"
         theme="vs-dark"
         value={value}
         onChange={(val) => onChange && onChange({ target: { value: val }})}

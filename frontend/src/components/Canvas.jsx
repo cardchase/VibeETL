@@ -1,4 +1,5 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ReactFlow,
   Controls,
@@ -25,6 +26,14 @@ const FindNodePanel = ({ nodes, onNodeSelect }) => {
   const [isOpen, setIsOpen] = useState(false);
   const { setCenter } = useReactFlow();
 
+  useEffect(() => {
+    const handleOpenFind = () => {
+      setIsOpen(true);
+    };
+    window.addEventListener('vibe-open-find', handleOpenFind);
+    return () => window.removeEventListener('vibe-open-find', handleOpenFind);
+  }, []);
+
   const matchingNodes = query.trim() ? nodes.filter(n => 
     n.id.toLowerCase().includes(query.toLowerCase()) || 
     (n.data?.label || '').toLowerCase().includes(query.toLowerCase())
@@ -41,13 +50,8 @@ const FindNodePanel = ({ nodes, onNodeSelect }) => {
   };
 
   return (
-    <Panel position="top-right" className="find-node-panel">
-      {!isOpen ? (
-        <button className="mode-btn" onClick={() => setIsOpen(true)} title="Find Tool on Canvas" style={{ background: 'white', padding: '8px', borderRadius: '8px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Search size={16} />
-          <span style={{ fontSize: '12px', fontWeight: 600 }}>Find...</span>
-        </button>
-      ) : (
+    <Panel position="top-right" className="find-node-panel" style={{ right: '64px', top: '16px' }}>
+      {isOpen && (
         <div style={{ background: 'white', borderRadius: '8px', boxShadow: '0 4px 15px rgba(0,0,0,0.15)', border: '1px solid #e2e8f0', width: '250px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #e2e8f0' }}>
             <Search size={14} style={{ color: '#94a3b8', marginRight: '8px' }} />
@@ -110,6 +114,17 @@ const CanvasContent = ({
   const [isPanMode, setIsPanMode] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
   const [menuConfig, setMenuConfig] = useState({ visible: false, x: 0, y: 0, type: null, nodeId: null });
+  const [minimapTarget, setMinimapTarget] = useState(null);
+  
+  // Continuously monitor for minimap portal target changes since ConfigWindow remounts it
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const el = document.getElementById('minimap-portal-target');
+      // Update state if the element is different from the currently stored one
+      setMinimapTarget(prevEl => (prevEl !== el ? el : prevEl));
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleCopy = () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true }));
@@ -118,7 +133,18 @@ const CanvasContent = ({
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true }));
   };
   const handleDelete = () => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }));
+    const selectedNodes = nodes.filter(n => n.selected);
+    const selectedEdgesList = edges.filter(e => e.selected);
+    
+    if (selectedNodes.length > 0) {
+      if (onNodesDelete) onNodesDelete(selectedNodes);
+      onNodesChange(selectedNodes.map(n => ({ id: n.id, type: 'remove' })));
+    }
+    
+    if (selectedEdgesList.length > 0) {
+      if (onEdgesDelete) onEdgesDelete(selectedEdgesList);
+      onEdgesChange(selectedEdgesList.map(e => ({ id: e.id, type: 'remove' })));
+    }
   };
   const handleSelectAll = () => {
     const changes = nodes.map(n => ({ id: n.id, type: 'select', selected: true }));
@@ -338,25 +364,27 @@ const CanvasContent = ({
           <span>Paste</span>
         </button>
 
-        {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
+        {(nodes.filter(n => n.selected && n.type !== 'container').length > 0 || edges.filter(e => e.selected).length > 0) && (
           <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
         )}
-        {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
+        {(nodes.filter(n => n.selected && n.type !== 'container').length > 0 || edges.filter(e => e.selected).length > 0) && (
           <>
-            <button
-              className="mode-btn"
-              onClick={() => {
-                handleCopy();
-                setIsCopied(true);
-                setTimeout(() => setIsCopied(false), 1500);
-              }}
-              title="Copy Selected Nodes"
-            >
-              {isCopied ? <CheckSquare size={14} style={{ color: 'var(--color-success)' }} /> : <Copy size={14} />}
-              <span style={isCopied ? { color: 'var(--color-success)', fontWeight: 600 } : {}}>
-                {isCopied ? 'Copied!' : 'Copy'}
-              </span>
-            </button>
+            {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
+              <button
+                className="mode-btn"
+                onClick={() => {
+                  handleCopy();
+                  setIsCopied(true);
+                  setTimeout(() => setIsCopied(false), 1500);
+                }}
+                title="Copy Selected Nodes"
+              >
+                {isCopied ? <CheckSquare size={14} style={{ color: 'var(--color-success)' }} /> : <Copy size={14} />}
+                <span style={isCopied ? { color: 'var(--color-success)', fontWeight: 600 } : {}}>
+                  {isCopied ? 'Copied!' : 'Copy'}
+                </span>
+              </button>
+            )}
             <button
               className="mode-btn"
               onClick={handleDelete}
@@ -366,20 +394,21 @@ const CanvasContent = ({
               <Trash2 size={14} />
               <span>Delete</span>
             </button>
-            <button
-              className="mode-btn"
-              onClick={() => {
-                const selectedNodes = nodes.filter(n => n.selected && n.type !== 'container');
-                if (selectedNodes.length === 0) return;
-                
-                // Calculate bounding box
-                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                selectedNodes.forEach(n => {
-                  if (n.position.x < minX) minX = n.position.x;
-                  if (n.position.y < minY) minY = n.position.y;
-                  if (n.position.x + (n.width || 150) > maxX) maxX = n.position.x + (n.width || 150);
-                  if (n.position.y + (n.height || 60) > maxY) maxY = n.position.y + (n.height || 60);
-                });
+            {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
+              <button
+                className="mode-btn"
+                onClick={() => {
+                  const selectedNodes = nodes.filter(n => n.selected && n.type !== 'container');
+                  if (selectedNodes.length === 0) return;
+                  
+                  // Calculate bounding box
+                  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                  selectedNodes.forEach(n => {
+                    if (n.position.x < minX) minX = n.position.x;
+                    if (n.position.y < minY) minY = n.position.y;
+                    if (n.position.x + (n.width || 150) > maxX) maxX = n.position.x + (n.width || 150);
+                    if (n.position.y + (n.height || 60) > maxY) maxY = n.position.y + (n.height || 60);
+                  });
 
                 // Add padding
                 minX -= 40;
@@ -404,6 +433,7 @@ const CanvasContent = ({
               <Box size={14} />
               <span>Put in Container</span>
             </button>
+            )}
           </>
         )}
       </div>

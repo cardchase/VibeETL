@@ -1,6 +1,7 @@
 import React, { memo, useState } from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
 import * as Icons from 'lucide-react';
+import { useLayout } from '../contexts/LayoutContext';
 
 const CustomNode = ({ id, data, selected, type }) => {
   const IconComponent = data.icon ? (Icons[data.icon] || Icons.Square) : Icons.Square;
@@ -9,6 +10,9 @@ const CustomNode = ({ id, data, selected, type }) => {
   
   const [isHoveringCancel, setIsHoveringCancel] = useState(false);
   const reactFlow = useReactFlow();
+  const { layoutDirection } = useLayout();
+  const sourcePosition = layoutDirection === 'horizontal' ? Position.Right : Position.Bottom;
+  const targetPosition = layoutDirection === 'horizontal' ? Position.Left : Position.Top;
 
   // Determine display description dynamically based on common parameter fields (supports custom tools out-of-the-box!)
   let description = '';
@@ -38,12 +42,28 @@ const CustomNode = ({ id, data, selected, type }) => {
     description = data.description;
   }
 
+  let filterCondition = '';
+  if (type === 'filter') {
+    if (data?.parameters?.filter_type === 'custom' && data?.parameters?.custom_expression) {
+      const expr = data.parameters.custom_expression;
+      filterCondition = `EXP: ${expr.length > 25 ? expr.substring(0, 25) + '...' : expr}`;
+    } else if (data?.parameters?.column) {
+      const op = data.parameters.operator || '';
+      const val = data.parameters.value !== undefined && data.parameters.value !== '' ? ` '${data.parameters.value}'` : '';
+      filterCondition = `[${data.parameters.column}] ${op}${val}`.trim();
+    }
+  }
+
   // If node has executed successfully, replace the sub-label with the output row counts!
   if (status === 'success' && data?.resultSummary) {
     if (type === 'filter' && data.resultSummary.ports) {
       const trueCount = data.resultSummary.ports['true']?.row_count || 0;
       const falseCount = data.resultSummary.ports['false']?.row_count || 0;
-      description = `T: ${trueCount} | F: ${falseCount} rows`;
+      description = filterCondition ? `${filterCondition}\nT: ${trueCount} | F: ${falseCount} rows` : `T: ${trueCount} | F: ${falseCount} rows`;
+    } else if (type === 'unique' && data.resultSummary.ports) {
+      const uniqueCount = data.resultSummary.ports['unique']?.row_count || 0;
+      const duplicateCount = data.resultSummary.ports['duplicate']?.row_count || 0;
+      description = `U: ${uniqueCount} | D: ${duplicateCount} rows`;
     } else if (type === 'join') {
       const edges = reactFlow.getEdges();
       const nodes = reactFlow.getNodes();
@@ -110,7 +130,7 @@ const CustomNode = ({ id, data, selected, type }) => {
           <div className="join-port-label left-label">L</div>
           <Handle
             type="target"
-            position={Position.Left}
+            position={targetPosition}
             id="left"
             style={{ top: '30%' }}
             className="node-handle left-handle join-left-handle"
@@ -119,17 +139,38 @@ const CustomNode = ({ id, data, selected, type }) => {
           <div className="join-port-label right-label">R</div>
           <Handle
             type="target"
-            position={Position.Left}
+            position={targetPosition}
             id="right"
             style={{ top: '70%' }}
             className="node-handle left-handle join-right-handle"
             onClick={(e) => handleAnchorClick(e, 'target', 'right')}
           />
         </>
-      ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'folder_input', 'folderInput', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn', 'odds_portal_scraper', 'oddsPortalScraper'].includes(type)) ? (
+      ) : type === 'predictor' ? (
+        <>
+          <div className="join-port-label left-label" title="Historical / Training Data" style={{background: '#8b5cf6', color: 'white'}}>H</div>
+          <Handle
+            type="target"
+            position={targetPosition}
+            id="historical"
+            style={{ top: '30%' }}
+            className="node-handle left-handle join-left-handle"
+            onClick={(e) => handleAnchorClick(e, 'target', 'historical')}
+          />
+          <div className="join-port-label right-label" title="Upcoming / Predict Data" style={{background: '#0ea5e9', color: 'white'}}>U</div>
+          <Handle
+            type="target"
+            position={targetPosition}
+            id="upcoming"
+            style={{ top: '70%' }}
+            className="node-handle left-handle join-right-handle"
+            onClick={(e) => handleAnchorClick(e, 'target', 'upcoming')}
+          />
+        </>
+      ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'folder_input', 'folderInput', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn', 'odds_portal_scraper', 'oddsPortalScraper', 'odds_portal_upcoming', 'oddsPortalUpcoming'].includes(type)) ? (
         <Handle
           type="target"
-          position={Position.Left}
+          position={targetPosition}
           id="input"
           className="node-handle left-handle"
           onClick={(e) => handleAnchorClick(e, 'target', 'input')}
@@ -157,7 +198,7 @@ const CustomNode = ({ id, data, selected, type }) => {
             onMouseLeave={() => setIsHoveringCancel(false)}
             onClick={(e) => {
               e.stopPropagation();
-              fetch(`http://localhost:8000/api/cancel/${id}?session_id=${window.sessionId}`, { method: 'POST' }).catch(console.error);
+              fetch(`http://localhost:8001/api/cancel/${id}?session_id=${window.sessionId}`, { method: 'POST' }).catch(console.error);
             }}
             style={{ cursor: 'pointer', pointerEvents: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
@@ -191,7 +232,7 @@ const CustomNode = ({ id, data, selected, type }) => {
           {data?.label || 'Node'} {id.match(/_(\d+)$/) ? `[${id.match(/_(\d+)$/)[1]}]` : ''}
         </div>
         {description && (
-          <div className="node-label-sub" title={description}>
+          <div className="node-label-sub" title={description} style={{ whiteSpace: 'pre-line', lineHeight: '1.2' }}>
             {description}
           </div>
         )}
@@ -203,7 +244,7 @@ const CustomNode = ({ id, data, selected, type }) => {
           <div className="filter-port-label true-label">T</div>
           <Handle
             type="source"
-            position={Position.Right}
+            position={sourcePosition}
             id="true"
             style={{ top: '30%' }}
             className="node-handle right-handle true-handle"
@@ -212,17 +253,38 @@ const CustomNode = ({ id, data, selected, type }) => {
           <div className="filter-port-label false-label">F</div>
           <Handle
             type="source"
-            position={Position.Right}
+            position={sourcePosition}
             id="false"
             style={{ top: '70%' }}
             className="node-handle right-handle false-handle"
             onClick={(e) => handleAnchorClick(e, 'source', 'false')}
           />
         </>
+      ) : type === 'unique' ? (
+        <>
+          <div className="filter-port-label true-label" style={{background: '#10b981', color: 'white'}}>U</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="unique"
+            style={{ top: '30%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'unique')}
+          />
+          <div className="filter-port-label false-label" style={{background: '#f43f5e', color: 'white'}}>D</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="duplicate"
+            style={{ top: '70%' }}
+            className="node-handle right-handle false-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'duplicate')}
+          />
+        </>
       ) : (!['browse', 'file_output', 'fileOutput', 'database_output', 'databaseOutput', 'gcs_out', 'gcsOut', 'google_sheets_out', 'googleSheetsOut'].includes(type)) ? (
         <Handle
           type="source"
-          position={Position.Right}
+          position={sourcePosition}
           id="output"
           className="node-handle right-handle"
           onClick={(e) => handleAnchorClick(e, 'source', 'output')}

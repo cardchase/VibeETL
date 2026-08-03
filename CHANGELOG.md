@@ -47,3 +47,10 @@ Today we implemented a significant number of architectural, backend, and UI/UX i
 - Upgraded the `Image Ingest` tool to explicitly check `self.is_cancelled()` during its image batch loop, allowing it to safely abort mid-execution without waiting for 100+ images to finish processing. Downstream nodes naturally fail due to missing dependencies, while upstream cached data remains fully intact.
 - Resolved a critical threadpool deadlock issue where the development server would hang completely if auto-reloaded while a background execution thread was running an uncancellable loop.
 - Built a high-concurrency **OddsPortal Web Scraper** using Playwright Stealth. Mitigated React DOM race conditions with aggressive JS injection checks and 15s element wait tolerances. Guaranteed full data-scrape pipelines for betting odds using strict regex clamps.
+## August 3, 2026 - UI Redesign & Tool Updates
+- Redesigned the Canvas Top Toolbar UI: Moved execution actions (Run/Stop/Undo/Redo) to the inline top right panel for a cleaner workspace.
+- Upgraded the Formula Compute and Filter tools with robust multi-column logic and real-time expression validation.
+
+## August 3, 2026 - Sports Data Pipeline (WIP)
+- Built robust OddsPortal Upcoming & Historical Scrapers handling complex dynamic React DOM elements and async tabs.
+- Added a Predictor ML node specifically designed for predicting match outcomes with intelligent imputation.

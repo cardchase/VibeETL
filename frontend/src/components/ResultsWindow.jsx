@@ -12,9 +12,15 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
   const [prevNodeId, setPrevNodeId] = useState(null);
   const [copied, setCopied] = useState(false);
   const [dataCopied, setDataCopied] = useState(false);
+  const [showCopyMenu, setShowCopyMenu] = useState(false);
   const [wrapText, setWrapText] = useState(false);
+  const [compactCols, setCompactCols] = useState(false);
   const [selectedRowCount, setSelectedRowCount] = useState(0);
   const [previewImage, setPreviewImage] = useState(null);
+  
+  // Full data fetch state
+  const [fullData, setFullData] = useState(null);
+  const [isLoadingFull, setIsLoadingFull] = useState(false);
   
   const gridRef = useRef(null);
 
@@ -26,6 +32,8 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
     setPrevNodeId(nodeId);
     setSelectedPort(null);
     setSelectedRowCount(0);
+    setFullData(null);
+    setIsLoadingFull(false);
   }
 
   const nodeResult = nodeId ? results?.[nodeId] : null;
@@ -41,7 +49,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
   const rawPreviewData = activePortData ? (activePortData.preview || []) : (nodeResult?.preview || []);
   const rowCount = activePortData ? (activePortData.row_count || 0) : (nodeResult?.row_count || 0);
   // Data for AG Grid
-  const previewData = rawPreviewData;
+  const previewData = fullData || rawPreviewData;
   const colCount = activePortData ? (activePortData.column_count || 0) : (nodeResult?.column_count || 0);
 
   // AG Grid Column Definitions
@@ -83,7 +91,28 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
     }
   }, []);
 
+  // Fetch full data on demand
+  const handleLoadFullData = async () => {
+    setIsLoadingFull(true);
+    try {
+      const sessionId = window.sessionId || 'default';
+      const portParam = activePort ? `&port=${activePort}` : '';
+      const res = await fetch(`http://localhost:8001/api/node/data?session_id=${sessionId}&node_id=${nodeId}${portParam}`);
+      if (!res.ok) throw new Error("Failed to fetch full data");
+      const data = await res.json();
+      setFullData(data.rows || []);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to load full dataset.");
+    } finally {
+      setIsLoadingFull(false);
+    }
+  };
 
+  // Reset full data when active port changes
+  useEffect(() => {
+    setFullData(null);
+  }, [activePort]);
   
   const duration = nodeResult?.duration_ms || 0;
   const error = nodeResult?.error;
@@ -112,19 +141,24 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
     });
   };
 
-  const handleCopyData = useCallback(() => {
-    if (!gridRef.current || !gridRef.current.api) return;
+  const handleCopyData = useCallback((maxRows = null, includeHeaders = true) => {
+    if (!gridRef.current || !schema) return;
+    setShowCopyMenu(false);
     
     let rowsToCopy = [];
     const selectedRows = gridRef.current.api.getSelectedRows();
     
-    if (selectedRows.length > 0) {
+    if (selectedRows.length > 0 && maxRows === null) {
       rowsToCopy = selectedRows;
     } else {
       // Get all sorted/filtered rows
       gridRef.current.api.forEachNodeAfterFilterAndSort((node) => {
         rowsToCopy.push(node.data);
       });
+    }
+    
+    if (maxRows !== null) {
+        rowsToCopy = rowsToCopy.slice(0, maxRows);
     }
     
     if (rowsToCopy.length === 0) return;
@@ -137,7 +171,15 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
       }).join('\t');
     }).join('\n');
     
-    const clipboardText = headers + '\n' + rowsText;
+    let clipboardText = '';
+    const nodeLabel = selectedNode?.data?.label || selectedNode?.id || 'Unknown';
+    const toolType = selectedNode?.data?.type || selectedNode?.type || 'Tool';
+    clipboardText += `[VibeETL Export] Tool: ${nodeLabel} (${toolType}) | Rows copied: ${rowsToCopy.length}\n`;
+    
+    if (includeHeaders) {
+        clipboardText += headers + '\n';
+    }
+    clipboardText += rowsText;
     
     navigator.clipboard.writeText(clipboardText).then(() => {
       setDataCopied(true);
@@ -165,13 +207,34 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
       {/* Header and Tabs */}
       <div className="results-header">
         <div className="results-tabs">
-          <button
-            className={`results-tab ${activeTab === 'data' ? 'active' : ''}`}
-            onClick={() => setActiveTab('data')}
-          >
-            <Database size={14} />
-            <span>Data Preview</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <button
+              className={`results-tab ${activeTab === 'data' ? 'active' : ''}`}
+              onClick={() => setActiveTab('data')}
+            >
+              <Database size={14} />
+              <span>Data Preview</span>
+            </button>
+            {rowCount > rawPreviewData.length && !fullData && activeTab === 'data' && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleLoadFullData(); }}
+                disabled={isLoadingFull}
+                style={{
+                  marginLeft: '8px',
+                  padding: '2px 8px',
+                  fontSize: '0.75rem',
+                  backgroundColor: '#ebf5ff',
+                  color: '#1d4ed8',
+                  borderRadius: '4px',
+                  border: '1px solid #bfdbfe',
+                  cursor: isLoadingFull ? 'not-allowed' : 'pointer',
+                  opacity: isLoadingFull ? 0.5 : 1
+                }}
+              >
+                {isLoadingFull ? 'Loading...' : `Load All ${rowCount.toLocaleString()} Rows`}
+              </button>
+            )}
+          </div>
           <button
             className={`results-tab ${activeTab === 'logs' ? 'active' : ''}`}
             onClick={() => setActiveTab('logs')}
@@ -338,6 +401,30 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
                       <label style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: 'var(--text-secondary)' }}>
                         <input 
                           type="checkbox" 
+                          checked={compactCols} 
+                          onChange={(e) => {
+                            const isCompact = e.target.checked;
+                            setCompactCols(isCompact);
+                            if (gridRef.current && gridRef.current.api) {
+                              const allColumns = gridRef.current.api.getColumns();
+                              if (allColumns) {
+                                if (isCompact) {
+                                  allColumns.forEach(col => {
+                                    gridRef.current.api.setColumnWidth(col, 100);
+                                  });
+                                } else {
+                                  gridRef.current.api.autoSizeColumns(allColumns, false);
+                                }
+                              }
+                            }
+                          }} 
+                          style={{ margin: 0 }}
+                        />
+                        Compact Columns
+                      </label>
+                      <label style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                        <input 
+                          type="checkbox" 
                           checked={wrapText} 
                           onChange={(e) => {
                             setWrapText(e.target.checked);
@@ -355,7 +442,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
                         className="copy-logs-btn" 
                         onClick={async () => {
                           try {
-                            const res = await fetch(`http://localhost:8000/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}&session_id=${activeTabId}`);
+                            const res = await fetch(`http://localhost:8001/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}&session_id=${activeTabId}`);
                             if (!res.ok) {
                               const errData = await res.json();
                               alert(`Download failed: ${errData.detail || res.statusText}`);
@@ -387,10 +474,21 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
                         <FileText size={12} />
                         Download CSV
                       </button>
-                      <button className="copy-logs-btn" onClick={handleCopyData}>
-                        {dataCopied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
-                        {dataCopied ? "Copied Data" : (selectedRowCount > 0 ? "Copy Selected Rows" : "Copy Preview Data")}
-                      </button>
+                      <div style={{ position: 'relative' }}>
+                        <button className="copy-logs-btn" onClick={() => setShowCopyMenu(!showCopyMenu)}>
+                          {dataCopied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
+                          {dataCopied ? "Copied" : (selectedRowCount > 0 ? "Copy Selected" : "Copy Data ▾")}
+                        </button>
+                        {showCopyMenu && (
+                          <div style={{ position: 'absolute', top: '100%', right: 0, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px', zIndex: 100, display: 'flex', flexDirection: 'column', minWidth: '160px', marginTop: '4px', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
+                            <button style={{ padding: '8px 12px', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', fontSize: '11px', fontWeight: 600 }} onClick={() => handleCopyData(null, true)}>Copy All (With Headers)</button>
+                            <button style={{ padding: '8px 12px', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', fontSize: '11px', fontWeight: 600 }} onClick={() => handleCopyData(null, false)}>Copy All (No Headers)</button>
+                            <button style={{ padding: '8px 12px', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', fontSize: '11px', fontWeight: 600 }} onClick={() => handleCopyData(5, true)}>Copy First 5 Rows</button>
+                            <button style={{ padding: '8px 12px', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', fontSize: '11px', fontWeight: 600 }} onClick={() => handleCopyData(10, true)}>Copy First 10 Rows</button>
+                            <button style={{ padding: '8px 12px', textAlign: 'left', background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }} onClick={() => handleCopyData(20, true)}>Copy First 20 Rows</button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="ag-theme-quartz" style={{ flex: 1, width: '100%', minHeight: 0 }}>
@@ -404,9 +502,10 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
                       enableCellTextSelection={true}
                       suppressRowClickSelection={true}
                       rowMultiSelectWithClick={true}
-                      autoSizeStrategy={{ type: 'fitCellContents' }}
+                      autoSizeStrategy={compactCols ? null : { type: 'fitCellContents' }}
                       suppressColumnVirtualisation={true}
                       defaultColDef={{
+                        width: compactCols ? 100 : undefined,
                         sortable: true,
                         filter: true,
                         resizable: true,
@@ -445,6 +544,15 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
                       paginationPageSize={100}
                     />
                   </div>
+                  <div className="text-xs text-gray-500 flex items-center justify-between w-64 border-l border-gray-300 pl-4 h-6">
+                    {fullData ? (
+                      <span>All {previewData.length} of {rowCount} rows loaded</span>
+                    ) : (
+                      <span>Previewing {previewData.length} of {rowCount} rows</span>
+                    )}
+                    <span className="text-gray-400">|</span>
+                    <span>{colCount} cols</span>
+                  </div>
                 </div>
               ) : (
                 <div className="no-node-selected" style={{ padding: 20 }}>
@@ -467,9 +575,9 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
               <div style={{ color: 'var(--text-muted)' }}>Console is empty. Run the workflow to generate logs.</div>
             ) : (
               <>
-                {globalLogs.length > 0 && (
+                {!selectedNode && globalLogs.length > 0 && (
                   <div style={{ marginBottom: selectedNode ? 20 : 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8, position: 'sticky', top: 0, backgroundColor: '#0f172a', zIndex: 10, paddingTop: 4 }}>
                       <div style={{ color: 'var(--color-accent)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <FileText size={12} /> GLOBAL ENGINE SYSTEM LOGS
                       </div>
@@ -487,16 +595,14 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
                 )}
                 {selectedNode && (
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--color-inout)', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8, marginTop: globalLogs.length > 0 ? 16 : 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--color-inout)', fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: 4, marginBottom: 8, marginTop: globalLogs.length > 0 ? 16 : 0, position: 'sticky', top: 0, backgroundColor: '#0f172a', zIndex: 10, paddingTop: 4 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Terminal size={12} /> SELECTED NODE LOGS ({selectedNode.data?.label || selectedNode.id})
                       </div>
-                      {globalLogs.length === 0 && (
-                        <button className="copy-logs-btn" onClick={handleCopyLogs}>
-                          {copied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
-                          {copied ? "Copied" : "Copy Logs"}
-                        </button>
-                      )}
+                      <button className="copy-logs-btn" onClick={handleCopyLogs}>
+                        {copied ? <Check size={12} color="var(--color-inout)" /> : <Copy size={12} />}
+                        {copied ? "Copied" : "Copy Logs"}
+                      </button>
                     </div>
                     {nodeLogs.length > 0 ? (
                       nodeLogs.map((log, idx) => (
@@ -529,7 +635,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
         }} onClick={() => setPreviewImage(null)}>
           <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
             <img 
-              src={`http://localhost:8000/api/local-image?path=${encodeURIComponent(previewImage)}`} 
+              src={`http://localhost:8001/api/local-image?path=${encodeURIComponent(previewImage)}`} 
               style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', backgroundColor: 'white' }}
               alt="Preview"
               onClick={(e) => e.stopPropagation()}

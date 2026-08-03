@@ -82,6 +82,11 @@ const resolveNodeSchema = (nodeId, nodes, edges, results = {}) => {
   const node = nodes.find(n => n.id === nodeId);
   if (!node) return [];
 
+  // Prioritize actual executed schema if available (essential for nodes with dynamic schemas like Dynamic Input)
+  if (results && results[nodeId] && results[nodeId].schema && results[nodeId].schema.length > 0) {
+    return results[nodeId].schema;
+  }
+
   // File Input returns its detected schema
   if (node.type === 'fileInput') {
     return node.data?.parameters?.detectedSchema || [];
@@ -253,7 +258,7 @@ const getInitialTabs = () => {
   }];
 };
 
-function App() {
+function App({ isSandbox = false }) {
   const [tabs, setTabs] = useState(getInitialTabs());
   const [activeTabId, setActiveTabId] = useState(tabs[0]?.id || 'tab-1');
 
@@ -276,6 +281,7 @@ function App() {
   }, [isRunningMap]);
 
   const isRunning = isRunningMap[activeTabId] || false;
+  const executeInFlightRef = React.useRef({}); // Tracks if an execute POST request is currently in flight for a given tabId
   const setIsRunning = useCallback((val, tabId = activeTabId) => {
     setIsRunningMap(prev => ({ ...prev, [tabId]: typeof val === 'function' ? val(prev[tabId]) : val }));
   }, [activeTabId]);
@@ -452,12 +458,18 @@ function App() {
 
   // Topological Sort for UI Node Numbering
   useEffect(() => {
-    if (!nodes || nodes.length === 0) return;
-    
-    const inDegree = {};
-    const adj = {};
-    nodes.forEach(n => { inDegree[n.id] = 0; adj[n.id] = []; });
-    edges.forEach(e => {
+    try {
+      if (!nodes || nodes.length === 0) return;
+      
+      const inDegree = {};
+      const adj = {};
+      nodes.forEach(n => {
+        if (!n) console.error('CRITICAL BUG: n is falsy!', n, 'Nodes array:', nodes);
+        if (!n.id) console.error('CRITICAL BUG: n.id is missing!', n);
+        inDegree[n.id] = 0;
+        adj[n.id] = [];
+      });
+      edges.forEach(e => {
       if (inDegree[e.target] !== undefined && adj[e.source]) {
         inDegree[e.target]++;
         adj[e.source].push(e.target);
@@ -500,6 +512,9 @@ function App() {
         }
         return n;
       }));
+    }
+    } catch (err) {
+      console.error('Topological Sort Error:', err, 'Nodes:', nodes);
     }
   }, [edges, nodes.length, setNodes]);
 
@@ -1021,9 +1036,6 @@ function App() {
 
     setIsDirty(true);
     
-    // Save the active workflow (legacy fallback)
-    localStorage.setItem('vibeetl_autosave_workflow', JSON.stringify({ nodes, edges }));
-    
     // Critcal Fix: Synchronize the active canvas state into the tabs array before saving!
     const syncedTabs = tabs.map(t => {
       if (t.id === activeTabId) {
@@ -1031,7 +1043,19 @@ function App() {
       }
       return t;
     });
-    localStorage.setItem('vibeetl_autosave_workflow_tabs', JSON.stringify(syncedTabs));
+
+    // Strip heavy execution data before saving to localStorage
+    const strippedTabs = syncedTabs.map(t => {
+      const { results, globalLogs, ...rest } = t;
+      return rest;
+    });
+    
+    try {
+      localStorage.setItem('vibeetl_autosave_workflow', JSON.stringify({ nodes, edges }));
+      localStorage.setItem('vibeetl_autosave_workflow_tabs', JSON.stringify(strippedTabs));
+    } catch (err) {
+      console.warn('LocalStorage quota exceeded. Falling back to backend autosave only.', err);
+    }
 
     const timer = setTimeout(() => {
       const activeTabTitle = tabs.find(t => t.id === activeTabId)?.name || 'Untitled_Workflow';
@@ -1058,8 +1082,52 @@ function App() {
   }, [isDirty]);
   const [autoRun, setAutoRun] = useState(false);
   const [availableTools, setAvailableTools] = useState([]);
-  const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [sidebarWidth, setSidebarWidth] = useState(380);
   const isResizing = React.useRef(false);
+
+  const lastSelectedNodeRef = React.useRef(null);
+
+  // Handle dynamic config sidebar width based on selected tool
+  useEffect(() => {
+    if (selectedNodeId) {
+      if (selectedNodeId !== lastSelectedNodeRef.current) {
+        lastSelectedNodeRef.current = selectedNodeId;
+        const selectedNode = nodes.find(n => n.id === selectedNodeId);
+        if (selectedNode) {
+          const tool = availableTools.find(t => t.id === selectedNode.type);
+          if (tool) {
+            let optimalWidth = 380; // Default for simple tools
+            
+            // Heuristics for determining optimal width based on tool complexity
+            if (tool.ui_schema && tool.ui_schema.length > 2) {
+               optimalWidth = 380;
+            }
+            
+            // Specific tools known to have wide/complex configuration interfaces
+            if (['filter', 'formula', 'dynamicInput', 'sqlExecute', 'join', 'select', 'unique'].includes(tool.id)) {
+               optimalWidth = 380;
+            }
+            
+            // Explicit manifest override if provided
+            if (tool.defaultWidth) {
+               optimalWidth = tool.defaultWidth;
+            }
+            
+            setSidebarWidth(optimalWidth);
+          }
+        }
+      }
+    } else {
+      // Revert to default narrow width when nothing is selected
+      if (lastSelectedNodeRef.current !== null) {
+        lastSelectedNodeRef.current = null;
+        setSidebarWidth(380);
+       } else {
+        // Just opened it normally
+        setSidebarWidth(380);
+      }
+    }
+  }, [selectedNodeId, nodes, availableTools]);
 
   const startResizing = useCallback((mouseDownEvent) => {
     isResizing.current = true;
@@ -1069,7 +1137,7 @@ function App() {
     const handleMouseMove = (mouseMoveEvent) => {
       if (!isResizing.current) return;
       const newWidth = mouseMoveEvent.clientX;
-      if (newWidth > 220 && newWidth < 700) {
+      if (newWidth > 220 && newWidth < 1200) {
         setSidebarWidth(newWidth);
       }
     };
@@ -1117,14 +1185,20 @@ function App() {
   // Fetch dynamic tools and check backend connection status
   useEffect(() => {
     const fetchToolsAndStatus = () => {
-      fetch(`${API_BASE}/api/tools`)
+      const url = isSandbox ? `${API_BASE}/api/sandbox/tools` : `${API_BASE}/api/tools`;
+      fetch(url)
         .then(res => {
           if (!res.ok) throw new Error("Backend not OK");
           setIsBackendConnected(true);
           return res.json();
         })
         .then(data => {
-          if (data.tools) setAvailableTools(data.tools);
+          if (data.tools) {
+            setAvailableTools(prev => {
+              if (JSON.stringify(prev) === JSON.stringify(data.tools)) return prev;
+              return data.tools;
+            });
+          }
         })
         .catch(err => {
           setIsBackendConnected(false);
@@ -1137,7 +1211,7 @@ function App() {
     // Poll every 5 seconds to keep connection status alive
     const interval = setInterval(fetchToolsAndStatus, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isSandbox]);
 
   // Handles adding wire connections between nodes
   const onConnect = useCallback(
@@ -1168,13 +1242,24 @@ function App() {
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id === nodeId) {
-          // If params changed, we reset status to idle
+          // Check if core parameters actually changed (ignoring isCached)
+          const oldParams = { ...(node.data.parameters || {}) };
+          delete oldParams.isCached;
+          const newParamsWithoutCache = { ...newParams };
+          delete newParamsWithoutCache.isCached;
+          
+          const paramsChanged = JSON.stringify(oldParams) !== JSON.stringify(newParamsWithoutCache);
+
+          // If params changed, we reset status to idle and clear the cache lock
           return {
             ...node,
             data: {
               ...node.data,
               status: 'idle',
-              parameters: newParams
+              parameters: {
+                ...newParams,
+                isCached: paramsChanged ? false : newParams.isCached
+              }
             }
           };
         }
@@ -1296,44 +1381,104 @@ function App() {
       }
     }
 
-    const maxId = nodes.reduce((max, n) => {
+    const anchorNode = anchorNodeId ? nodes.find(n => n.id === anchorNodeId) : null;
+    let sourceHandles = ['output'];
+    
+    if (anchorNode) {
+      const multiOutputMap = {
+        'filter': ['true', 'false'],
+        'unique': ['unique', 'duplicate'],
+        'split': ['1', '2']
+      };
+      const terminalNodes = ['browse', 'file_output', 'fileOutput', 'database_output', 'databaseOutput', 'gcs_out', 'gcsOut', 'google_sheets_out', 'googleSheetsOut'];
+      
+      if (multiOutputMap[anchorNode.type]) {
+        sourceHandles = multiOutputMap[anchorNode.type];
+      } else if (terminalNodes.includes(anchorNode.type)) {
+        sourceHandles = [];
+      }
+    }
+
+    const multiInputNodes = ['union', 'join'];
+    const supportsMultipleInputs = multiInputNodes.includes(type);
+    const nodesToCreate = (!supportsMultipleInputs && sourceHandles.length > 1) ? sourceHandles.length : 1;
+
+    let currentMaxId = nodes.reduce((max, n) => {
       const match = n.id.match(/^node_(\d+)$/);
       if (match) {
         const num = parseInt(match[1], 10);
-        if (num < 1000000) { // Ignore huge legacy timestamp IDs
-          return Math.max(max, num);
-        }
+        if (num < 1000000) return Math.max(max, num);
       }
       return max;
     }, 0);
-    const newNodeId = `node_${maxId + 1}`;
 
-    const newNode = {
-      id: newNodeId,
-      type,
-      position,
-      data: {
-        label,
-        category,
-        icon,
-        parameters: defaultParams,
-        status: 'idle',
-        error: null
+    const newNodes = [];
+    const newEdges = [];
+
+    for (let i = 0; i < nodesToCreate; i++) {
+      currentMaxId++;
+      const newNodeId = `node_${currentMaxId}`;
+      
+      const nodePos = {
+        x: position.x,
+        y: position.y + (i * 90) // Stack nodes vertically if spawning multiple
+      };
+      
+      // If spawning multiple nodes for a single tool, append the port name to the label
+      const nodeLabel = nodesToCreate > 1 ? `${label} [${sourceHandles[i].charAt(0).toUpperCase()}]` : label;
+
+      const newNode = {
+        id: newNodeId,
+        type,
+        position: nodePos,
+        data: {
+          label: nodeLabel,
+          category,
+          icon,
+          parameters: defaultParams,
+          status: 'idle',
+          error: null
+        }
+      };
+      
+      newNodes.push(newNode);
+
+      if (anchorNodeId && sourceHandles.length > 0) {
+        const defaultTargetHandle = type === 'join' ? 'left' : 'input';
+        if (nodesToCreate > 1) {
+          // Connect 1-to-1: one port per duplicated node
+          const srcHandle = sourceHandles[i];
+          newEdges.push({
+            id: `edge_e${anchorNodeId}-${srcHandle}-${newNodeId}`,
+            source: anchorNodeId,
+            target: newNodeId,
+            sourceHandle: srcHandle,
+            targetHandle: defaultTargetHandle,
+            style: { stroke: '#9ca3af', strokeWidth: 2 }
+          });
+        } else {
+          // Connect N-to-1: all ports to the single multi-input node
+          sourceHandles.forEach(srcHandle => {
+            newEdges.push({
+              id: `edge_e${anchorNodeId}-${srcHandle}-${newNodeId}`,
+              source: anchorNodeId,
+              target: newNodeId,
+              sourceHandle: srcHandle,
+              targetHandle: defaultTargetHandle, // Note: joining T and F to 'left' for now
+              style: { stroke: '#9ca3af', strokeWidth: 2 }
+            });
+          });
+        }
       }
-    };
+    }
 
-    setNodes((nds) => nds.concat(newNode));
-    setSelectedNodeId(newNodeId);
-
-    if (anchorNodeId) {
-      setEdges((eds) => eds.concat({
-        id: `edge_e${anchorNodeId}-${newNodeId}`,
-        source: anchorNodeId,
-        target: newNodeId,
-        sourceHandle: 'output',
-        targetHandle: 'input',
-        style: { stroke: '#9ca3af', strokeWidth: 2 }
-      }));
+    setNodes((nds) => nds.concat(newNodes));
+    if (newEdges.length > 0) {
+      setEdges((eds) => eds.concat(newEdges));
+    }
+    
+    if (newNodes.length > 0) {
+      setSelectedNodeId(newNodes[newNodes.length - 1].id);
     }
   }, [setNodes, setEdges, availableTools, nodes]);
 
@@ -1369,6 +1514,16 @@ function App() {
       };
     }
 
+    // Special case for Union Node: resolve schemas for all incoming edges
+    if (activeNode.type === 'union') {
+      const incomingEdges = edges.filter(e => e.target === selectedNodeId);
+      return incomingEdges.map(e => ({
+        sourceId: e.source,
+        sourceName: nodes.find(n => n.id === e.source)?.data?.label || e.source,
+        schema: resolveNodeSchema(e.source, nodes, edges, results)
+      }));
+    }
+
     // Default behavior for nodes with a single generic 'input' port
     const incomingEdge = edges.find(
       (e) => e.target === selectedNodeId && (e.targetPort === 'input' || e.targetHandle === 'input')
@@ -1379,6 +1534,27 @@ function App() {
   }, [nodes, edges, selectedNodeId, results]);
 
   // Executes the pipeline DAG by sending the graph schema JSON to the backend
+  const handleStopPipeline = async () => {
+    if (window.confirm("Are you sure you want to stop the workflow execution?")) {
+      try {
+        await fetch(`${API_BASE}/api/cancel?session_id=${activeTabId}`, { method: 'POST' });
+        
+        // Immediately set status back to idle to avoid being stuck in running state
+        setIsRunning(false, activeTabId);
+        setGlobalLogs(prev => [...prev, '[SYSTEM] Cancel signal sent to server.']);
+        
+        setNodes(nds => nds.map(node => {
+          if (node.data.status === 'running' || node.data.status === 'waiting') {
+            return { ...node, data: { ...node.data, status: 'error', error: 'Pipeline cancelled by user' } };
+          }
+          return node;
+        }));
+      } catch (e) {
+        console.error("Failed to cancel pipeline:", e);
+      }
+    }
+  };
+
   const handleClearGlobalCache = () => {
     setNodes((nds) => nds.map(node => ({
       ...node,
@@ -1409,8 +1585,10 @@ function App() {
 
     // Build DAG JSON payload for FastAPI
     // We only need id, type, parameters for nodes, and connection ports for edges
+    const currentTabName = tabs.find(t => t.id === currentTabId)?.name || 'Untitled Workflow';
     const dagPayload = {
       session_id: currentTabId,
+      workflow_name: currentTabName,
       nodes: nodes.filter(n => n.type !== 'comment').map((n) => ({
         id: n.id,
         type: n.type,
@@ -1428,6 +1606,7 @@ function App() {
     };
 
     try {
+      executeInFlightRef.current[currentTabId] = true;
       const response = await fetch(`${API_BASE}/api/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1505,6 +1684,7 @@ function App() {
         }));
       }
     } finally {
+      executeInFlightRef.current[currentTabId] = false;
       setIsRunning(false, currentTabId);
     }
   };
@@ -1557,6 +1737,20 @@ function App() {
           .then(res => res.json())
           .then(data => {
             if (!data) return;
+            
+            if (data.is_running === false) {
+              // Only reset running state if we don't have an execute HTTP request in flight
+              if (!executeInFlightRef.current[tabId]) {
+                setIsRunningMap(prev => {
+                  if (!prev[tabId]) return prev;
+                  const newMap = { ...prev };
+                  newMap[tabId] = false;
+                  localStorage.setItem('vibeetl_is_running_map', JSON.stringify(newMap));
+                  return newMap;
+                });
+              }
+              return; // Stop processing this payload, the backend is not running
+            }
             
             if (tabId === activeTabIdRef.current) {
               if (data.statuses) {
@@ -1747,16 +1941,49 @@ function App() {
     return types;
   }, [availableTools]);
 
-  const handleSaveWorkflow = () => {
+  const handleSaveWorkflow = async () => {
     setIsDirty(false);
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ nodes, edges }));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    const activeTabName = tabs.find(t => t.id === activeTabId)?.name || 'workflow';
-    downloadAnchorNode.setAttribute("download", `${activeTabName}.json`);
-    document.body.appendChild(downloadAnchorNode); // required for firefox
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    const activeTabName = tabs.find(t => t.id === activeTabId)?.name || 'Untitled Workflow';
+    
+    try {
+      if (window.showSaveFilePicker) {
+        const fileHandle = await window.showSaveFilePicker({
+          suggestedName: `${activeTabName}.json`,
+          types: [{
+            description: 'VibeETL Workflow',
+            accept: { 'application/json': ['.json'] },
+          }],
+        });
+        
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify({ nodes, edges }));
+        await writable.close();
+        
+        // Update tab name to the new file name (removing .json extension if present)
+        let newName = fileHandle.name;
+        if (newName.endsWith('.json')) {
+          newName = newName.substring(0, newName.length - 5);
+        }
+        
+        setTabs(prev => prev.map(t => 
+          t.id === activeTabId ? { ...t, name: newName } : t
+        ));
+      } else {
+        // Fallback for browsers that don't support showSaveFilePicker
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ nodes, edges }));
+        const downloadAnchorNode = document.createElement('a');
+        downloadAnchorNode.setAttribute("href", dataStr);
+        downloadAnchorNode.setAttribute("download", `${activeTabName}.json`);
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error("Failed to save workflow:", err);
+        alert("Failed to save workflow. See console for details.");
+      }
+    }
   };
 
   const handleExportYAML = () => {
@@ -1857,6 +2084,7 @@ function App() {
       {/* 1. Tool Palette (Top Panel) */}
       <ToolPalette 
         onRunPipeline={handleRunPipeline} 
+        onStopPipeline={handleStopPipeline}
         onClearGlobalCache={handleClearGlobalCache}
         onSaveWorkflow={handleSaveWorkflow}
         onLoadWorkflow={handleLoadWorkflow}
@@ -1869,10 +2097,11 @@ function App() {
         onUpdateParams={handleUpdateParams}
         isChatOpen={isChatOpen}
         onToggleChat={() => setIsChatOpen(!isChatOpen)}
+        isSandbox={isSandbox}
       />
 
       {/* Workspace Area */}
-      <div className="workspace-container">
+      <div id="workspace-container" className="workspace-container" style={{ position: 'relative' }}>
         <ErrorBoundary>
           <ConfigWindow
             selectedNode={selectedNode}
@@ -1910,6 +2139,13 @@ function App() {
                     });
                   }
                 }}>{tab.name}</span>
+                {isRunningMap[tab.id] && (
+                  <span className="tab-spinner" title="Workflow is running">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                    </svg>
+                  </span>
+                )}
                 {tabs.length > 1 && (
                   <button 
                     className="tab-close-btn"

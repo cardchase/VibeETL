@@ -129,9 +129,9 @@ class FileInputNode(BaseNode):
 
         # Intelligent Frontend Guard Layer: Apply truncation strictly to the returned UI payload
         unleash_hardware = self.parameters.get("unleash_hardware", False)
-        if final_df.height > 1000 and not unleash_hardware:
-            self.log("⚠️ FRONTEND SAFEGUARD ACTIVE: Restricting preview streaming payload to top 1000 rows for UI rendering stability. Full dataset remains fully intact in-memory via Polars.")
-            return final_df.head(1000)
+        if final_df.height > 10000 and not unleash_hardware:
+            self.log("⚠️ FRONTEND SAFEGUARD ACTIVE: Restricting preview streaming payload to top 10000 rows for UI rendering stability. Full dataset remains fully intact in-memory via Polars.")
+            return final_df.head(10000)
         
         return final_df
 
@@ -171,7 +171,7 @@ class FileInputNode(BaseNode):
             separator=delimiter,
             has_header=has_header,
             encoding=encoding,
-            infer_schema_length=10000,
+            infer_schema_length=100000,
             null_values=["", "NA", "NaN", "null"],
             try_parse_dates=True
         )

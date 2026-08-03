@@ -10,6 +10,14 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, List
 from dotenv import load_dotenv
+import logging
+
+# Filter out /api/status endpoint from access logs to prevent terminal spam
+class EndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.args and len(record.args) >= 3 and "/api/status" not in record.args[2]
+
+logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 # Load environment variables from .env file
 load_dotenv()
@@ -28,7 +36,9 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",  # Vite default
-        "http://127.0.0.1:5173"
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -51,6 +61,8 @@ def get_tools():
     for node_id, node_class in NODE_CLASSES.items():
         if hasattr(node_class, 'MANIFEST') and node_class.MANIFEST:
             manifest = node_class.MANIFEST.copy()
+            if "id" not in manifest:
+                manifest["id"] = node_id
             # Ensure default_params is generated from ui_schema
             default_params = {}
             for field in manifest.get("ui_schema", []):
@@ -58,6 +70,50 @@ def get_tools():
             manifest["defaultParams"] = default_params
             tools.append(manifest)
     return {"tools": tools}
+
+import glob
+import importlib.util
+import os
+
+@app.get("/api/sandbox/tools")
+def get_sandbox_tools():
+    """
+    Returns regular tools + dynamically loaded tools from sandbox directory.
+    """
+    # Get regular tools
+    base_tools = get_tools()["tools"]
+    
+    sandbox_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sandbox"))
+    sandbox_files = glob.glob(os.path.join(sandbox_dir, "*.py"))
+    
+    for tool_file in sandbox_files:
+        if os.path.basename(tool_file) == "__init__.py": continue
+        
+        try:
+            module_name = f"sandbox.{os.path.basename(tool_file)[:-3]}"
+            spec = importlib.util.spec_from_file_location(module_name, tool_file)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            
+            # Find classes inheriting from BaseNode
+            from app.tools.base import BaseNode
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if isinstance(attr, type) and issubclass(attr, BaseNode) and attr is not BaseNode:
+                    if hasattr(attr, 'MANIFEST') and attr.MANIFEST:
+                        manifest = attr.MANIFEST.copy()
+                        if "id" not in manifest:
+                            manifest["id"] = manifest.get("type", "SandboxTool")
+                        default_params = {}
+                        for field in manifest.get("ui_schema", []):
+                            default_params[field["field"]] = field.get("default")
+                        manifest["defaultParams"] = default_params
+                        manifest["isSandbox"] = True
+                        base_tools.append(manifest)
+        except Exception as e:
+            print(f"Failed to load sandbox tool {tool_file}: {e}")
+            
+    return {"tools": base_tools}
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -194,11 +250,18 @@ async def execute_dag(pipeline: Dict[str, Any] = Body(...)):
     and executes nodes in order. Returns preview rows and execution logs for each node.
     """
     try:
+        session_id = pipeline.get("session_id", "default")
+        cache = cache_manager.get_cache(session_id)
+        if cache.get_is_running():
+            raise HTTPException(status_code=409, detail="Pipeline is already running for this session.")
+
         # Run the CPU-bound execution in a separate thread so we don't block the event loop
         result = await run_in_threadpool(execute_pipeline, pipeline)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error executing pipeline: {str(e)}")
+
+
 
 @app.get("/api/pick_save_file")
 def pick_save_file():
@@ -266,7 +329,8 @@ def get_status(session_id: str = "default"):
     cache = cache_manager.get_cache(session_id)
     return {
         "statuses": cache.get_status_payload(),
-        "global_logs": cache.get_global_logs()
+        "global_logs": cache.get_global_logs(),
+        "is_running": cache.get_is_running()
     }
 
 @app.post("/api/node/schema")
@@ -289,6 +353,36 @@ async def get_node_schema(payload: Dict[str, Any] = Body(...)):
         "schema": result.get("schema", []),
         "error": result.get("error")
     }
+
+@app.get("/api/node/data")
+async def get_node_data(session_id: str, node_id: str, port: str = None, limit: int = 100000):
+    """
+    Fetches raw dataframe data for a node on demand.
+    Bypasses the 100-row preview limit in the cache for full data viewing.
+    """
+    cache = cache_manager.get_cache(session_id)
+    if not cache:
+        return {"rows": []}
+        
+    df = cache.get_node_df(node_id, port if port else "output")
+    if df is None:
+        # Fallback if port="output" fails, try to get primary df directly
+        if node_id in cache._cache and cache._cache[node_id].get("_df") is not None:
+            df = cache._cache[node_id].get("_df")
+        else:
+            return {"rows": []}
+            
+    import math
+    def sanitize_nan(val):
+        if isinstance(val, float) and math.isnan(val):
+            return None
+        return val
+        
+    preview_df = df.head(limit)
+    preview_rows = preview_df.to_dicts()
+    preview_rows = [{k: sanitize_nan(v) for k, v in row.items()} for row in preview_rows]
+    
+    return {"rows": preview_rows, "row_count": df.height}
 
 from fastapi.responses import Response, StreamingResponse
 import io
@@ -393,7 +487,7 @@ async def autosave_workflow(pipeline: Dict[str, Any] = Body(...)):
             json.dump(pipeline, f)
             
         # Keep only the last 10 files
-        files = glob.glob(os.path.join(AUTOSAVES_DIR, "autosave_*.json"))
+        files = glob.glob(os.path.join(AUTOSAVES_DIR, "*_autosave_*.json"))
         files.sort() # Sorted by timestamp ascending because of %Y%m%d_%H%M%S format
         if len(files) > 10:
             for old_file in files[:-10]:
@@ -593,3 +687,14 @@ async def chat_assistant(req: ChatRequest):
         return {"response": response.text}
     except Exception as e:
         return {"response": f"AI Error: {str(e)}"}
+
+from pydantic import BaseModel
+class ErrorLog(BaseModel):
+    error: str
+
+@app.post('/api/log_error')
+async def log_error(log: ErrorLog):
+    print('============== FRONTEND CRASH ==============')
+    print(log.error)
+    print('==========================================')
+    return {'status': 'ok'}

@@ -1,7 +1,9 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import * as Icons from 'lucide-react';
-import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize } from 'lucide-react';
+import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize, Columns, Rows } from 'lucide-react';
 import { API_BASE } from '../config';
+import { useLayout } from '../contexts/LayoutContext';
 
 const CATEGORY_TITLES = {
   'favorites': '⭐ Favorites',
@@ -12,7 +14,8 @@ const CATEGORY_TITLES = {
   'misc': 'Miscellaneous'
 };
 
-const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode, isChatOpen, onToggleChat }) => {
+const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode, isChatOpen, onToggleChat, isSandbox }) => {
+  const { layoutDirection, toggleLayout } = useLayout();
   const fileInputRef = useRef(null);
   const dropdownRef = useRef(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -26,7 +29,12 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
   const authFileInputRef = useRef(null);
 
   const [runStatus, setRunStatus] = useState('idle');
+  const [workspaceNode, setWorkspaceNode] = useState(null);
   const prevIsRunning = useRef(isRunning);
+
+  useEffect(() => {
+    setWorkspaceNode(document.getElementById('workspace-container'));
+  }, []);
 
   useEffect(() => {
     if (prevIsRunning.current === true && isRunning === false) {
@@ -147,7 +155,7 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
     } catch (e) {
       console.warn("Failed to load favorites", e);
     }
-    return ['fileInput', 'browse', 'select', 'formula'];
+    return ['fileInput', 'browse', 'select', 'formula', 'unique'];
   });
 
   const toggleFavorite = (toolId, e) => {
@@ -162,7 +170,7 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
   };
 
   const resetFavorites = () => {
-    const defaultFavs = ['fileInput', 'browse', 'select', 'formula'];
+    const defaultFavs = ['fileInput', 'browse', 'select', 'formula', 'unique'];
     setFavoriteToolIds(defaultFavs);
     localStorage.removeItem('vibeetl_favorites');
   };
@@ -206,7 +214,10 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
       {/* Logo Section */}
       <div className="palette-logo">
         <div className="logo-icon">ETL</div>
-        <div className="logo-text">VibeETL</div>
+        <div className="logo-text">
+          VibeETL
+          {isSandbox && <span style={{ marginLeft: '10px', fontSize: '10px', background: '#ef4444', color: 'white', padding: '2px 6px', borderRadius: '4px', verticalAlign: 'middle', fontWeight: 'bold' }}>SANDBOX MODE</span>}
+        </div>
       </div>
 
       {/* Tool Categories Section */}
@@ -270,38 +281,28 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
               )}
             </div>
             <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              {Object.entries(categories).filter(([catKey]) => catKey !== 'favorites').map(([catKey, tools]) => {
-                const filteredTools = tools.filter(tool => 
+              {availableTools
+                .filter(tool => 
                   tool.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                   tool.id.toLowerCase().includes(searchQuery.toLowerCase())
-                );
-                
-                if (filteredTools.length === 0) return null;
-                
-                return (
-                  <div key={catKey}>
-                    <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', backgroundColor: '#f8fafc' }}>
-                      {CATEGORY_TITLES[catKey] || catKey.split(/[-_]/).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
-                    </div>
-                    {filteredTools.map(tool => (
-                      <div 
-                        key={tool.id}
-                        onClick={() => {
-                          window.dispatchEvent(new CustomEvent('vibe-add-node', { detail: { type: tool.id } }));
-                          setIsDropdownOpen(false);
-                          setSearchQuery('');
-                        }}
-                        style={{ padding: '8px 12px', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid #f1f5f9' }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                      >
-                        {React.createElement(Icons[tool.icon] || Icons.Square, { size: 14, style: { color: '#64748b' } })}
-                        <span style={{ fontWeight: 600, color: '#334155' }}>{tool.name}</span>
-                      </div>
-                    ))}
+                )
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(tool => (
+                  <div 
+                    key={tool.id}
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('vibe-add-node', { detail: { type: tool.id } }));
+                      setIsDropdownOpen(false);
+                      setSearchQuery('');
+                    }}
+                    style={{ padding: '8px 12px', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid #f1f5f9' }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    {React.createElement(Icons[tool.icon] || Icons.Square, { size: 14, style: { color: '#64748b' } })}
+                    <span style={{ fontWeight: 600, color: '#334155' }}>{tool.name}</span>
                   </div>
-                );
-              })}
+                ))}
             </div>
           </div>
         )}
@@ -377,12 +378,89 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
           </div>
         )})}
       </div>
+      
+      {/* Execution Actions Section - Inline Top Right */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        marginLeft: 'auto'
+      }}>
+        {/* Run / Stop */}
+        {runStatus === 'running' ? (
+          <button
+            className="run-button"
+            onClick={onStopPipeline}
+            style={{ background: '#ef4444', color: 'white', border: '1px solid #dc2626' }}
+            title="Stop the running pipeline"
+          >
+            <Icons.Square size={14} fill="white" strokeWidth={3} />
+          </button>
+        ) : (
+          <button
+            className="run-button"
+            onClick={onRunPipeline}
+            disabled={runStatus === 'completed'}
+            title="Run the entire pipeline from start to finish"
+          >
+            {runStatus === 'completed' ? (
+              <Icons.Check size={16} color="var(--color-success)" strokeWidth={3} />
+            ) : (
+              <Play size={16} fill="white" />
+            )}
+          </button>
+        )}
 
-      {/* Execution Actions Section */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0, marginLeft: 'auto' }}>
+        {/* Auto-Run */}
+        <label className="auto-run-label" style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none' }} title="Toggle automatic execution on parameter changes">
+          <input
+            type="checkbox"
+            checked={autoRun}
+            onChange={(e) => setAutoRun(e.target.checked)}
+            style={{ accentColor: 'var(--color-accent)', margin: 0 }}
+          />
+          Auto
+        </label>
+
+        {/* Cache controls */}
+        {selectedNode && (
+          <button
+            className="run-button"
+            style={{
+              background: selectedNode.data?.parameters?.isCached ? 'var(--color-error)' : 'var(--color-success)',
+              color: 'white',
+              border: '1px solid var(--border-color)'
+            }}
+            onClick={() => {
+              const currentlyCached = selectedNode.data?.parameters?.isCached;
+              onUpdateParams(selectedNode.id, { ...selectedNode.data?.parameters, isCached: !currentlyCached });
+            }}
+            disabled={isRunning}
+            title={selectedNode.data?.parameters?.isCached ? "Un-cache Selected Node" : "Cache Selected Node"}
+          >
+            <Icons.Database size={12} />
+          </button>
+        )}
+
+        <button
+          className="run-button"
+          style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5' }}
+          onClick={() => {
+            if (window.confirm("Are you sure you want to clear all cached nodes? This will un-cache everything on the canvas.")) {
+              onClearGlobalCache();
+            }
+          }}
+          title="Clear all cached nodes in the workflow"
+        >
+          <Icons.Trash2 size={14} />
+        </button>
+
+        <div className="divider-vertical" style={{ height: '24px', width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+        {/* Undo / Redo */}
         <button 
           className="run-button" 
-          style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', opacity: canUndo ? 1 : 0.5, cursor: canUndo ? 'pointer' : 'not-allowed', padding: '6px 10px' }} 
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', opacity: canUndo ? 1 : 0.5, cursor: canUndo ? 'pointer' : 'not-allowed' }} 
           onClick={() => canUndo && window.dispatchEvent(new CustomEvent('vibe-undo'))} 
           title="Undo"
         >
@@ -390,15 +468,16 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
         </button>
         <button 
           className="run-button" 
-          style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', opacity: canRedo ? 1 : 0.5, cursor: canRedo ? 'pointer' : 'not-allowed', padding: '6px 10px' }} 
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', opacity: canRedo ? 1 : 0.5, cursor: canRedo ? 'pointer' : 'not-allowed' }} 
           onClick={() => canRedo && window.dispatchEvent(new CustomEvent('vibe-redo'))} 
           title="Redo"
         >
           <Icons.Redo size={16} />
         </button>
-        
-        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)' }} />
 
+        <div className="divider-vertical" style={{ height: '24px', width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+        {/* File actions */}
         <input 
           type="file" 
           accept=".json" 
@@ -412,7 +491,13 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
         <button className="run-button" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }} onClick={onSaveWorkflow} title="Save Workflow">
           <Save size={16} />
         </button>
-        <button className="run-button" style={{ background: 'var(--color-accent)', color: 'white', border: '1px solid var(--border-color)', marginLeft: '4px' }} onClick={onExportYAML} title="Export Agent YAML">
+        <button className="run-button" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }} onClick={() => window.dispatchEvent(new CustomEvent('vibe-open-find'))} title="Find Tool on Canvas">
+          <Search size={16} />
+        </button>
+        
+        <div className="divider-vertical" style={{ height: '24px', width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+        <button className="run-button" style={{ background: 'var(--color-accent)', color: 'white', border: '1px solid var(--border-color)' }} onClick={onExportYAML} title="Export Agent YAML">
           <Bot size={16} />
         </button>
         <button 
@@ -420,8 +505,7 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
           style={{ 
             background: authStatus === 'authenticated' ? '#ecfdf5' : '#e8f0fe', 
             color: authStatus === 'authenticated' ? '#10b981' : '#1a73e8', 
-            border: `1px solid ${authStatus === 'authenticated' ? '#a7f3d0' : '#d2e3fc'}`, 
-            marginLeft: '4px',
+            border: `1px solid ${authStatus === 'authenticated' ? '#a7f3d0' : '#d2e3fc'}`,
             position: 'relative'
           }} 
           onClick={() => setIsAuthModalOpen(true)} 
@@ -434,9 +518,6 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
             </div>
           )}
         </button>
-
-        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
-
         <button 
           className="run-button" 
           style={{ 
@@ -448,107 +529,27 @@ const ToolPalette = ({ onRunPipeline, onSaveWorkflow, onLoadWorkflow, onExportYA
           onClick={onToggleChat} 
           title="Toggle AI Assistant"
         >
-          <span style={{ fontSize: '14px', marginRight: '4px' }}>✨</span>
-          <span>AI Chat</span>
-        </button>
-        
-        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
-
-        <label className="auto-run-label" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none' }} title="Toggle automatic execution on parameter changes">
-          <input
-            type="checkbox"
-            checked={autoRun}
-            onChange={(e) => setAutoRun(e.target.checked)}
-            style={{ accentColor: 'var(--color-accent)' }}
-          />
-          <span>Auto-Run</span>
-        </label>
-
-        <button
-          className="run-button"
-          style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5', marginLeft: '8px' }}
-          onClick={() => {
-            if (window.confirm("Are you sure you want to clear all cached nodes? This will un-cache everything on the canvas.")) {
-              onClearGlobalCache();
-            }
-          }}
-          title="Clear all cached nodes in the workflow"
-        >
-          <Icons.Trash2 size={16} />
-          <span>Clear All Cache</span>
+          <span style={{ fontSize: '12px' }}>✨</span>
         </button>
 
-        {selectedNode && (
-          <button
-            className="run-button"
-            style={{
-              background: selectedNode.data?.parameters?.isCached ? 'var(--color-error)' : 'var(--color-success)',
-              color: 'white',
-              border: '1px solid var(--border-color)',
-              marginRight: '8px'
-            }}
-            onClick={() => {
-              const currentlyCached = selectedNode.data?.parameters?.isCached;
-              onUpdateParams(selectedNode.id, { ...selectedNode.data?.parameters, isCached: !currentlyCached });
-              if (!currentlyCached) {
-                // Wait briefly for state to update, then run workflow
-                setTimeout(() => onRunPipeline(), 50);
-              }
-            }}
-            disabled={isRunning}
-            title={selectedNode.data?.parameters?.isCached ? "Un-cache this Node" : "Cache Output for Selected Node"}
-          >
-            {selectedNode.data?.parameters?.isCached ? <Icons.Trash2 size={16} /> : <Database size={16} />}
-            <span>{selectedNode.data?.parameters?.isCached ? 'Clear Cache' : 'Cache & Run'}</span>
-          </button>
-        )}
+        <div className="divider-vertical" style={{ height: '24px', width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
 
-        {runStatus === 'running' ? (
-          <button
-            className="run-button"
-            onClick={async () => {
-              if (window.confirm("Are you sure you want to stop the workflow execution?")) {
-                try {
-                  await fetch(`http://localhost:8000/api/cancel?session_id=${window.sessionId}`, { method: 'POST' });
-                } catch (e) {
-                  console.error("Failed to cancel pipeline:", e);
-                }
-              }
-            }}
-            style={{ background: '#ef4444', color: 'white', border: '1px solid #dc2626' }}
-            title="Stop the running pipeline"
-          >
-            <Icons.Square size={14} fill="white" strokeWidth={3} />
-            <span>Stop</span>
-          </button>
-        ) : (
-          <button
-            className="run-button"
-            onClick={onRunPipeline}
-            disabled={runStatus === 'completed'}
-            title="Run the entire pipeline from start to finish"
-          >
-            {runStatus === 'completed' ? (
-              <>
-                <Icons.Check size={16} color="var(--color-success)" strokeWidth={3} />
-                <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>Completed</span>
-              </>
-            ) : (
-              <>
-                <Play size={16} fill="white" />
-                <span>Run</span>
-              </>
-            )}
-          </button>
-        )}
-
+        {/* Layout / View */}
         <button
           className="run-button"
-          style={{ background: 'var(--panel-bg)', color: 'var(--text-color)', border: '1px solid var(--border-color)', marginLeft: '8px' }}
+          style={{ background: 'var(--panel-bg)', color: 'var(--text-color)', border: '1px solid var(--border-color)' }}
           onClick={toggleFullscreen}
           title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
         >
           {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+        </button>
+        <button
+          className="run-button"
+          style={{ background: 'var(--panel-bg)', color: 'var(--text-color)', border: '1px solid var(--border-color)' }}
+          onClick={toggleLayout}
+          title={layoutDirection === 'horizontal' ? "Switch to Vertical Layout" : "Switch to Horizontal Layout"}
+        >
+          {layoutDirection === 'horizontal' ? <Rows size={16} /> : <Columns size={16} />}
         </button>
       </div>
 

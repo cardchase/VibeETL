@@ -34,8 +34,16 @@ from app.tools.gcs_input import GCSInputNode
 from app.tools.gcs_output import GCSOutputNode
 from app.tools.google_sheets_input import GoogleSheetsInputNode
 from app.tools.google_sheets_output import GoogleSheetsOutputNode
-from app.tools.odds_portal_scraper import OddsPortalScraperNode
 from app.tools.transpose import TransposeNode
+
+# Newly added tools
+from app.tools.soccer_reader import SoccerReaderNode
+from app.tools.data_profiler import DataProfilerNode
+from app.tools.odds_portal_historical import OddsPortalScraperNode
+from app.tools.odds_portal_upcoming import OddsPortalUpcomingNode
+from app.tools.predictor import PredictorNode
+from app.tools.odds_analyzer import OddsAnalyzerNode
+from app.tools.football_engine import FootballEngineNode
 
 NODE_CLASSES = {
     "fileInput": FileInputNode,
@@ -73,5 +81,13 @@ NODE_CLASSES = {
     "google_sheets_in": GoogleSheetsInputNode,
     "google_sheets_out": GoogleSheetsOutputNode,
     "fieldInfo": FieldInfoNode,
-    "odds_portal_scraper": OddsPortalScraperNode
+    
+    # New additions
+    "soccer_reader": SoccerReaderNode,
+    "data_profiler": DataProfilerNode,
+    "odds_portal_scraper": OddsPortalScraperNode,
+    "odds_portal_upcoming": OddsPortalUpcomingNode,
+    "predictor": PredictorNode,
+    "odds_analyzer": OddsAnalyzerNode,
+    "football_engine": FootballEngineNode
 }

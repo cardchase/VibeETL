@@ -22,9 +22,10 @@ class BaseNode:
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         node_name = self.MANIFEST.get("name", self.node_id)
         sid = getattr(self, "session_id", "default")
+        workflow_name = getattr(self, "workflow_name", sid)
         
-        print(f"[{timestamp}] [{sid}] [NODE LOG - {node_name}] {message}")
-        self.logs.append(f"[{timestamp}] {message}")
+        print(f"[{timestamp}] [{workflow_name}] [NODE LOG - {node_name}] {message}")
+        self.logs.append(f"[{timestamp}] [{workflow_name}] [{node_name}] {message}")
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         """

@@ -60,7 +60,7 @@ class FormulaNode(BaseNode):
         "id": "formula",
         "name": "Formula",
         "category": "prep",
-        "icon": "Calculator",
+        "icon": "Code",
         "description": "Compute a new column or update an existing one using an expression.",
         "ui_schema": [
             {"field": "output_column", "type": "column_creatable", "label": "Output Column Name", "default": "NewColumn"},
@@ -80,49 +80,36 @@ class FormulaNode(BaseNode):
             self.log("Output column or expression is empty. Skipping formula.")
             return df
             
-        polars_expr_str = parse_formula_to_polars(expression)
-        self.log(f"Compiling Formula: '{expression}' -> {polars_expr_str}")
-        
         try:
-            # Helper functions for Alteryx-like operations
-            def ToString(col):
-                if isinstance(col, pl.Expr): return col.cast(pl.Utf8)
-                return str(col)
-                
-            def ToNumber(col):
-                if isinstance(col, pl.Expr): return col.cast(pl.Float64)
-                return float(col)
-                
-            def IIF(cond, t, f):
-                if not isinstance(cond, pl.Expr): cond = pl.lit(cond)
-                if not isinstance(t, pl.Expr): t = pl.lit(t)
-                if not isinstance(f, pl.Expr): f = pl.lit(f)
-                return pl.when(cond).then(t).otherwise(f)
-                
-            # Intercept Malicious Injections via AST Scanning
-            verify_safe_formula_expression(polars_expr_str)
-
-            eval_context = {
-                "pl": pl, 
-                "datetime": __import__("datetime"),
-                "ToString": ToString,
-                "ToNumber": ToNumber,
-                "IIF": IIF,
-                "IF": IIF,
-                "__builtins__": {}  # Lock down the execution window environment
-            }
+            # Convert [Column] to "Column" to support Alteryx-style brackets
+            sql_expr = re.sub(r'\[(.*?)\]', r'"\1"', expression)
             
-            # pylint: disable=eval-used
-            compiled_expr = eval(polars_expr_str, eval_context)
-            compiled_expr = compiled_expr.alias(output_column)
-            res_df = df.with_columns(compiled_expr)
+            # Basic backward compatibility for common functions
+            sql_expr = re.sub(r'(?i)\bToString\((.*?)\)', r'CAST(\1 AS VARCHAR)', sql_expr)
+            sql_expr = re.sub(r'(?i)\bToNumber\((.*?)\)', r'CAST(\1 AS DOUBLE)', sql_expr)
+            sql_expr = re.sub(r'(?i)\bIIF\(', 'IF(', sql_expr)
+            
+            formatted_sql = re.sub(r'(?i)\s+(AND|OR)\s+', r'\n\1 ', sql_expr)
+            self.log(f"Compiled SQL Formula:\n'{expression}'\n->\n{formatted_sql}")
+            
+            ctx = pl.SQLContext(df=df)
+            
+            # Using a temporary output column to evaluate the expression
+            temp_col = f"{output_column}_temp"
+            res_df = ctx.execute(f"SELECT *, ({sql_expr}) AS `{temp_col}` FROM df").collect()
+            
+            # Safely replace existing column or add it at the end
+            original_cols = df.columns
+            if output_column in original_cols:
+                res_df = res_df.drop(output_column).rename({temp_col: output_column})
+                # Preserve original column order
+                res_df = res_df.select(original_cols)
+            else:
+                res_df = res_df.rename({temp_col: output_column})
+                
             self.log(f"Formula applied successfully. Target column: {output_column}")
         except Exception as e:
-            from app.tools.base import SecurityError
-            if isinstance(e, SecurityError):
-                self.log(f"Security Block: {str(e)}")
-            else:
-                self.log(f"Error evaluating formula '{expression}': {str(e)}")
+            self.log(f"Error evaluating formula '{expression}': {str(e)}")
             raise ValueError(f"Formula Error: {str(e)}")
 
         return res_df

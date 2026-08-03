@@ -13,7 +13,7 @@ class DynamicInputNode(BaseNode):
         "ui_schema": [
             {"field": "filePathColumn", "type": "column_select", "label": "File Path Column", "default": "FilePath"},
             {"field": "fileType", "type": "select", "label": "File Type", "options": ["Auto-detect", "CSV", "Excel", "JSON", "Parquet"], "default": "Auto-detect"},
-            {"field": "onSchemaMismatch", "type": "select", "label": "On Schema Mismatch", "options": ["Union (Fill Nulls)", "Intersect (Drop missing)", "Strict (Align to Reference)", "Error"], "default": "Union (Fill Nulls)"},
+            {"field": "onSchemaMismatch", "type": "select", "label": "On Schema Mismatch", "options": ["Union (Auto-Coerce to String)", "Intersect (Drop missing)", "Strict (Align to Reference)", "Error on Type Mismatch"], "default": "Union (Auto-Coerce to String)"},
             {"field": "referenceFilePath", "type": "string", "label": "Reference File Path (Optional)", "default": ""}
         ]
     }
@@ -45,7 +45,9 @@ class DynamicInputNode(BaseNode):
             return pl.DataFrame()
 
         file_type = self.parameters.get("fileType", "Auto-detect")
-        mismatch_behavior = self.parameters.get("onSchemaMismatch", "Union (Fill Nulls)")
+        mismatch_behavior = self.parameters.get("onSchemaMismatch", "Union (Auto-Coerce to String)")
+        if mismatch_behavior == "Union (Fill Nulls)":
+            mismatch_behavior = "Union (Auto-Coerce to String)"
         
         how_concat = "diagonal"
         if mismatch_behavior == "Intersect (Drop missing)":
@@ -66,7 +68,7 @@ class DynamicInputNode(BaseNode):
                 ext = os.path.splitext(ref_path)[1].lower()
                 try:
                     if ext == ".csv":
-                        ref_df = pl.read_csv(ref_path, infer_schema_length=10000, ignore_errors=True)
+                        ref_df = pl.read_csv(ref_path, infer_schema_length=100000, ignore_errors=True)
                     elif ext in [".xlsx", ".xls"]:
                         ref_df = pl.read_excel(ref_path)
                     elif ext == ".json":
@@ -114,7 +116,7 @@ class DynamicInputNode(BaseNode):
 
             try:
                 if current_type == "CSV":
-                    df = pl.read_csv(file_path, infer_schema_length=10000, ignore_errors=True)
+                    df = pl.read_csv(file_path, infer_schema_length=100000, ignore_errors=True)
                 elif current_type == "Excel":
                     df = pl.read_excel(file_path)
                 elif current_type == "JSON":
@@ -152,7 +154,7 @@ class DynamicInputNode(BaseNode):
                 dataframes.append(df)
             except Exception as e:
                 self.log(f"Error reading {file_path}: {str(e)}")
-                if mismatch_behavior == "Error":
+                if mismatch_behavior == "Error on Type Mismatch":
                     raise RuntimeError(f"Error reading {file_path}: {str(e)}")
 
         if not dataframes:
@@ -162,8 +164,27 @@ class DynamicInputNode(BaseNode):
         self.log(f"Unioning {len(dataframes)} DataFrames...")
         
         try:
-            if mismatch_behavior in ["Union (Fill Nulls)", "Strict (Align to Reference)"]:
-                final_df = pl.concat(dataframes, how="diagonal")
+            if mismatch_behavior in ["Union (Auto-Coerce to String)", "Strict (Align to Reference)"]:
+                # Robust Type Alignment: Resolve type conflicts by casting to String (Utf8)
+                col_types = {}
+                for df in dataframes:
+                    for col, dtype in zip(df.columns, df.dtypes):
+                        if col not in col_types:
+                            col_types[col] = dtype
+                        elif col_types[col] != dtype and col_types[col] != pl.Utf8:
+                            col_types[col] = pl.Utf8
+                
+                aligned_dfs = []
+                for df in dataframes:
+                    exprs = []
+                    for col in df.columns:
+                        if df[col].dtype != col_types[col]:
+                            exprs.append(pl.col(col).cast(col_types[col]))
+                        else:
+                            exprs.append(pl.col(col))
+                    aligned_dfs.append(df.with_columns(exprs))
+                    
+                final_df = pl.concat(aligned_dfs, how="diagonal")
             elif mismatch_behavior == "Intersect (Drop missing)":
                 # Find common columns
                 common_cols = set(dataframes[0].columns)
@@ -174,8 +195,27 @@ class DynamicInputNode(BaseNode):
                 if not common_cols_list:
                     raise ValueError("No common columns found across all files.")
                 
-                filtered_dfs = [df.select(common_cols_list) for df in dataframes]
-                final_df = pl.concat(filtered_dfs, how="vertical")
+                # Align types for common columns as well
+                col_types = {}
+                for df in dataframes:
+                    for col in common_cols_list:
+                        dtype = df[col].dtype
+                        if col not in col_types:
+                            col_types[col] = dtype
+                        elif col_types[col] != dtype and col_types[col] != pl.Utf8:
+                            col_types[col] = pl.Utf8
+                            
+                aligned_dfs = []
+                for df in dataframes:
+                    exprs = []
+                    for col in common_cols_list:
+                        if df[col].dtype != col_types[col]:
+                            exprs.append(pl.col(col).cast(col_types[col]))
+                        else:
+                            exprs.append(pl.col(col))
+                    aligned_dfs.append(df.select(common_cols_list).with_columns(exprs))
+                    
+                final_df = pl.concat(aligned_dfs, how="vertical")
             else: # Error on mismatch
                 final_df = pl.concat(dataframes, how="vertical")
                 
