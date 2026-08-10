@@ -1,0 +1,13 @@
+Odds Analyzer Node
+
+Calculates Match Probabilities and Expected Value (EV) from predicted goals using the Poisson Distribution model with the Dixon-Coles adjustment. This node uses rigorous statistical modeling to mathematically calibrate expectations on low-scoring draws and translate predicted goal expectancies into actionable betting metrics.
+
+Parameters:
+- Match Identifier Column (String): Column to identify the match (e.g., URL or Name).
+- Predicted Home Goals Column (String): The column containing predicted home goals.
+- Predicted Away Goals Column (String): The column containing predicted away goals.
+- Home Win Odds Column (String): The column containing decimal odds for a home win.
+- Draw Odds Column (String): The column containing decimal odds for a draw.
+- Away Win Odds Column (String): The column containing decimal odds for an away win.
+
+Schema Output: - Appends probability percentages and Expected Value (EV) calculations to the dataset based on bookmaker odds.
