@@ -256,7 +256,7 @@ class PredictorNode(BaseNode):
                         mae = mean_absolute_error(y_te, eval_preds)
                         self.log(f"Evaluated Chronological Blind Accuracy (MAE): {mae:.3f}")
                 else:
-                    self.log("Skipped Evaluation: Not enough historical data (< 10 rows).")
+                    self.log("Skipped Out-of-Sample Evaluation: Not enough historical data (< 10 rows). Proceeding directly to full training & prediction.")
 
                 # FINAL RETRAINING ON 100% OF DATA
                 # Scale best_iteration up by 25% because we are training on 100% instead of 80%
