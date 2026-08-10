@@ -1,0 +1,8 @@
+Data Profiler Node
+
+Analyzes the dataset and returns a comprehensive statistical profile. It describes null values, completeness percentages, distinct counts, and exact data types for each column in the input stream. This is critical for data quality assessment and auditing.
+
+Parameters:
+- No configuration parameters required. It automatically profiles all incoming columns.
+
+Schema Output: - Fixed schema containing profiling metrics (Column, Type, Null_Count, Null_Percentage, Valid_Count, Valid_Percentage, Distinct_Count).

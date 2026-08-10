@@ -1,0 +1,13 @@
+Odds Portal Scraper Node
+
+OddsPortal Scraper Node
+
+Enterprise-grade, high-concurrency web scraper utilizing Playwright and Stealth modules to extract historical betting odds.
+
+Parameters:
+- targetUrl (String): The URL of the OddsPortal league or match to scrape.
+- scrapeAllSeasons (Boolean): Scrape all historical seasons (Not fully implemented yet).
+- autoSaveCsvPath (String): Auto-save intermediate batches to CSV.
+- autoSaveBatchSize (String): The row count threshold for auto-saving.
+
+Schema Output: Yields a vast matrix of betting odds, match statuses, and scorelines.

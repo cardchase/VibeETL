@@ -1,0 +1,13 @@
+Soccer Predictor Node
+
+An intelligent XGBoost predictor utilizing GPU acceleration (if available) with automatic data leakage prevention and evaluation. Select the target columns you want to predict, and the engine will automatically use all other columns as features to learn from. 
+
+Parameters:
+- Target Columns (List): The column(s) to predict (e.g., FT_HomeScore, FT_AwayScore).
+- Machine Learning Task Type (Enum): The type of prediction to run:
+  * "Auto-Detect": Automatically infers the best model based on data types.
+  * "Poisson (Goal Counts)": Uses count-based regression suitable for goals.
+  * "Regression (Decimals/Odds)": Standard regression for continuous values.
+  * "Classification (Categories/Wins)": Categorical classification.
+
+Schema Output: - Appends columns prefixed with 'Predicted_' containing the model's output for the targeted columns.

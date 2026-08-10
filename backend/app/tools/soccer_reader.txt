@@ -1,0 +1,10 @@
+Soccer Predictor Reader Node
+
+Transforms Engine predictions and raw odds into a rich, human-readable Scout Report narrative. This tool acts as an 'Engine Pundit', translating raw numerical outputs from the Soccer Predictor into verbose natural language summaries for easy interpretation.
+
+Parameters:
+- Home Team / Away Team Columns (String): Columns identifying the teams.
+- Predicted Score Columns (String): Columns containing predicted Full Time (FT), Half Time (HT), or Second Half (SH) scores.
+- Odds Columns (String): Columns containing Home/Away win odds.
+
+Schema Output: - Appends a 'Scout_Report' string column containing the generated narrative.

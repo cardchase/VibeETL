@@ -1,0 +1,12 @@
+Football Engine Node
+
+Calculates rolling form, momentum, and historical stats for football matches to empower the AI Predictor. This tool acts as the 'Memory' for your AI, chronologically sorting matches and calculating the Past Form (Points/Goals from the last 5 games) for every team right before kick-off.
+
+Parameters:
+- Date Column (String): The column representing the match date.
+- Home Team Column (String): The column representing the home team.
+- Away Team Column (String): The column representing the away team.
+- Home Goals Column (String): The historical column containing the home team's full-time goals.
+- Away Goals Column (String): The historical column containing the away team's full-time goals.
+
+Schema Output: - Appends engineered historical form features (e.g., rolling points, momentum, goals scored/conceded) to the existing dataset.

@@ -1,0 +1,10 @@
+OddsPortal Upcoming Scraper Node
+
+Provides high-fidelity odds harvesting from active React DOM states on OddsPortal. Scrapes upcoming match data and odds directly from the specified league URL using headless browser automation.
+
+Parameters:
+- Target League URL (String): The OddsPortal URL for the target league.
+- Max Concurrent Workers (Number): Number of parallel scraping threads to use (Default: 10).
+- Run in Headless Mode (Boolean): Whether to run the browser invisibly in the background.
+
+Schema Output: - Dynamic schema containing scraped match details and upcoming odds.
