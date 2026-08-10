@@ -16,7 +16,7 @@
 > **🚀 ENTERPRISE READY (v1.5):** VibeETL has reached its enterprise readiness milestone! Featuring global secure cloud authentication (OAuth 2.0 / Service Accounts) with **Native Windows Certificate Store integration** for bypassing corporate MITM proxies (like Zscaler), auto-healing crash recovery, unrestricted Nvidia GPU background processing, and massive database integrations (PostgreSQL, MySQL, SQLite). The latest v1.5 release introduces O(1) Polars vectorization for advanced analytics, machine learning pipelines, and predictive sports nodes!
 
 <div align="center">
-  <img src="docs/screenshot_workflow.png" width="100%" alt="VibeETL Interactive Canvas Showcase">
+  <img src="docs/screenshot_workflow.png?v=1.5.0" width="100%" alt="VibeETL Interactive Canvas Showcase">
   <br>
   <i>Build lightning-fast Polars data pipelines visually via an interactive React Flow DAG canvas.</i>
 </div>
