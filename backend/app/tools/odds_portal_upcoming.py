@@ -12,6 +12,7 @@ Core features:
 - Headless Chromium orchestration with dynamic cancellation listeners.
 """
 import asyncio
+import random
 import re
 import os
 from typing import Dict, Any, List
@@ -165,6 +166,9 @@ class OddsPortalUpcomingNode(BaseNode):
             
             global_watcher_task = asyncio.create_task(global_cancel_watcher())
             
+            self.global_pause_event = asyncio.Event()
+            self.global_pause_event.set()
+            
             try:
                 if is_match:
                     page = await context.new_page()
@@ -249,6 +253,11 @@ class OddsPortalUpcomingNode(BaseNode):
                         async def process_match(match_url, original_idx, is_retry=False):
                             if hasattr(self, "is_cancelled") and self.is_cancelled():
                                 return None
+                                
+                            await self.wait_for_clearance()
+                            # Stagger start BEFORE grabbing semaphore to prevent locking pool slots while sleeping
+                            await asyncio.sleep(random.uniform(0.5, 3.0))
+                            
                             async with semaphore:
                                 if hasattr(self, "is_cancelled") and self.is_cancelled():
                                     return None
@@ -271,9 +280,10 @@ class OddsPortalUpcomingNode(BaseNode):
                                 except Exception as e:
                                     if hasattr(self, "is_cancelled") and self.is_cancelled():
                                         return None
-                                    if "TargetClosedError" in str(type(e)):
-                                        return None
-                                    raise
+                                    if "closed" in str(e).lower():
+                                        self.log("Browser connection closed unexpectedly, pausing tasks to prevent spam...")
+                                        await asyncio.sleep(5.0)
+                                    return {"_failed": True, "_error": str(e), "URL": match_url, "_original_order": original_idx, "_season_order": s_idx}
                                 finally:
                                     if page:
                                         try:
@@ -348,8 +358,6 @@ class OddsPortalUpcomingNode(BaseNode):
                                 except Exception as e:
                                     if not (hasattr(self, "is_cancelled") and self.is_cancelled()):
                                         self.log(f"Error extracting match: {e}")
-                                        if "closed" in str(e).lower():
-                                            raise e
 
                         # Pass 1: Initial Scrape
                         await consume_tasks(tasks, is_retry=False)
@@ -432,29 +440,45 @@ class OddsPortalUpcomingNode(BaseNode):
             if hasattr(self, "is_cancelled") and self.is_cancelled():
                 return [], consecutive_fully_scraped_pages
             try:
+                await self.wait_for_clearance()
                 if attempt == 0:
                     response = await page.goto(competition_url, wait_until="domcontentloaded", timeout=30000)
                 else:
                     self.log(f"Attempt {attempt + 1}: Refreshing page to find match links...")
                     response = await page.reload(wait_until="domcontentloaded", timeout=30000)
                     
+                # FIX: If we get a 503 or bad response, DO NOT instantly continue. 
                 if response and not response.ok:
-                    self.log(f"Warning: OddsPortal returned HTTP {response.status}. The URL may be invalid.")
+                    self.log(f"Received HTTP {response.status}. The server might be blocking us.")
+                    if response.status in [403, 429, 502, 503, 504]:
+                        self.trigger_rate_limit_pause(60)
+                    if attempt == 2: 
+                        return [], consecutive_fully_scraped_pages
+                    # Force a heavy timeout before the loop continues to the next attempt
+                    await asyncio.sleep(5.0)
+                    continue
             except Exception as e:
                 self.log(f"Error navigating to competition URL on attempt {attempt + 1}: {e}")
+                await asyncio.sleep(5.0)
                 if "closed" in str(e).lower():
                     raise e
                 continue
             
-            # Wait for the match grid to render
+            # Wait for the match grid
             try:
-                # Fast fail if the page clearly says there are no matches
-                no_matches = await page.evaluate("() => document.body.innerText.includes('Unfortunately, no matches can be displayed')")
-                if no_matches:
-                    self.log("Detected 'no matches' message. This season has no data yet. Skipping...")
-                    return [], consecutive_fully_scraped_pages
+                # Give React SPA 5 full seconds to hydrate the DOM. 
+                # This prevents premature scraping where the DOM contains SSR fallback text before hydration.
+                await page.wait_for_timeout(5000)
                 
-                await page.wait_for_selector('a[href*="/h2h/"]', state="attached", timeout=15000)
+                # Fast fail if the page clearly says there are no matches AFTER hydration
+                no_matches = await page.evaluate("() => document.body.innerText.toLowerCase().includes('unfortunately') && (document.body.innerText.toLowerCase().includes('no bookmakers') || document.body.innerText.toLowerCase().includes('no odds') || document.body.innerText.toLowerCase().includes('no matches'))")
+                if no_matches:
+                    self.log(f"Detected 'no matches' message on attempt {attempt + 1}.")
+                    if attempt == max_retries - 1:
+                        self.log("Maximum retries reached. This competition has no data yet. Skipping...")
+                        return [], consecutive_fully_scraped_pages
+                    await page.wait_for_timeout(2000)
+                    continue
             except Exception as e:
                 self.log(f"Warning: Timed out waiting for match links on {competition_url} (Attempt {attempt + 1})")
 
@@ -469,7 +493,7 @@ class OddsPortalUpcomingNode(BaseNode):
                 # Scroll to load lazy-loaded matches
                 for _ in range(5):
                     await page.evaluate("window.scrollBy(0, window.innerHeight)")
-                    await page.wait_for_timeout(10000)
+                    await page.wait_for_timeout(3000)
                 
                 # Scope to the main column to avoid sidebar (popular matches) pollution
                 links = await page.evaluate("""() => {
@@ -555,6 +579,22 @@ class OddsPortalUpcomingNode(BaseNode):
                 
         return match_links, consecutive_fully_scraped_pages
 
+    async def wait_for_clearance(self):
+        if hasattr(self, "global_pause_event") and not self.global_pause_event.is_set():
+            await self.global_pause_event.wait()
+
+    def trigger_rate_limit_pause(self, seconds=60):
+        if not hasattr(self, "global_pause_event"):
+            return
+        if self.global_pause_event.is_set():
+            self.log(f"🛑 [RATE LIMIT DETECTED] Pausing entire worker pool for {seconds} seconds to evade Cloudflare block...")
+            self.global_pause_event.clear()
+            async def release():
+                await asyncio.sleep(seconds)
+                self.log("🟢 [RATE LIMIT CLEARED] Cooling off complete. Resuming worker pool.")
+                self.global_pause_event.set()
+            asyncio.create_task(release())
+
     async def execute_interception_engine(self, page, url: str) -> Dict[str, Any]:
         """
         The core harvesting engine for an individual match page.
@@ -618,14 +658,23 @@ class OddsPortalUpcomingNode(BaseNode):
             if hasattr(self, "is_cancelled") and self.is_cancelled():
                 return extracted_row
             try:
+                await self.wait_for_clearance()
                 if attempt == 0:
                     response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 else:
                     self.log(f"Attempt {attempt + 1}: Refreshing match page due to missing DOM tags...")
                     response = await page.reload(wait_until="domcontentloaded", timeout=30000)
                 
+                # Hard wait for 5 seconds immediately after landing to prevent race conditions
+                await page.wait_for_timeout(5000)
+                
                 if response and not response.ok:
+                    self.log(f"Received HTTP {response.status}. The server might be blocking us.")
+                    if response.status in [403, 429, 502, 503, 504]:
+                        self.trigger_rate_limit_pause(60)
                     if attempt == 2: return extracted_row
+                    # Force a heavy timeout before the loop continues to the next attempt
+                    await asyncio.sleep(5.0)
                     continue
                     
                 # Wait for SPA DOM hydration of match items
@@ -642,6 +691,7 @@ class OddsPortalUpcomingNode(BaseNode):
                 
                 break
             except Exception as e:
+                await asyncio.sleep(5.0)
                 if attempt == 2:
                     self.log(f"Failed to load match page after 3 attempts: {e}")
                     return extracted_row
@@ -701,8 +751,8 @@ class OddsPortalUpcomingNode(BaseNode):
             // 3. Extract Live Info & Score from data-testid="live-info" or body
             let liveInfo = document.querySelector('[data-testid="live-info"]') || document.querySelector('.live-info');
             let liveText = liveInfo ? cleanText(liveInfo.innerText) : '';
-            let mainContent = document.querySelector('.flex.flex-col.w-full.min-w-0') || document.body;
-            let bodyText = cleanText(mainContent.innerText);
+            let mainColumn = document.querySelector('div.flex.flex-col') || document.body;
+            let bodyText = cleanText(mainColumn.innerText);
 
             let fullText = (liveText + ' ' + bodyText).trim();
 
@@ -1050,7 +1100,7 @@ class OddsPortalUpcomingNode(BaseNode):
                         more_tab = page.get_by_text(more_regex).filter(visible=True).first
                         if await more_tab.count() > 0:
                             await more_tab.click()
-                            await page.wait_for_timeout(10000)
+                            await page.wait_for_timeout(2000)
                             
                         # Check again with combined regex
                         target = page.get_by_text(main_regex).filter(visible=True).first
@@ -1078,7 +1128,7 @@ class OddsPortalUpcomingNode(BaseNode):
                         
                         if not is_active:
                             await main_tab.click(timeout=3000)
-                            await page.wait_for_timeout(500) # Give React a tiny moment to unmount old data
+                            await page.wait_for_timeout(2000) # Give React a moment to load tab data
                     else:
                         if hasattr(self, "is_cancelled") and self.is_cancelled():
                             return []
@@ -1106,7 +1156,7 @@ class OddsPortalUpcomingNode(BaseNode):
                                         
                             if not is_active:
                                 await sub_tab.click(timeout=3000)
-                                await page.wait_for_timeout(500) # Give React a tiny moment to unmount old data
+                                await page.wait_for_timeout(2000) # Give React a moment to load tab data
                         else:
                             # Sub tab missing, meaning this market segment doesn't exist for this match
                             return []
@@ -1213,6 +1263,7 @@ class OddsPortalUpcomingNode(BaseNode):
 
                 if await target.count() > 0:
                     await target.click(timeout=3000)
+                    await page.wait_for_timeout(2000)
                 else:
                     if not page_reloaded and attempt == 0:
                         self.log("Smart Refresh: Over/Under tab missing. Reloading page...")

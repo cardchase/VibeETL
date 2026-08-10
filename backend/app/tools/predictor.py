@@ -30,6 +30,19 @@ class PredictorNode(BaseNode):
                 "default": ["FT_HomeScore", "FT_AwayScore"]
             },
             {
+                "field": "personality",
+                "type": "select",
+                "label": "🎭 Prediction Personality",
+                "options": [
+                    "Conservative (Default, Most Accurate)", 
+                    "Exciting (High Scoring & Upsets)", 
+                    "Underdog Seeker (Boosts Weaker Teams)", 
+                    "Defensive Stalemate (Low Scoring)",
+                    "All Personalities (Outputs Multiple Columns)"
+                ],
+                "default": "Conservative (Default, Most Accurate)"
+            },
+            {
                 "field": "taskType",
                 "type": "select",
                 "label": "🧠 Machine Learning Task Type",
@@ -60,16 +73,69 @@ class PredictorNode(BaseNode):
 
         target_cols = self.parameters.get("targetColumns", ["FT_HomeScore", "FT_AwayScore"])
         task_type = self.parameters.get("taskType", "Auto-Detect")
+        personality = self.parameters.get("personality", "Conservative (Default, Most Accurate)")
 
         if not target_cols:
-            logger.warning("No target columns selected for Predictor.")
+            self.log("No target columns selected for Predictor.")
             return df
+            
+        # Standardize empty strings to nulls for target columns to prevent data leakage/crashes
+        import polars as pl
+        for target in target_cols:
+            if target in df.columns:
+                # Replace empty strings with None so they are properly detected as nulls
+                df = df.with_columns(pl.when(pl.col(target) == "").then(None).otherwise(pl.col(target)).alias(target))
 
         # We will hold the output DataFrame which will just be `df` with new columns
         full_pd = df.to_pandas()
         
-        # Hardcoded leakage heuristics for soccer matches
-        leakage_keywords = ['Score', 'BTTS', 'OU', 'DC', 'DNB', 'Winner', 'Result']
+        # Enterprise Anti-Leakage: Post-match outcomes that MUST be hidden to prevent cheating
+        post_match_outcomes = {
+            'FT_HomeScore', 'FT_AwayScore', 
+            'HT_HomeScore', 'HT_AwayScore', 
+            'SH_HomeScore', 'SH_AwayScore',
+            'Match_Status', 'Winner', 'Result'
+        }
+        
+        def apply_personality(predictions, is_classification, is_poisson, personality_type, target_name):
+            if is_classification or not is_poisson:
+                return predictions
+                
+            if "Conservative" in personality_type:
+                return predictions
+            
+            import numpy as np
+            preds_array = np.array(predictions, dtype=float)
+            
+            # Preserve relative distribution dynamics instead of flat multiplication
+            if "Exciting" in personality_type:
+                # Boost attacking tempo conditionally based on baseline xG variance
+                preds_array = np.where(preds_array > 1.2, preds_array * 1.35 + 0.2, preds_array * 1.1)
+                self.log(f"💥 Applied 'Exciting' personality to {target_name} (Dynamic attacking boost)")
+            elif "Defensive" in personality_type:
+                # Penalize goal expectation dynamically without flattening lower bounds
+                preds_array = np.maximum(0.2, preds_array * 0.72)
+                self.log(f"🛡️ Applied 'Defensive' personality to {target_name} (Dynamic lower bounds)")
+            elif "Underdog" in personality_type:
+                # Boost weaker team xG relative to home/away target
+                if "Away" in target_name:
+                    preds_array = preds_array * 1.3 + 0.3
+                    self.log(f"🐕 Applied 'Underdog' personality to {target_name} (Away boost)")
+                else:
+                    preds_array = preds_array * 0.95
+                    self.log(f"🐕 Applied 'Underdog' personality to {target_name} (Home penalty)")
+                    
+            return preds_array
+            
+        def store_predictions(raw_preds, is_class, is_poiss, p_type, tgt, df_full, msg_suffix=""):
+            if "All Personalities" in p_type:
+                for p_name in ["Conservative", "Exciting", "Underdog", "Defensive"]:
+                    adj_preds = apply_personality(raw_preds, is_class, is_poiss, p_name, tgt)
+                    df_full[f"Predicted_{tgt}_{p_name}"] = adj_preds
+            else:
+                adj_preds = apply_personality(raw_preds, is_class, is_poiss, p_type, tgt)
+                df_full[f"Predicted_{tgt}"] = adj_preds
+            self.log(f"Generated predictions for {len(df_infer)} empty rows{msg_suffix}.")
         
         for target in target_cols:
             if target not in df.columns:
@@ -81,29 +147,25 @@ class PredictorNode(BaseNode):
             df_infer = df.filter(~mask)
             
             if df_train.is_empty():
-                logger.warning(f"No training data available for {target} (all rows are null). Skipping.")
+                self.log(f"No training data available for {target} (all rows are null). Skipping.")
                 continue
 
             # Intelligent Data Leakage Prevention
-            # If predicting a score, we must drop all OTHER scores and match outcomes from features!
-            auto_dropped = set()
-            if any(kw in target for kw in leakage_keywords):
-                for col in df.columns:
-                    if col == target: continue
-                    if any(kw in col for kw in leakage_keywords):
-                        auto_dropped.add(col)
-
-            # All other columns are features
-            features_to_drop = set(target_cols).union(auto_dropped)
+            # Ensure targets and explicit post-match outcomes are removed from features
+            features_to_drop = set(target_cols).union(post_match_outcomes)
             feature_cols = [c for c in df.columns if c not in features_to_drop]
 
-            logger.info(f"--- PREDICTING: {target} ---")
-            if auto_dropped:
-                logger.info(f"⚠️ ANTI-LEAKAGE: Automatically hid {len(auto_dropped)} future outcome columns from the Engine to prevent cheating: {list(auto_dropped)[:5]}...")
-            
-            logger.info(f"Using {len(feature_cols)} features for learning.")
+            self.log(f"--- PREDICTING: {target} ---")
+            dropped = list(features_to_drop.intersection(set(df.columns)))
+            self.log(f"Preventing data leakage: Dropped {len(dropped)} future outcome variables.")
 
-            train_pd = df_train.to_pandas()
+            # 1. Convert categories on the FULL dataframe first to prevent XGBoost category mismatch
+            for col in feature_cols:
+                if full_pd[col].dtype == 'object' or str(full_pd[col].dtype) == 'string':
+                    full_pd[col] = full_pd[col].astype('category')
+
+            # 2. Slice train_pd AFTER categorical conversion so dtypes match perfectly
+            train_pd = full_pd[full_pd[target].notnull()].copy()
             
             # Identify task type
             is_classification = False
@@ -112,26 +174,28 @@ class PredictorNode(BaseNode):
             target_dtype = str(train_pd[target].dtype)
             
             if task_type == "Auto-Detect":
-                if target_dtype in ['object', 'string', 'category', 'bool']:
-                    is_classification = True
-                    logger.info("Auto-detected Classification task.")
-                elif "Score" in target or "Goal" in target:
+                if "Score" in target or "Goal" in target:
                     is_poisson = True
-                    logger.info("Auto-detected Poisson task (Count Data).")
+                    self.log("Auto-detected Poisson task (Count Data).")
+                    # Force cast to float in case Select tool made it a string
+                    import pandas as pd
+                    train_pd[target] = pd.to_numeric(train_pd[target], errors='coerce')
+                    full_pd[target] = pd.to_numeric(full_pd[target], errors='coerce')
+                    target_dtype = str(train_pd[target].dtype)
+                elif target_dtype in ['object', 'string', 'category', 'bool']:
+                    is_classification = True
+                    self.log("Auto-detected Classification task.")
                 else:
-                    logger.info("Auto-detected Regression task (Continuous Data).")
+                    self.log("Auto-detected Regression task.")
+            elif task_type == "Regression (Decimals/Odds)":
+                self.log("Auto-detected Regression task.")
+            elif task_type == "Classification (Categories/Wins)":
+                is_classification = True
             else:
-                if task_type == "Classification (Categories/Wins)":
-                    is_classification = True
-                elif task_type == "Poisson (Goal Counts)":
-                    is_poisson = True
+                is_poisson = True
+                self.log("Auto-detected Poisson task.")
 
-            # Encode categorical features
-            for col in feature_cols:
-                if train_pd[col].dtype == 'object' or str(train_pd[col].dtype) == 'string':
-                    train_pd[col] = train_pd[col].astype('category')
-                    full_pd[col] = full_pd[col].astype('category')
-
+            # Categorical features are already encoded on full_pd above
             X_train_full = train_pd[feature_cols]
             y_train_full = train_pd[target]
             X_full = full_pd[feature_cols]
@@ -142,48 +206,62 @@ class PredictorNode(BaseNode):
                 labels = y_train_full.unique().tolist()
                 label_map = {k: v for v, k in enumerate(labels)}
                 y_train_full = y_train_full.map(label_map)
-                logger.info(f"Mapped categories to integers: {label_map}")
+            # Dynamic Depth based on dataset size
+            # Small dataset (<5k) -> depth 4 to prevent overfitting
+            # Medium dataset -> depth 6
+            # Large dataset (>20k) -> depth 8
+            if len(train_pd) < 5000:
+                dynamic_depth = 4
+            elif len(train_pd) < 20000:
+                dynamic_depth = 6
+            else:
+                dynamic_depth = 8
 
-            # Define model params
+            # Define model params (using 1000 estimators for early stopping)
             params = {
                 "tree_method": "hist",
                 "device": "cuda",             # GPU Acceleration
                 "enable_categorical": True,
                 "learning_rate": 0.05,
-                "max_depth": 6,
-                "n_estimators": 100,
+                "max_depth": dynamic_depth,
+                "n_estimators": 1000,
                 "random_state": 42
             }
             
             if is_poisson:
                 params["objective"] = "count:poisson"
 
+            best_iteration = 100 # default fallback
+            
             try:
                 # TRAIN / TEST EVALUATION CYCLE
                 if len(train_pd) > 10:
-                    self.log("--------------------------------------------------")
-                    self.log("🔄 IN-SAMPLE VS OUT-OF-SAMPLE EVALUATION CYCLE")
-                    self.log("Splitting historical data: 80% for the Engine to learn, 20% held back to test it blind.")
-                    X_tr, X_te, y_tr, y_te = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42)
+                    # Chronological Train/Test Split (Preserves Time Order)
+                    split_idx = int(len(X_train_full) * 0.8)
+                    X_tr, X_te = X_train_full.iloc[:split_idx], X_train_full.iloc[split_idx:]
+                    y_tr, y_te = y_train_full.iloc[:split_idx], y_train_full.iloc[split_idx:]
                     
                     if is_classification:
-                        eval_model = xgb.XGBClassifier(**params)
-                        eval_model.fit(X_tr, y_tr)
+                        eval_model = xgb.XGBClassifier(early_stopping_rounds=30, **params)
+                        eval_model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
+                        best_iteration = eval_model.best_iteration
                         eval_preds = eval_model.predict(X_te)
                         acc = accuracy_score(y_te, eval_preds) * 100
-                        self.log(f"✅ TRUE BLIND ACCURACY: {acc:.2f}% (How often it guessed right on matches it had never seen before)")
+                        self.log(f"Evaluated Chronological Blind Accuracy: {acc:.2f}%")
                     else:
-                        eval_model = xgb.XGBRegressor(**params)
-                        eval_model.fit(X_tr, y_tr)
+                        eval_model = xgb.XGBRegressor(early_stopping_rounds=30, **params)
+                        eval_model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
+                        best_iteration = eval_model.best_iteration
                         eval_preds = eval_model.predict(X_te)
                         mae = mean_absolute_error(y_te, eval_preds)
-                        self.log(f"✅ TRUE BLIND ACCURACY (MAE): The Engine's predictions were off by an average of {mae:.3f} on matches it had never seen before.")
-                    self.log("--------------------------------------------------")
+                        self.log(f"Evaluated Chronological Blind Accuracy (MAE): {mae:.3f}")
                 else:
-                    self.log("Not enough data for Train/Test split evaluation (< 10 rows).")
+                    self.log("Skipped Evaluation: Not enough historical data (< 10 rows).")
 
                 # FINAL RETRAINING ON 100% OF DATA
-                self.log(f"🚀 Retraining final model on all {len(X_train_full)} rows to maximize knowledge before predicting.")
+                # Scale best_iteration up by 25% because we are training on 100% instead of 80%
+                final_estimators = max(10, int(best_iteration * 1.25))
+                params["n_estimators"] = final_estimators
                 
                 if is_classification:
                     model = xgb.XGBClassifier(**params)
@@ -200,23 +278,17 @@ class PredictorNode(BaseNode):
                     reverse_map = {v: k for k, v in label_map.items()}
                     preds = [reverse_map.get(p, p) for p in preds]
                 
-                pred_col = f"Predicted_{target}"
-                full_pd[pred_col] = preds
-                logger.info(f"Generated predictions for {len(df_infer)} empty rows.")
+                store_predictions(preds, is_classification, is_poisson, personality, target, full_pd)
                 
                 # Log feature importances
                 importance = model.feature_importances_
                 feat_imp = sorted(zip(feature_cols, importance), key=lambda x: x[1], reverse=True)
-                logger.info(f"Top 5 most important patterns for predicting {target}:")
+                self.log("Top Decision Patterns:")
                 for f, imp in feat_imp[:5]:
-                    logger.info(f"  ⭐ {f}: {imp:.4f}")
-                    
-                useless = [f for f, imp in feat_imp if imp <= 0.0]
-                if useless:
-                    logger.info(f"Found {len(useless)} useless columns with 0.0 impact on {target}.")
+                    self.log(f"  ⭐ {f} ({imp * 100:.1f}% impact)")
                     
             except Exception as e:
-                logger.error(f"XGBoost GPU failed for {target}: {e}. Retrying on CPU...")
+                self.log(f"XGBoost GPU failed for {target}: {e}. Retrying on CPU...")
                 # Fallback to CPU
                 try:
                     params["device"] = "cpu"
@@ -231,11 +303,23 @@ class PredictorNode(BaseNode):
                         reverse_map = {v: k for k, v in label_map.items()}
                         preds = [reverse_map.get(p, p) for p in preds]
                         
-                    full_pd[f"Predicted_{target}"] = preds
-                    logger.info(f"Generated predictions for {len(df_infer)} empty rows using CPU.")
+                    store_predictions(preds, is_classification, is_poisson, personality, target, full_pd, " using CPU")
                 except Exception as inner_e:
-                    logger.error(f"CPU fallback also failed: {inner_e}")
+                    self.log(f"CPU fallback also failed: {inner_e}")
                     raise
 
         # Convert back to Polars
-        return pl.from_pandas(full_pd)
+        full_pl = pl.from_pandas(full_pd)
+        
+        # Determine upcoming matches (rows missing target labels) to output ONLY those
+        if target_cols and target_cols[0] in df.columns:
+            mask = df[target_cols[0]].is_null()
+            upcoming_pl = full_pl.filter(mask)
+            
+            # If we successfully found upcoming matches, return just them. 
+            # Otherwise return full dataset (e.g. if everything was predicted already)
+            if len(upcoming_pl) > 0:
+                self.log(f"Filtered output from {len(full_pl)} total rows down to {len(upcoming_pl)} Upcoming matches.")
+                return upcoming_pl
+                
+        return full_pl

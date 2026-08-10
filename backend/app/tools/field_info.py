@@ -19,11 +19,14 @@ class FieldInfoNode(BaseNode):
     }
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
-        if "default" not in inputs:
-            raise ValueError("Field Info requires an input dataframe.")
+        df = inputs.get("input")
+        if df is None:
+            # Fallback to the first available input dataframe if "input" isn't found
+            if inputs:
+                df = list(inputs.values())[0]
+            else:
+                raise ValueError("Field Info requires an input dataframe.")
             
-        df = inputs["default"]
-        
         self.log(f"Extracting field info for {df.width} columns...")
         
         # We need to construct metadata for each column

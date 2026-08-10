@@ -49,7 +49,7 @@ VibeETL bridges the gap between complex code-based data preparation and heavy en
 - **Interactive Canvas**: Drag-and-drop tools to build Directed Acyclic Graphs (DAGs) of your data pipeline.
 - **In-Memory Executions**: Process data locally using **Polars** yielding sub-millisecond execution times.
 - 🐘 **Big Data Ready**: Connect directly to massive SQL Databases (PostgreSQL, MySQL, SQLite, etc.) via highly-parallelized `connectorx` Arrow drivers.
-- 🧠 **Smart DAG Pruning**: Fully integrated node-caching capabilities. Lock a node's state to prevent upstream re-execution, saving you tremendous time during workflow development.
+- 🧠 **Smart DAG Pruning & Persistent Disk Caching**: Fully integrated node-caching capabilities. Click the Cache button to **Freeze** a node's output directly to highly compressed Parquet files on your hard drive. This survives server restarts and instantly bypasses expensive upstream computations (like ML predictions) in milliseconds!
 - 🏗️ **Union & Deduplication**: Stack datasets seamlessly or isolate distinct entries.
 - 📊 **Interactive Web Visuals**: Dynamically generate rich, interactive Scatter, Line, Bar, and Box plots using the integrated `Plotly` HTML backend. Hover, zoom, and pan directly inside your results grid!
 - ✨ **Multimodal Generative AI**: Seamlessly process Text, Images, Video, and Audio using the integrated **Gemini AI** node! Throw files and prompts at the node and watch it dynamically extract data into a new column.
@@ -76,7 +76,8 @@ VibeETL brings the dense, hyper-productive feel of professional enterprise suite
 - 💎 **Semantic Propagation**: When a semantic type is detected, the Engine maps it directly through the computational DAG! This metadata drives intelligent UI rendering—displaying `$` badges in your preview grid, formatting Plotly axes dynamically into currency layouts, and guiding users seamlessly.
 - ⭐ **Dynamic Tool Favorites**: Fully customize your workspace! Pin any tool to your exclusive "Favorites" group by clicking its Star badge, completely eliminating scrolling and searching when building workflows. Your preferences are instantly saved to your browser's local storage and flawlessly restored across sessions!
 - 🔢 **True Sequential Numbering & Find**: Navigating massive workflows is incredibly easy with true, clean sequential Node IDs (`node_1`, `node_2`) that make hitting the "Find" bar extremely powerful and accurate.
-- ✨ **Smart Canvas Mechanics**: Magnetic wire snapping, node-collision detection, cascading auto-drops, and a dedicated "Clear All Cache" tool keep the canvas incredibly responsive and visually flawless!
+- ✨ **Intelligent Canvas Branching**: Build complex, multi-path workflows effortlessly. The canvas dynamically preserves all existing edge connections when dropping new tools, allowing you to seamlessly branch a single output into multiple downstream tools simultaneously.
+- 🧲 **Smart Canvas Mechanics**: Magnetic wire snapping, node-collision detection, cascading auto-drops, and a dedicated "Clear All Cache" tool keep the canvas incredibly responsive and visually flawless!
 
 ---
 
@@ -105,7 +106,7 @@ VibeETL comes pre-loaded with an extensive suite of data engineering nodes, eleg
 | **Preparation** | Blue 🔵 | `Filter`, `Sort`, `Cleanse`, `Formula Compute`, `Unique`, `Regex`, `Record ID`, `Sample Records`, `Field Info` |
 | **Transform** | Orange 🟠 | `Select`, `Pivot`, `Unpivot`, `Summarize`, `Date Time` |
 | **Join** | Purple 🟣 | `Union`, `Join` |
-| **Analysis** | Pink 🦩 | `Gemini AI (Multimodal LLM)`, `Visualization`, `Python Code`, `LLM Chunker` |
+| **Analysis** | Pink 🦩 | `Gemini AI (Multimodal LLM)`, `Visualization`, `Python Code`, `LLM Chunker`, `Football Engine`, `ML Predictor` |
 
 > 🚀 **More Tools on the Horizon!**
 > We are continuously expanding the VibeETL ecosystem! We have recently launched the **Cloud Connectors** suite, meaning `Google Sheets` and `Google Cloud Storage (GCS)` nodes are now partially ready for community use and testing! Expect more advanced integrations like Machine Learning predictors and geospatial transformers very soon.
@@ -173,5 +174,5 @@ Developers do **NOT** need to write any React/Javascript to build forms! Simply 
 </div>
 
 
-## Sports Analytics Suite (WIP)
-This branch contains the work-in-progress Sports Predictor suite, featuring dynamic OddsPortal scrapers (Upcoming & Historical) and intelligent match outcome Predictor pipelines.
+## 🏆 Advanced Analytics & Machine Learning (WIP)
+This branch contains our work-in-progress Advanced Analytics suite! We are building out complex feature engineering nodes (like the `Football Engine`) and intelligent multi-target Machine Learning pipelines (`Predictor`) that leverage our lightning-fast Polars backend to forecast outcomes directly on the canvas!

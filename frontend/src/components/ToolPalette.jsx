@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import * as Icons from 'lucide-react';
-import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize, Columns, Rows } from 'lucide-react';
+import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize, Columns, Rows, Wand } from 'lucide-react';
 import { API_BASE } from '../config';
 import { useLayout } from '../contexts/LayoutContext';
 
@@ -14,7 +14,7 @@ const CATEGORY_TITLES = {
   'misc': 'Miscellaneous'
 };
 
-const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode, isChatOpen, onToggleChat, isSandbox }) => {
+const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode, isChatOpen, onToggleChat, isSandbox, onAutoLayout }) => {
   const { layoutDirection, toggleLayout } = useLayout();
   const fileInputRef = useRef(null);
   const dropdownRef = useRef(null);
@@ -27,6 +27,9 @@ const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWork
   const [authStatus, setAuthStatus] = useState('checking');
   const [uploadSuccessMessage, setUploadSuccessMessage] = useState('');
   const authFileInputRef = useRef(null);
+
+  const [hoveredToolInfo, setHoveredToolInfo] = useState(null);
+  const hoverTimeoutRef = useRef(null);
 
   const [runStatus, setRunStatus] = useState('idle');
   const [workspaceNode, setWorkspaceNode] = useState(null);
@@ -339,10 +342,19 @@ const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWork
                     onClick={() => {
                       window.dispatchEvent(new CustomEvent('vibe-add-node', { detail: { type: tool.id } }));
                     }}
-                    title={tool.description || `Click or drag onto canvas to add ${tool.name}`}
+                    onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      hoverTimeoutRef.current = setTimeout(() => {
+                        setHoveredToolInfo({ tool, rect });
+                      }, 2000);
+                    }}
+                    onMouseLeave={() => {
+                      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                      setHoveredToolInfo(null);
+                    }}
                     style={{ cursor: 'pointer', position: 'relative' }}
                   >
-                    <IconComponent size={18} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                    <IconComponent size={18} strokeWidth={1.5} style={{ flexShrink: 0, color: `var(--color-${tool.category})` }} />
                     <span>{tool.name}</span>
                     <div 
                       onClick={(e) => toggleFavorite(tool.id, e)}
@@ -544,6 +556,13 @@ const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWork
           {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
         </button>
         <button
+          className="toolbar-btn"
+          onClick={onAutoLayout}
+          title="Auto-Layout Nodes (Magic Wand)"
+        >
+          <Wand size={16} />
+        </button>
+        <button
           className="run-button"
           style={{ background: 'var(--panel-bg)', color: 'var(--text-color)', border: '1px solid var(--border-color)' }}
           onClick={toggleLayout}
@@ -697,6 +716,30 @@ const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWork
             </div>
           </div>
         </div>
+      )}
+
+      {hoveredToolInfo && createPortal(
+        <div style={{
+          position: 'absolute',
+          top: hoveredToolInfo.rect.bottom + 10,
+          left: Math.min(hoveredToolInfo.rect.left, window.innerWidth - 300),
+          background: 'white',
+          border: '1px solid var(--border-color)',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+          padding: '12px 14px',
+          borderRadius: '8px',
+          maxWidth: '300px',
+          zIndex: 99999,
+          pointerEvents: 'none',
+          fontFamily: 'var(--font-primary)'
+        }}>
+          <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {React.createElement(Icons[hoveredToolInfo.tool.icon] || Icons.Square, { size: 16, style: { color: 'var(--color-primary)' } })}
+            {hoveredToolInfo.tool.name}
+          </h4>
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: hoveredToolInfo.tool.description || 'No documentation available.' }} />
+        </div>,
+        document.body
       )}
     </div>
   );

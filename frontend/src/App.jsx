@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNodesState, useEdgesState, addEdge } from '@xyflow/react';
+import dagre from 'dagre';
 import ToolPalette from './components/ToolPalette';
 import Canvas from './components/Canvas';
 import ConfigWindow from './components/ConfigWindow';
@@ -19,6 +20,18 @@ if (!window.sessionId) {
 
 // Dynamic API Base URL from environment variables
 import { API_BASE } from './config';
+
+const deepEqual = (obj1, obj2) => {
+  if (obj1 === obj2) return true;
+  if (typeof obj1 !== 'object' || typeof obj2 !== 'object' || obj1 == null || obj2 == null) return false;
+  const keys1 = Object.keys(obj1);
+  const keys2 = Object.keys(obj2);
+  if (keys1.length !== keys2.length) return false;
+  for (let key of keys1) {
+    if (!keys2.includes(key) || !deepEqual(obj1[key], obj2[key])) return false;
+  }
+  return true;
+};
 
 // Initial nodes to populate the workspace with a working demo out-of-the-box
 const initialNodes = [
@@ -260,7 +273,25 @@ const getInitialTabs = () => {
 
 function App({ isSandbox = false }) {
   const [tabs, setTabs] = useState(getInitialTabs());
-  const [activeTabId, setActiveTabId] = useState(tabs[0]?.id || 'tab-1');
+  const [activeTabId, setActiveTabId] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabFromUrl = params.get('tab');
+      // If we find the tab in initial tabs or it's a valid ID pattern
+      if (tabFromUrl) return tabFromUrl;
+    } catch (e) {}
+    return tabs[0]?.id || 'tab-1';
+  });
+
+  useEffect(() => {
+    try {
+      const url = new URL(window.location);
+      if (url.searchParams.get('tab') !== activeTabId) {
+        url.searchParams.set('tab', activeTabId);
+        window.history.replaceState({}, '', url);
+      }
+    } catch (e) {}
+  }, [activeTabId]);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
   
@@ -317,7 +348,7 @@ function App({ isSandbox = false }) {
   }, [activeTabId]);
 
   const onNodesChange = useCallback((changes) => {
-    onNodesChangeCore(changes);
+    console.log('Changes:', changes.filter(c => c.type === 'select')); onNodesChangeCore(changes);
     const isDrag = changes.some(c => c.type === 'position' || c.type === 'dimensions');
     if (isDrag) {
       isDraggingNode.current = true;
@@ -963,6 +994,29 @@ function App({ isSandbox = false }) {
         if (nodesToCopy.length > 0) {
           localStorage.setItem('vibeetl_clipboard', JSON.stringify({ nodes: nodesToCopy, edges: edgesToCopy }));
         }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        const selectedNodes = nodes.filter(n => n.selected || n.id === selectedNodeId);
+        
+        // Include children if a container is selected
+        const children = nodes.filter(n => selectedNodes.some(sn => sn.id === n.parentId && !selectedNodes.includes(n)));
+        const nodesToCopy = [...selectedNodes, ...children];
+        
+        const selectedNodeIds = nodesToCopy.map(n => n.id);
+        const edgesToCopy = edges.filter(e => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target));
+        
+        if (nodesToCopy.length > 0) {
+          localStorage.setItem('vibeetl_clipboard', JSON.stringify({ nodes: nodesToCopy, edges: edgesToCopy }));
+          
+          setNodes(nds => nds.filter(n => !selectedNodeIds.includes(n.id)));
+          setEdges(eds => eds.filter(edge => 
+            !edgesToCopy.some(e => e.id === edge.id) &&
+            !selectedNodeIds.includes(edge.source) && 
+            !selectedNodeIds.includes(edge.target)
+          ));
+          setSelectedNodeId(null);
+          setSelectedEdgeId(null);
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         setNodes(nds => nds.map(n => ({ ...n, selected: true })));
@@ -1001,11 +1055,14 @@ function App({ isSandbox = false }) {
               }
             });
             
-            const newEdges = pastedEdges.map(e => ({
+            // Filter to only include edges where both source and target are inside the pasted nodes
+            const validPastedEdges = pastedEdges.filter(e => idMap[e.source] && idMap[e.target]);
+            
+            const newEdges = validPastedEdges.map(e => ({
               ...e,
               id: `edge_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-              source: idMap[e.source] || e.source,
-              target: idMap[e.target] || e.target,
+              source: idMap[e.source],
+              target: idMap[e.target],
               selected: true
             }));
             
@@ -1083,12 +1140,15 @@ function App({ isSandbox = false }) {
   const [autoRun, setAutoRun] = useState(false);
   const [availableTools, setAvailableTools] = useState([]);
   const [sidebarWidth, setSidebarWidth] = useState(380);
+  const [hasResizedSidebar, setHasResizedSidebar] = useState(false);
   const isResizing = React.useRef(false);
 
   const lastSelectedNodeRef = React.useRef(null);
 
   // Handle dynamic config sidebar width based on selected tool
   useEffect(() => {
+    if (hasResizedSidebar) return;
+    
     if (selectedNodeId) {
       if (selectedNodeId !== lastSelectedNodeRef.current) {
         lastSelectedNodeRef.current = selectedNodeId;
@@ -1127,7 +1187,7 @@ function App({ isSandbox = false }) {
         setSidebarWidth(380);
       }
     }
-  }, [selectedNodeId, nodes, availableTools]);
+  }, [selectedNodeId, nodes, availableTools, hasResizedSidebar]);
 
   const startResizing = useCallback((mouseDownEvent) => {
     isResizing.current = true;
@@ -1139,6 +1199,7 @@ function App({ isSandbox = false }) {
       const newWidth = mouseMoveEvent.clientX;
       if (newWidth > 220 && newWidth < 1200) {
         setSidebarWidth(newWidth);
+        setHasResizedSidebar(true);
       }
     };
 
@@ -1222,12 +1283,23 @@ function App({ isSandbox = false }) {
         return;
       }
 
+      const targetNode = nodes.find(n => n.id === params.target);
+      const isMultiInput = targetNode?.type === 'union';
+
       const edge = {
         ...params,
-        id: `e-${params.source}-${params.target}`,
+        id: `e-${params.source}-${params.sourceHandle || 'output'}-${params.target}-${params.targetHandle || 'input'}`,
         style: { stroke: '#9ca3af', strokeWidth: 2 }
       };
-      setEdges((eds) => addEdge(edge, eds));
+      
+      setEdges((eds) => {
+        let currentEdges = eds;
+        if (!isMultiInput) {
+          // Remove any existing edge that targets the same node and handle
+          currentEdges = currentEdges.filter(e => !(e.target === params.target && (e.targetHandle || 'input') === (params.targetHandle || 'input')));
+        }
+        return addEdge(edge, currentEdges);
+      });
     },
     [nodes, setEdges]
   );
@@ -1248,14 +1320,18 @@ function App({ isSandbox = false }) {
           const newParamsWithoutCache = { ...newParams };
           delete newParamsWithoutCache.isCached;
           
-          const paramsChanged = JSON.stringify(oldParams) !== JSON.stringify(newParamsWithoutCache);
+          const paramsChanged = !deepEqual(oldParams, newParamsWithoutCache);
+
+          if (!paramsChanged && node.data.parameters?.isCached === newParams.isCached) {
+            return node;
+          }
 
           // If params changed, we reset status to idle and clear the cache lock
           return {
             ...node,
             data: {
               ...node.data,
-              status: 'idle',
+              status: paramsChanged ? 'idle' : node.data.status,
               parameters: {
                 ...newParams,
                 isCached: paramsChanged ? false : newParams.isCached
@@ -1268,8 +1344,37 @@ function App({ isSandbox = false }) {
     );
   }, [setNodes]);
 
+  const handleCopyConfig = useCallback((node) => {
+    if (!node) return;
+    const configData = {
+      type: node.type,
+      parameters: node.data.parameters
+    };
+    localStorage.setItem('vibe_copied_config', JSON.stringify(configData));
+  }, []);
+
+  const handlePasteConfig = useCallback((targetNode) => {
+    if (!targetNode) return;
+    try {
+      const stored = localStorage.getItem('vibe_copied_config');
+      if (!stored) {
+        alert('No configuration copied.');
+        return;
+      }
+      const configData = JSON.parse(stored);
+      if (configData.type !== targetNode.type) {
+        alert(`Type mismatch! Cannot paste ${configData.type} config into a ${targetNode.type} tool.`);
+        return;
+      }
+      handleUpdateParams(targetNode.id, configData.parameters);
+    } catch (e) {
+      console.error('Failed to paste config', e);
+    }
+  }, [handleUpdateParams]);
+
+
   // Add a new node dropped from the tool palette
-  const handleAddNode = useCallback((type, position, anchorNodeId = null) => {
+  const handleAddNode = useCallback((type, position, anchorNodeId = null, splitEdgeId = null) => {
     let label = 'Node';
     let category = 'inout';
     let icon = 'Square';
@@ -1444,7 +1549,8 @@ function App({ isSandbox = false }) {
       newNodes.push(newNode);
 
       if (anchorNodeId && sourceHandles.length > 0) {
-        const defaultTargetHandle = type === 'join' ? 'left' : 'input';
+        let defaultTargetHandle = 'input';
+        if (type === 'join') defaultTargetHandle = 'left';
         if (nodesToCreate > 1) {
           // Connect 1-to-1: one port per duplicated node
           const srcHandle = sourceHandles[i];
@@ -1472,15 +1578,52 @@ function App({ isSandbox = false }) {
       }
     }
 
-    setNodes((nds) => nds.concat(newNodes));
-    if (newEdges.length > 0) {
-      setEdges((eds) => eds.concat(newEdges));
+    let finalEdges = [...newEdges];
+    let removeEdgeIds = [];
+    
+    if (splitEdgeId && newNodes.length === 1) {
+      const splitEdge = edges.find(e => e.id === splitEdgeId);
+      if (splitEdge) {
+        removeEdgeIds.push(splitEdge.id);
+        
+        let defaultTargetHandle = 'input';
+        if (type === 'join') defaultTargetHandle = 'left';
+        
+        // 1. Upstream node to new dropped tool
+        finalEdges.push({
+          id: `edge_split1_${splitEdge.source}-${splitEdge.sourceHandle}-${newNodes[0].id}`,
+          source: splitEdge.source,
+          target: newNodes[0].id,
+          sourceHandle: splitEdge.sourceHandle,
+          targetHandle: defaultTargetHandle,
+          style: splitEdge.style || { stroke: '#9ca3af', strokeWidth: 2 }
+        });
+        
+        // 2. New dropped tool to downstream node
+        finalEdges.push({
+          id: `edge_split2_${newNodes[0].id}-output-${splitEdge.target}`,
+          source: newNodes[0].id,
+          target: splitEdge.target,
+          sourceHandle: 'output',
+          targetHandle: splitEdge.targetHandle,
+          style: splitEdge.style || { stroke: '#9ca3af', strokeWidth: 2 }
+        });
+      }
+    }
+
+    setNodes((nds) => {
+      const updatedNodes = nds.map(n => ({ ...n, selected: false }));
+      const newNodesWithSelection = newNodes.map((n, idx) => ({ ...n, selected: idx === newNodes.length - 1 }));
+      return updatedNodes.concat(newNodesWithSelection);
+    });
+    if (finalEdges.length > 0 || removeEdgeIds.length > 0) {
+      setEdges((eds) => eds.filter(e => !removeEdgeIds.includes(e.id)).concat(finalEdges));
     }
     
     if (newNodes.length > 0) {
       setSelectedNodeId(newNodes[newNodes.length - 1].id);
     }
-  }, [setNodes, setEdges, availableTools, nodes]);
+  }, [setNodes, setEdges, availableTools, nodes, edges]);
 
   // Clean state when nodes are deleted
   const onNodesDelete = useCallback((deleted) => {
@@ -1760,7 +1903,7 @@ function App({ isSandbox = false }) {
                   const nextResults = { ...prevResults };
                   
                   for (const [nodeId, payload] of Object.entries(data.statuses)) {
-                    if (payload.status === 'running' && payload.preview) {
+                    if ((payload.status === 'running' || payload.status === 'waiting') && payload.preview) {
                       const currentLogsCount = nextResults[nodeId] && nextResults[nodeId].logs ? nextResults[nodeId].logs.length : 0;
                       const newLogsCount = payload.logs ? payload.logs.length : 0;
                       
@@ -2077,6 +2220,42 @@ function App({ isSandbox = false }) {
     return selectedNode;
   };
 
+  const handleAutoLayout = () => {
+    if (nodes.length === 0) return;
+    
+    const dagreGraph = new dagre.graphlib.Graph();
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
+    
+    // Config: nodesep is horizontal distance, ranksep is vertical distance for LR direction
+    const isHorizontal = true; // Most nodes flow left to right
+    dagreGraph.setGraph({ rankdir: isHorizontal ? 'LR' : 'TB', nodesep: 150, ranksep: 200 });
+
+    nodes.forEach((node) => {
+      // Approximate node size
+      dagreGraph.setNode(node.id, { width: 250, height: 100 });
+    });
+
+    edges.forEach((edge) => {
+      dagreGraph.setEdge(edge.source, edge.target);
+    });
+
+    dagre.layout(dagreGraph);
+
+    const newNodes = nodes.map((node) => {
+      const nodeWithPosition = dagreGraph.node(node.id);
+      return {
+        ...node,
+        position: {
+          x: nodeWithPosition.x - 125, // offset by half width
+          y: nodeWithPosition.y - 50   // offset by half height
+        },
+      };
+    });
+
+    setNodes(newNodes);
+    setIsDirty(true);
+  };
+
   const inspectedNode = getInspectedNode();
 
   return (
@@ -2098,6 +2277,7 @@ function App({ isSandbox = false }) {
         isChatOpen={isChatOpen}
         onToggleChat={() => setIsChatOpen(!isChatOpen)}
         isSandbox={isSandbox}
+        onAutoLayout={handleAutoLayout}
       />
 
       {/* Workspace Area */}
@@ -2191,6 +2371,8 @@ function App({ isSandbox = false }) {
                   // Force a tabs sync to capture the new coordinates
                   setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, nodes, edges, isDirty: true } : t));
                 }}
+                onCopyConfig={handleCopyConfig}
+                onPasteConfig={handlePasteConfig}
               />
             </ErrorBoundary>
           </div>

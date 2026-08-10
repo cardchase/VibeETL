@@ -4,10 +4,17 @@ import sys
 import glob
 import concurrent.futures
 import polars as pl
+import signal
+
+def force_exit_handler(sig, frame):
+    print("\n[!] Ctrl+C detected! Forcefully shutting down all scraping tasks immediately...")
+    os._exit(1)
+
+signal.signal(signal.SIGINT, force_exit_handler)
 
 # Add current dir to path to import app
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from app.tools.odds_portal_scraper import OddsPortalScraperNode
+from app.tools.odds_portal_historical import OddsPortalScraperNode
 
 def get_slug(url: str) -> str:
     parts = [p for p in url.split('/') if p]
@@ -23,11 +30,18 @@ def get_slug(url: str) -> str:
     country_abbr = country[:3]
     return f"{country_abbr}_{competition}"
 
-def sync_and_deduplicate_csvs(output_dir: str):
-    print("Running deduplication and synchronization on CSV files...")
-    intermediate_files = glob.glob(os.path.join(output_dir, "*_intermediate.csv"))
+def sync_and_deduplicate_csvs(output_dir: str, target_slug: str = None):
+    intermediates_dir = os.path.join(output_dir, "intermediates")
+    
+    if target_slug:
+        intermediate_files = [os.path.join(intermediates_dir, f"{target_slug}_intermediate.csv")]
+    else:
+        intermediate_files = glob.glob(os.path.join(intermediates_dir, "*_intermediate.csv"))
     
     for inter_path in intermediate_files:
+        if not os.path.exists(inter_path):
+            continue
+            
         filename = os.path.basename(inter_path)
         slug = filename.replace("_intermediate.csv", "")
         final_path = os.path.join(output_dir, f"{slug}.csv")
@@ -57,12 +71,14 @@ def sync_and_deduplicate_csvs(output_dir: str):
         except Exception as e:
             print(f"Failed to sync {slug}: {e}")
 
-def process_competition(url: str):
+def process_competition(url: str, tabs: int = 3, headless: bool = False):
     slug = get_slug(url)
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "outputs"))
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "outputs"))
+    intermediates_dir = os.path.join(output_dir, "intermediates")
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(intermediates_dir, exist_ok=True)
     
-    intermediate_csv = os.path.join(output_dir, f"{slug}_intermediate.csv")
+    intermediate_csv = os.path.join(intermediates_dir, f"{slug}_intermediate.csv")
     final_csv = os.path.join(output_dir, f"{slug}.csv")
     
     # Intelligent Resume Logic
@@ -70,16 +86,19 @@ def process_competition(url: str):
         import shutil
         shutil.copy(final_csv, intermediate_csv)
     
+    # Sync and deduplicate this specific competition before we start
+    sync_and_deduplicate_csvs(output_dir, target_slug=slug)
+    
     # Initialize node
     node = OddsPortalScraperNode(
         node_id=f"scraper_{slug}",
         parameters={
             "targetUrl": url,
-            "maxWorkers": 5,
-            "headless": True,
+            "maxWorkers": tabs,
+            "headless": headless,
             "scrapeAllSeasons": True,
             "autoSaveCsvPath": intermediate_csv,
-            "autoSaveBatchSize": 10
+            "autoSaveBatchSize": 5
         }
     )
     
@@ -97,26 +116,62 @@ def process_competition(url: str):
     try:
         df = node.execute({"input": None})
         if df is not None and not df.is_empty():
+            pl.Config.set_tbl_rows(100)
+            pl.Config.set_tbl_cols(20)
+            pl.Config.set_fmt_str_lengths(135)
+            print(f"\n{df}\n")
             df.write_csv(final_csv)
-            print(f"Finished extraction for {slug}. Saved {len(df)} rows to {final_csv}")
+            print(f"Finished extraction for {slug}. Saved {len(df)} total rows to {final_csv}")
         else:
-            print(f"Finished extraction for {slug}, but no data was returned. Logging to missed_links.")
-            log_missed_link(url, "No data returned or empty DataFrame")
+            if os.path.exists(intermediate_csv) or os.path.exists(final_csv):
+                print(f"✨ Finished {slug}. All matches were already up-to-date in your CSV (0 new matches scraped).")
+            else:
+                print(f"Finished extraction for {slug}, but no data was returned. Logging to missed_links.")
+                log_missed_link(url, "No data returned or empty DataFrame")
             
     except Exception as e:
         print(f"Error extracting {slug}: {e}. Logging to missed_links.")
         log_missed_link(url, str(e))
 
 def main():
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "outputs"))
+    import argparse
+    parser = argparse.ArgumentParser(description="Run Batch Scraping for OddsPortal")
+    parser.add_argument("url", nargs="?", help="Specific URL to scrape (optional, otherwise reads from CSV)")
+    parser.add_argument("-b", "--browsers", type=int, default=None, help="Number of concurrent leagues (browsers) to scrape at once.")
+    parser.add_argument("-t", "--tabs", type=int, default=None, help="Number of concurrent match tabs per league.")
+    parser.add_argument("--headless", action="store_true", help="Run browsers in invisible headless mode")
+    
+    args = parser.parse_args()
+
+    if args.browsers is None and args.tabs is None:
+        print("\n=== OddsPortal Scraper Setup ===")
+        print("1. Daytime Mode   (1 Browser, 3 Tabs per browser)  - Visible browsers, lighter load")
+        print("2. Nighttime Mode (10 Browsers, 3 Tabs per browser) - Headless (invisible) browsers, maximum speed")
+        print("================================\n")
+        while True:
+            choice = input("Select an option (1 or 2): ").strip()
+            if choice == "1":
+                args.browsers = 1
+                args.tabs = 3
+                break
+            elif choice == "2":
+                args.browsers = 10
+                args.tabs = 3
+                args.headless = True
+                break
+            else:
+                print("Invalid choice. Please enter 1 or 2.")
+    else:
+        # Fallbacks if they only provide one argument
+        if args.browsers is None: args.browsers = 1
+        if args.tabs is None: args.tabs = 3
+
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "outputs"))
     os.makedirs(output_dir, exist_ok=True)
     
-    # 1. Deduplicate existing CSVs first
-    sync_and_deduplicate_csvs(output_dir)
-    
-    if len(sys.argv) > 1:
+    if args.url:
         # Run single URL passed via CLI
-        urls = [sys.argv[1]]
+        urls = [args.url]
     else:
         # Batch from CSV
         csv_file = os.path.join(output_dir, "competition list.csv")
@@ -129,44 +184,88 @@ def main():
                 for row in reader:
                     if not row: continue
                     url = row[0]
+                    
+                    # Intelligently exclude e-sports, virtuals, and non-football leagues
+                    url_lower = url.lower()
+                    if 'football' not in url_lower:
+                        continue
+                    if any(exclude_term in url_lower for exclude_term in ['esoccer', 'e-soccer', 'esport', 'virtual', 'srl', 'cyber', 'simulated']):
+                        continue
+                        
+                    if 'england/premier-league' in url_lower:
+                        continue
+                        
                     if not url.endswith('/results/'):
                         url = url.rstrip('/') + '/results/'
                     all_urls.append(url)
                     
         print(f"Found {len(all_urls)} competitions to scrape from CSV.")
         
-        # 2. Prioritize ones with intermediate files
-        priority_urls = []
-        regular_urls = []
+        # 2. Prioritize by League Popularity First, then Status
+        all_url_items = []
         
         for url in all_urls:
             slug = get_slug(url)
-            inter_path = os.path.join(output_dir, f"{slug}_intermediate.csv")
+            intermediates_dir = os.path.join(output_dir, "intermediates")
+            inter_path = os.path.join(intermediates_dir, f"{slug}_intermediate.csv")
             final_path = os.path.join(output_dir, f"{slug}.csv")
             
-            if os.path.exists(inter_path) or os.path.exists(final_path):
-                priority_urls.append((slug, url))
+            # Status: 0=incomplete, 1=update, 2=new
+            if os.path.exists(inter_path) and not os.path.exists(final_path):
+                status = 0
+            elif os.path.exists(final_path):
+                status = 1
             else:
-                regular_urls.append((slug, url))
+                status = 2
                 
-        # Sort both lists alphabetically by slug
-        priority_urls.sort(key=lambda x: x[0])
-        regular_urls.sort(key=lambda x: x[0])
-        
-        urls = [u[1] for u in priority_urls] + [u[1] for u in regular_urls]
+            all_url_items.append((slug, url, status))
+                
+        def get_priority(slug, url):
+            url_lower = url.lower()
+            
+            # Top tier - most popular, highest volume
+            top_tier = ['england/premier-league', 'spain/laliga', 'germany/bundesliga', 'italy/serie-a', 'france/ligue-1', 'europe/champions-league', 'europe/europa-league']
+            for term in top_tier:
+                if term in url_lower:
+                    return 1
+                    
+            # Mid tier - popular national leagues and second divisions
+            mid_tier = ['england/championship', 'netherlands/eredivisie', 'portugal/liga-portugal', 'brazil/serie-a', 'usa/mls', 'argentina/liga-profesional', 'italy/serie-b', 'spain/laliga2', 'germany/2-bundesliga', 'france/ligue-2', 'mexico/liga-mx']
+            for term in mid_tier:
+                if term in url_lower:
+                    return 2
+                    
+            # Obscure/low volume leagues - push to back
+            obscure = ['women', 'femenina', 'u20', 'u23', 'u19', 'u21', 'reserve', 'regional', 'npl', 'amateur']
+            for term in obscure:
+                if term in url_lower:
+                    return 99
+                    
+            return 10
+            
+        def sort_key(item):
+            slug, url, status = item
+            return (get_priority(slug, url), status, slug)
+
+        all_url_items.sort(key=sort_key)
+        urls = [item[1] for item in all_url_items]
 
     print(f"Preparing to scrape {len(urls)} competitions...")
+    print(f"Configuration -> Browsers (Leagues): {args.browsers}, Tabs (Matches/League): {args.tabs}, Headless: {args.headless}")
     
-    # Concurrent competitions using threads
-    max_workers = 1 if len(urls) == 1 else 5
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(process_competition, url) for url in urls]
+    # Use ThreadPoolExecutor to run multiple leagues concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.browsers) as executor:
+        futures = [executor.submit(process_competition, url, args.tabs, args.headless) for url in urls]
         try:
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"Competition task failed: {e}")
+            active_futures = list(futures)
+            while active_futures:
+                done, not_done = concurrent.futures.wait(active_futures, timeout=0.5, return_when=concurrent.futures.FIRST_COMPLETED)
+                for future in done:
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"Competition task failed: {e}")
+                    active_futures.remove(future)
         except KeyboardInterrupt:
             print("\n[!] Ctrl+C detected! Forcefully shutting down all scraping tasks immediately...")
             os._exit(1)

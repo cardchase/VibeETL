@@ -12,6 +12,7 @@ Core features:
 - Headless Chromium orchestration with dynamic cancellation listeners.
 """
 import asyncio
+import random
 import re
 import os
 from typing import Dict, Any, List
@@ -136,21 +137,28 @@ class OddsPortalScraperNode(BaseNode):
         
         async with async_playwright() as p:
             headless_mode = str(self.parameters.get("headless", "true")).lower() == "true"
+            
+            browser_args = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu']
+            if headless_mode:
+                browser_args.extend(['--headless=new', '--window-position=-2400,-2400'])
+            else:
+                browser_args.extend(['--start-maximized'])
+                
             # We use an authentic user agent to avoid trivial bot blocking
             browser = await p.chromium.launch(
                 headless=headless_mode,
-                args=[
-                    '--no-sandbox', 
-                    '--disable-setuid-sandbox', 
-                    '--headless=new', 
-                    '--window-position=-2400,-2400',
-                    '--disable-gpu'
-                ]
+                args=browser_args
             )
-            context = await browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+            if not headless_mode:
+                context = await browser.new_context(
+                    viewport={"width": 1920, "height": 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+            else:
+                context = await browser.new_context(
+                    viewport={"width": 1920, "height": 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
             
             async def global_cancel_watcher():
                 while True:
@@ -164,6 +172,9 @@ class OddsPortalScraperNode(BaseNode):
                     await asyncio.sleep(0.5)
             
             global_watcher_task = asyncio.create_task(global_cancel_watcher())
+            
+            self.global_pause_event = asyncio.Event()
+            self.global_pause_event.set()
             
             try:
                 if is_match:
@@ -234,7 +245,7 @@ class OddsPortalScraperNode(BaseNode):
                             break
                             
                         season_slug = season_url.split('football/')[-1] if 'football/' in season_url else season_url
-                        self.log(f"📅 [Season {s_idx+1}/{len(season_urls)}] Backward Scan: {season_slug}")
+                        self.log(f"  [Season {s_idx+1}/{len(season_urls)}] Backward Scan: {season_slug}")
                         match_links, consecutive_fully_scraped_pages = await self.extract_match_links(competition_page, season_url, scraped_urls, consecutive_fully_scraped_pages)
                         
                         original_len = len(match_links)
@@ -249,6 +260,11 @@ class OddsPortalScraperNode(BaseNode):
                         async def process_match(match_url, original_idx, is_retry=False):
                             if hasattr(self, "is_cancelled") and self.is_cancelled():
                                 return None
+                            
+                            await self.wait_for_clearance()
+                            # Stagger start BEFORE grabbing semaphore to prevent locking pool slots while sleeping
+                            await asyncio.sleep(random.uniform(0.5, 3.0))
+                            
                             async with semaphore:
                                 if hasattr(self, "is_cancelled") and self.is_cancelled():
                                     return None
@@ -271,9 +287,10 @@ class OddsPortalScraperNode(BaseNode):
                                 except Exception as e:
                                     if hasattr(self, "is_cancelled") and self.is_cancelled():
                                         return None
-                                    if "TargetClosedError" in str(type(e)):
-                                        return None
-                                    raise
+                                    if "closed" in str(e).lower():
+                                        self.log("Browser connection closed unexpectedly, pausing tasks to prevent spam...")
+                                        await asyncio.sleep(5.0)
+                                    return {"_failed": True, "_error": str(e), "URL": match_url, "_original_order": original_idx, "_season_order": s_idx}
                                 finally:
                                     if page:
                                         try:
@@ -296,6 +313,14 @@ class OddsPortalScraperNode(BaseNode):
                                 try:
                                     r = await completed_task
                                     if isinstance(r, dict):
+                                        if r.get("_failed"):
+                                            if not is_retry:
+                                                self.log(f"⚠️ [Error] Tab failed for {r.get('URL')} with error: {r.get('_error')}. Added to retry queue.")
+                                                retry_queue.append({'url': r.get("URL"), 'idx': r.get("_original_order")})
+                                            else:
+                                                self.log(f"❌ [Failed] Match permanently failed after retry: {r.get('URL')}")
+                                            continue
+                                            
                                         needs_retry = False
                                         if not is_retry:
                                             critical_cols = ["FT_HomeOdds", "DNB_Home", "DC_FT_1X", "BTTS_Yes", "OU25_Over"]
@@ -344,9 +369,7 @@ class OddsPortalScraperNode(BaseNode):
                                                     self.log(f"Error auto-saving to CSV: {e}")
                                 except Exception as e:
                                     if not (hasattr(self, "is_cancelled") and self.is_cancelled()):
-                                        self.log(f"Error extracting match: {e}")
-                                        if "closed" in str(e).lower():
-                                            raise e
+                                        self.log(f"Error extracting match in tab: {e}. Skipping to next match.")
 
                         # Pass 1: Initial Scrape
                         await consume_tasks(tasks, is_retry=False)
@@ -385,39 +408,34 @@ class OddsPortalScraperNode(BaseNode):
         try:
             self.log(f"Navigating to base URL to discover historical seasons: {base_url}")
             await page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
-            # The seasons are inside a flex-wrap container with a link to results/
-            # We will grab all hrefs that match the pattern /football/<country>/<league>
-            # The user provided outerHTML: <div class="flex flex-wrap gap-2 py-3 ..."><a href="...">...</a></div>
-            await page.wait_for_selector('a[href*="/results/"]', timeout=15000)
+            await page.wait_for_timeout(5000)
+
+            # Get all links on the page and filter them in Python
+            links = await page.evaluate("() => Array.from(document.body.querySelectorAll('a')).map(a => a.href)")
             
-            links = await page.evaluate(r"""
-                () => {
-                    let containers = Array.from(document.querySelectorAll('div.flex.flex-wrap.gap-2.py-3'));
-                    for (let c of containers) {
-                        let aTags = Array.from(c.querySelectorAll('a[href*="/results/"]'));
-                        if (aTags.length > 3) {
-                            return aTags.map(a => a.href);
-                        }
-                    }
-                    return [];
-                }
-            """)
+            import re
+            # E.g., if base_url is https://www.oddsportal.com/football/europe/champions-league/results/
+            # We want to match: /europe/champions-league-2023-2024/results/
+            clean_base = base_url.split('/results')[0].split('/standings')[0].rstrip('/')
             
-            if links:
-                # Remove duplicates while preserving order
-                unique_links = []
-                for l in links:
-                    if l not in unique_links:
-                        unique_links.append(l)
+            season_links = []
+            for l in links:
+                if l.startswith(clean_base) and "/results" in l:
+                    if re.search(r'-\d{4}-\d{4}/results/?$', l):
+                        season_links.append(l)
+
+            if season_links:
+                # Deduplicate while preserving order and sort descending to scrape newest seasons first
+                unique_links = list(dict.fromkeys(season_links))
+                unique_links.sort(reverse=True)
                 self.log(f"Found {len(unique_links)} historical seasons.")
                 return unique_links
             else:
-                self.log("Could not find the season pagination container. Falling back to single season.")
+                self.log("Could not find historical seasons in the DOM. Falling back to single season.")
                 return [base_url]
         except Exception as e:
             self.log(f"Error extracting season links: {e}")
             return [base_url]
-
 
     async def extract_match_links(self, page, competition_url: str, scraped_urls: set = None, consecutive_fully_scraped_pages: int = 0) -> tuple:
         max_retries = 3
@@ -429,6 +447,7 @@ class OddsPortalScraperNode(BaseNode):
             if hasattr(self, "is_cancelled") and self.is_cancelled():
                 return [], consecutive_fully_scraped_pages
             try:
+                await self.wait_for_clearance()
                 if attempt == 0:
                     response = await page.goto(competition_url, wait_until="domcontentloaded", timeout=30000)
                 else:
@@ -439,19 +458,26 @@ class OddsPortalScraperNode(BaseNode):
                     self.log(f"Warning: OddsPortal returned HTTP {response.status}. The URL may be invalid.")
             except Exception as e:
                 self.log(f"Error navigating to competition URL on attempt {attempt + 1}: {e}")
+                await asyncio.sleep(5.0)
                 if "closed" in str(e).lower():
                     raise e
                 continue
             
-            # Wait for the match grid to render
+            # Wait for the match grid
             try:
-                # Fast fail if the page clearly says there are no matches
-                no_matches = await page.evaluate("() => document.body.innerText.includes('Unfortunately, no matches can be displayed')")
-                if no_matches:
-                    self.log("Detected 'no matches' message. This season has no data yet. Skipping...")
-                    return [], consecutive_fully_scraped_pages
+                # Give React SPA 5 full seconds to hydrate the DOM. 
+                # This prevents premature scraping where the DOM contains SSR fallback text before hydration.
+                await page.wait_for_timeout(5000)
                 
-                await page.wait_for_selector('a[href*="/h2h/"]', state="attached", timeout=15000)
+                # Fast fail if the page clearly says there are no matches AFTER hydration
+                no_matches = await page.evaluate("() => document.body.innerText.toLowerCase().includes('unfortunately') && (document.body.innerText.toLowerCase().includes('no bookmakers') || document.body.innerText.toLowerCase().includes('no odds') || document.body.innerText.toLowerCase().includes('no matches'))")
+                if no_matches:
+                    self.log(f"Detected 'no matches' message on attempt {attempt + 1}.")
+                    if attempt == max_retries - 1:
+                        self.log("Maximum retries reached. This season has no data yet. Skipping...")
+                        return [], consecutive_fully_scraped_pages
+                    await page.wait_for_timeout(2000)
+                    continue
             except Exception as e:
                 self.log(f"Warning: Timed out waiting for match links on {competition_url} (Attempt {attempt + 1})")
 
@@ -466,9 +492,9 @@ class OddsPortalScraperNode(BaseNode):
                 # Scroll to load lazy-loaded matches
                 for _ in range(5):
                     await page.evaluate("window.scrollBy(0, window.innerHeight)")
-                    await page.wait_for_timeout(10000)
+                    await page.wait_for_timeout(3000)
                 
-                # Scope to the main column to avoid sidebar (popular matches) pollution
+                # Scope strictly to the main column to avoid sidebar (popular matches) pollution
                 links = await page.evaluate("""() => {
                     let mainColumn = document.querySelector('div.flex.flex-col') || document.body;
                     return Array.from(mainColumn.querySelectorAll('a')).map(a => a.href);
@@ -497,6 +523,16 @@ class OddsPortalScraperNode(BaseNode):
                             l = canonical_url
                         else:
                             continue
+
+                    canonical_base_url = re.sub(r'-\d{4}-\d{4}/?$', '', base_url)
+                    if not canonical_base_url.endswith('/'):
+                        canonical_base_url += '/'
+                    canonical_base_url = canonical_base_url.rstrip('/')
+                    
+                    if not l.startswith(canonical_base_url):
+                        # Prevent scraping matches from the 'Popular Matches' sidebar that belong to other leagues.
+                        # Historical match URLs do not contain the -YYYY-YYYY suffix, so we check against canonical_base_url.
+                        continue
                     
                     # Ensure the match link matches the ID pattern (8 alphanumeric chars hash)
                     if re.search(r'-[a-zA-Z0-9]{8}/?(?:[?#].*)?$', l):
@@ -515,12 +551,12 @@ class OddsPortalScraperNode(BaseNode):
                 # Intelligence Check
                 if page_total_valid_links > 0 and page_total_valid_links == page_already_scraped_links:
                     consecutive_fully_scraped_pages += 1
-                    self.log(f"⏭️  [Page {page_num}] 100% of matches ({page_total_valid_links}) are already in dataset. Consecutive full pages: {consecutive_fully_scraped_pages}")
+                    self.log(f"  [Page {page_num}] 100% of matches ({page_total_valid_links}) are already in dataset. Consecutive full pages: {consecutive_fully_scraped_pages}")
                     if consecutive_fully_scraped_pages >= 2:
                         break
                 elif page_total_valid_links > 0:
                     consecutive_fully_scraped_pages = 0
-                    self.log(f"🔍 [Page {page_num}] Found {page_total_valid_links - page_already_scraped_links} new/incomplete matches to scrape.")
+                    self.log(f"  [Page {page_num}] Found {page_total_valid_links - page_already_scraped_links} new/incomplete matches to scrape.")
                 
                 # Try clicking "Next" button
                 next_clicked = await page.evaluate("""
@@ -551,6 +587,22 @@ class OddsPortalScraperNode(BaseNode):
                 await page.wait_for_timeout(2000)
                 
         return match_links, consecutive_fully_scraped_pages
+
+    async def wait_for_clearance(self):
+        if hasattr(self, "global_pause_event") and not self.global_pause_event.is_set():
+            await self.global_pause_event.wait()
+
+    def trigger_rate_limit_pause(self, seconds=60):
+        if not hasattr(self, "global_pause_event"):
+            return
+        if self.global_pause_event.is_set():
+            self.log(f"🛑 [RATE LIMIT DETECTED] Pausing entire worker pool for {seconds} seconds to evade Cloudflare block...")
+            self.global_pause_event.clear()
+            async def release():
+                await asyncio.sleep(seconds)
+                self.log("🟢 [RATE LIMIT CLEARED] Cooling off complete. Resuming worker pool.")
+                self.global_pause_event.set()
+            asyncio.create_task(release())
 
     async def execute_interception_engine(self, page, url: str) -> Dict[str, Any]:
         """
@@ -615,18 +667,54 @@ class OddsPortalScraperNode(BaseNode):
             if hasattr(self, "is_cancelled") and self.is_cancelled():
                 return extracted_row
             try:
+                await self.wait_for_clearance()
                 if attempt == 0:
+                    # Add a baseline jitter so all tabs don't hit the server at the exact same millisecond
+                    await asyncio.sleep(random.uniform(1.5, 3.5))
                     response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 else:
                     self.log(f"Attempt {attempt + 1}: Refreshing match page due to missing DOM tags...")
+                    # If we are retrying, wait longer! Give the firewall time to cool off.
+                    await asyncio.sleep(random.uniform(4.0, 7.0))
                     response = await page.reload(wait_until="domcontentloaded", timeout=30000)
+                    
+                # Blanket wait to let React SPA settle and prevent glitchy visual race conditions
+                await page.wait_for_timeout(5000)
+                    
                 
                 if response and not response.ok:
+                    self.log(f"Received HTTP {response.status}. The server might be blocking us.")
+                    if response.status in [403, 429, 502, 503, 504]:
+                        self.trigger_rate_limit_pause(60)
                     if attempt == 2: return extracted_row
+                    # Force a heavy timeout before the loop continues to the next attempt
+                    await asyncio.sleep(5.0)
                     continue
                     
-                # Wait for SPA DOM hydration of match items
-                await page.wait_for_selector('[data-testid="game-time-item"], [data-testid="live-info"], a[href*="1X2"], .flex-col', state="attached", timeout=15000)
+                # Wait for SPA DOM hydration OR empty state
+                try:
+                    await page.wait_for_function("""
+                        () => {
+                            if (document.querySelector('[data-testid="game-time-item"]') || document.querySelector('a[href*="1X2"]')) return true;
+                            if (document.body.innerText.toLowerCase().includes('unfortunately')) return true;
+                            return false;
+                        }
+                    """, timeout=15000)
+                except Exception:
+                    pass
+                    
+                # Fast abort if OddsPortal explicitly says there are no odds
+                content = await page.evaluate("() => document.body.innerText.toLowerCase()")
+                if "unfortunately" in content and ("no bookmakers" in content or "no odds" in content):
+                    self.log(f"Match has no odds available (found 'unfortunately...') on attempt {attempt + 1}.")
+                    if attempt == 2:
+                        self.log("Maximum retries reached. Skipping.")
+                        return {"_skip_retry": True}
+                    await page.wait_for_timeout(2000)
+                    continue
+                    
+                # Wait for SPA DOM hydration of match items (short timeout since we already waited)
+                await page.wait_for_selector('[data-testid="game-time-item"], [data-testid="live-info"], a[href*="1X2"], .flex-col', state="attached", timeout=5000)
                 
                 # Give the DOM an extra moment to settle text nodes
                 await page.wait_for_timeout(2500)
@@ -639,6 +727,7 @@ class OddsPortalScraperNode(BaseNode):
                 
                 break
             except Exception as e:
+                await asyncio.sleep(5.0)
                 if attempt == 2:
                     self.log(f"Failed to load match page after 3 attempts: {e}")
                     return extracted_row
@@ -1047,7 +1136,7 @@ class OddsPortalScraperNode(BaseNode):
                         more_tab = page.get_by_text(more_regex).filter(visible=True).first
                         if await more_tab.count() > 0:
                             await more_tab.click()
-                            await page.wait_for_timeout(10000)
+                            await page.wait_for_timeout(2000)
                             
                         # Check again with combined regex
                         target = page.get_by_text(main_regex).filter(visible=True).first
@@ -1075,7 +1164,7 @@ class OddsPortalScraperNode(BaseNode):
                         
                         if not is_active:
                             await main_tab.click(timeout=3000)
-                            await page.wait_for_timeout(500) # Give React a tiny moment to unmount old data
+                            await page.wait_for_timeout(2000) # Give React a moment to load tab data
                     else:
                         if hasattr(self, "is_cancelled") and self.is_cancelled():
                             return []
@@ -1103,18 +1192,18 @@ class OddsPortalScraperNode(BaseNode):
                                         
                             if not is_active:
                                 await sub_tab.click(timeout=3000)
-                                await page.wait_for_timeout(500) # Give React a tiny moment to unmount old data
+                                await page.wait_for_timeout(2000) # Give React a moment to load tab data
                         else:
                             # Sub tab missing, meaning this market segment doesn't exist for this match
                             return []
                     
                     # 3. Smart poll for ANY data to render to confirm load status
-                    # We will wait up to 120 seconds (120 loops of 10000ms) for odds to appear.
+                    # We will wait up to 120 seconds (120 loops of 1000ms) for odds to appear.
                     # We will not instantly abort on empty_market, as OddsPortal flashes this while loading.
                     empty_market_count = 0
                     rows_present_count = 0
                     for _ in range(120):
-                        await page.wait_for_timeout(10000)
+                        await page.wait_for_timeout(1000)
                         state = await page.evaluate(get_evaluate_tab_state(main_tab_texts, sub_tab_text, expected_odds_count))
                         if state["status"] == "loaded":
                             return state["odds"]
@@ -1210,6 +1299,7 @@ class OddsPortalScraperNode(BaseNode):
 
                 if await target.count() > 0:
                     await target.click(timeout=3000)
+                    await page.wait_for_timeout(2000)
                 else:
                     if not page_reloaded and attempt == 0:
                         self.log("Smart Refresh: Over/Under tab missing. Reloading page...")

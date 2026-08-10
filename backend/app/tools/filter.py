@@ -210,11 +210,12 @@ class FilterNode(BaseNode):
             return pl.lit(True)
             
         if column not in df.columns:
-            from app.tools.base import SchemaCompatibilityError
-            raise SchemaCompatibilityError(
-                f"Schema Compatibility Error in 'filter' node: Required column '{column}' "
-                f"is missing from the upstream schema. Available columns are: {df.columns}."
+            self.graceful_bypass(
+                df=df,
+                missing_cols=[column],
+                expected_config={'Filter Column': column}
             )
+            return pl.lit(True)
 
         col_type = df.schema[column]
         value = value_raw

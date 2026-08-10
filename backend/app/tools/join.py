@@ -11,8 +11,7 @@ class JoinNode(BaseNode):
         "description": "Join two datasets together based on a common key.",
         "ui_schema": [
             {"field": "left_keys", "type": "string", "label": "Left Key Column", "default": ""},
-            {"field": "right_keys", "type": "string", "label": "Right Key Column", "default": ""},
-            {"field": "how", "type": "select", "label": "Join Type", "options": ["left", "inner", "outer", "semi", "anti"], "default": "left"}
+            {"field": "right_keys", "type": "string", "label": "Right Key Column", "default": ""}
         ]
     }
 
@@ -72,10 +71,21 @@ class JoinNode(BaseNode):
         self.log(f"Performing {how} join. Left keys: {left_keys}, Right keys: {right_keys}.")
 
         try:
-            # Polars join
-            res_df = left_df.join(right_df, left_on=left_keys, right_on=right_keys, how=how)
-            self.log(f"Join successful. Result has {res_df.height} rows and {res_df.width} columns.")
-            return res_df
+            # Polars joins
+            joined = left_df.join(right_df, left_on=left_keys, right_on=right_keys, how="inner")
+            left_unjoined = left_df.join(right_df, left_on=left_keys, right_on=right_keys, how="anti")
+            right_unjoined = right_df.join(left_df, left_on=right_keys, right_on=left_keys, how="anti")
+            
+            self.log(f"Join successful. J: {joined.height} rows, L: {left_unjoined.height} rows, R: {right_unjoined.height} rows.")
+            
+            # Return multiple streams (J = Inner, L = Left Unjoined, R = Right Unjoined).
+            # We also include 'output' pointing to J for backwards compatibility with older edges.
+            return {
+                "J": joined,
+                "L": left_unjoined,
+                "R": right_unjoined,
+                "output": joined
+            }
         except Exception as e:
             self.log(f"Join failed: {str(e)}")
             raise ValueError(f"Join operation failed: {str(e)}")

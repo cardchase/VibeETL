@@ -96,7 +96,8 @@ class SelectNode(BaseNode):
             self.log(f"Applying select transformations for {len(expressions)} columns.")
             res_df = df.select(expressions)
             
-            self.log(f"Columns after select/rename/cast: {res_df.columns}")
+            schema_info = [f"'{col}' ({str(dtype)})" for col, dtype in res_df.schema.items()]
+            self.log(f"Columns after select/rename/cast: {schema_info}")
             return res_df
 
         except Exception as e:

@@ -3,7 +3,7 @@ import os
 import copy
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8001))
+    port = int(os.environ.get("PORT", 8000))
     print(f"Starting VibeETL Engine on port {port}...")
     
     # Add timestamps to the terminal logs

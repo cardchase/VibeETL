@@ -11,7 +11,7 @@ import {
   SelectionMode,
   Panel
 } from '@xyflow/react';
-import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Check, Copy, ClipboardPaste, Trash2, Maximize } from 'lucide-react';
+import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Check, Copy, Scissors, ClipboardPaste, Trash2, Maximize } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
 import ContainerNode from './ContainerNode';
@@ -108,9 +108,11 @@ const CanvasContent = ({
   onNodeDragStop,
   initialViewport,
   onMoveEnd,
+  onCopyConfig,
+  onPasteConfig,
 }) => {
   const reactFlowWrapper = useRef(null);
-  const { screenToFlowPosition, fitView, getViewport, setViewport, getNodes } = useReactFlow();
+  const { screenToFlowPosition, fitView, getViewport, setViewport, getNodes, setCenter } = useReactFlow();
   const [isPanMode, setIsPanMode] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
   const [menuConfig, setMenuConfig] = useState({ visible: false, x: 0, y: 0, type: null, nodeId: null });
@@ -128,6 +130,9 @@ const CanvasContent = ({
 
   const handleCopy = () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true }));
+  };
+  const handleCut = () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', ctrlKey: true }));
   };
   const handlePaste = () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true }));
@@ -148,7 +153,7 @@ const CanvasContent = ({
   };
   const handleSelectAll = () => {
     const changes = nodes.map(n => ({ id: n.id, type: 'select', selected: true }));
-    onNodesChange(changes);
+    console.log('Changes:', changes, 'Nodes:', nodes); onNodesChange(changes);
   };
 
   useEffect(() => {
@@ -203,31 +208,45 @@ const CanvasContent = ({
         y: event.clientY,
       });
 
-      // Prevent stacking - Find closest available area "1 tool apart" (Alteryx style)
-      let conflict = true;
-      let offsetMultiplier = 0;
+      // Check for Drop on Wire
+      let splitEdgeId = null;
+      let minDistance = 40; // 40 pixel threshold
       
-      while (conflict && offsetMultiplier < 20) {
-        // A standard tool is roughly 150x80. If another tool is within 160px X and 100px Y, it's overlapping.
-        // eslint-disable-next-line no-loop-func
-        conflict = nodes.some(n => 
-          Math.abs(n.position.x - position.x) < 160 && 
-          Math.abs(n.position.y - position.y) < 100
-        );
-        
-        if (conflict) {
-          offsetMultiplier++;
-          // Shift exactly "1 tool apart" to the right
-          position = {
-            x: position.x + 200,
-            y: position.y
-          };
+      for (const edge of edges) {
+        const sourceNode = nodes.find(n => n.id === edge.source);
+        const targetNode = nodes.find(n => n.id === edge.target);
+        if (sourceNode && targetNode) {
+          const ax = sourceNode.position.x + (sourceNode.measured?.width || 150);
+          const ay = sourceNode.position.y + (sourceNode.measured?.height || 80) / 2;
+          const bx = targetNode.position.x;
+          const by = targetNode.position.y + (targetNode.measured?.height || 80) / 2;
+          
+          const l2 = (bx - ax) ** 2 + (by - ay) ** 2;
+          let dist = 0;
+          if (l2 === 0) {
+            dist = Math.hypot(position.x - ax, position.y - ay);
+          } else {
+            let t = ((position.x - ax) * (bx - ax) + (position.y - ay) * (by - ay)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            const projX = ax + t * (bx - ax);
+            const projY = ay + t * (by - ay);
+            dist = Math.hypot(position.x - projX, position.y - projY);
+          }
+          
+          if (dist < minDistance) {
+            minDistance = dist;
+            splitEdgeId = edge.id;
+          }
         }
       }
 
-      onAddNode(type, position);
+      if (splitEdgeId) {
+        onAddNode(type, position, null, splitEdgeId);
+      } else {
+        onAddNode(type, position);
+      }
     },
-    [screenToFlowPosition, onAddNode, nodes]
+    [screenToFlowPosition, onAddNode, nodes, edges]
   );
 
   const onNodeClick = useCallback((event, node) => {
@@ -262,62 +281,66 @@ const CanvasContent = ({
   useEffect(() => {
     const handleAddNodeEvent = (e) => {
       const type = e.detail.type;
+      const explicitPosition = e.detail.position;
+      const splitEdgeId = e.detail.splitEdgeId;
+      
       if (reactFlowWrapper.current) {
         let position;
         let anchorNodeId = null;
         
-        const selectedNodes = nodes.filter(n => n.selected);
-        if (selectedNodes.length > 0) {
-          // If a node is explicitly selected, place it to the right of that node
-          const refNode = selectedNodes[selectedNodes.length - 1];
-          anchorNodeId = refNode.id;
-          position = {
-            x: refNode.position.x + (refNode.width || 150) + 60,
-            y: refNode.position.y
-          };
-        } else if (nodes.length > 0) {
-          // If no node is selected, place it to the right of the right-most node
-          const rightMostNode = nodes.reduce((prev, current) => (prev.position.x > current.position.x) ? prev : current);
-          position = {
-            x: rightMostNode.position.x + (rightMostNode.width || 150) + 60,
-            y: rightMostNode.position.y
-          };
+        if (explicitPosition) {
+          position = explicitPosition;
         } else {
-          // Fallback for empty canvas: center it relative to the viewport
-          const bounds = reactFlowWrapper.current.getBoundingClientRect();
-          position = screenToFlowPosition({
-            x: bounds.x + bounds.width / 2 - 100,
-            y: bounds.y + bounds.height / 2 - 50,
-          });
-        }
-        
-        // Prevent stacking via Vertical Deflection
-        let conflict = true;
-        let loopCounter = 0;
-        
-        while (conflict && loopCounter < 50) {
-          // eslint-disable-next-line no-loop-func
-          conflict = nodes.some(n => 
-            Math.abs(n.position.x - position.x) < 160 && 
-            Math.abs(n.position.y - position.y) < 100
-          );
-          
-          if (conflict) {
-            loopCounter++;
-            // Shift exactly "1 tool height + spacing" downward
+          const selectedNodes = nodes.filter(n => n.selected);
+          if (selectedNodes.length > 0) {
+            // If a node is explicitly selected, place it to the right of that node
+            const refNode = selectedNodes[selectedNodes.length - 1];
+            anchorNodeId = refNode.id;
             position = {
-              x: position.x,
-              y: position.y + (80) + 60
+              x: refNode.position.x + (refNode.width || 150) + 60,
+              y: refNode.position.y
             };
+          } else {
+            // Fallback for empty canvas or no selection: use last clicked position OR center of viewport
+            if (lastClickedPosition) {
+              position = lastClickedPosition;
+            } else {
+              const bounds = reactFlowWrapper.current.getBoundingClientRect();
+              position = screenToFlowPosition({
+                x: bounds.x + bounds.width / 2 - 100,
+                y: bounds.y + bounds.height / 2 - 50,
+              });
+            }
+          }
+          
+          // Prevent stacking via Vertical Deflection ONLY for auto-layout
+          let conflict = true;
+          let loopCounter = 0;
+          
+          while (conflict && loopCounter < 50) {
+            // eslint-disable-next-line no-loop-func
+            conflict = nodes.some(n => 
+              Math.abs(n.position.x - position.x) < 160 && 
+              Math.abs(n.position.y - position.y) < 100
+            );
+            
+            if (conflict) {
+              loopCounter++;
+              // Shift exactly "1 tool height + spacing" downward
+              position = {
+                x: position.x,
+                y: position.y + (80) + 60
+              };
+            }
           }
         }
 
-        onAddNode(type, position, anchorNodeId);
+        onAddNode(type, position, anchorNodeId, splitEdgeId);
       }
     };
     window.addEventListener('vibe-add-node', handleAddNodeEvent);
     return () => window.removeEventListener('vibe-add-node', handleAddNodeEvent);
-  }, [screenToFlowPosition, onAddNode, nodes]);
+  }, [screenToFlowPosition, onAddNode, nodes, setCenter, getViewport]);
 
   return (
     <div
@@ -384,6 +407,43 @@ const CanvasContent = ({
                   {isCopied ? 'Copied!' : 'Copy'}
                 </span>
               </button>
+            )}
+            {nodes.filter(n => n.selected && n.type !== 'container').length > 0 && (
+              <button
+                className="mode-btn"
+                onClick={handleCut}
+                title="Cut Selected Nodes"
+              >
+                <Scissors size={14} />
+                <span>Cut</span>
+              </button>
+            )}
+            {nodes.filter(n => n.selected && n.type !== 'container').length === 1 && (
+              <>
+                <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }} />
+                <button
+                  className="mode-btn"
+                  onClick={() => {
+                    const selectedNode = nodes.find(n => n.selected && n.type !== 'container');
+                    if (onCopyConfig) onCopyConfig(selectedNode);
+                  }}
+                  title="Copy Tool Logic/Config"
+                >
+                  <Copy size={14} />
+                  <span>Copy Config</span>
+                </button>
+                <button
+                  className="mode-btn"
+                  onClick={() => {
+                    const selectedNode = nodes.find(n => n.selected && n.type !== 'container');
+                    if (onPasteConfig) onPasteConfig(selectedNode);
+                  }}
+                  title="Paste Tool Logic/Config"
+                >
+                  <ClipboardPaste size={14} />
+                  <span>Paste Config</span>
+                </button>
+              </>
             )}
             <button
               className="mode-btn"

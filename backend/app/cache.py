@@ -1,9 +1,12 @@
 import threading
 import polars as pl
 from typing import Dict, Any, List
+import json
+import os
+from pathlib import Path
 
 class PipelineCache:
-    def __init__(self):
+    def __init__(self, session_id: str = "default"):
         self._lock = threading.Lock()
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._global_logs: List[str] = []
@@ -11,6 +14,10 @@ class PipelineCache:
         self._global_cancel_flag: bool = False
         self._cancelled_nodes: set = set()
         self._is_running: bool = False
+        
+        self.session_id = session_id
+        self.cache_dir = Path(f".vibe_cache/{session_id}")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def cancel_pipeline(self):
         with self._lock:
@@ -227,7 +234,7 @@ class PipelineCache:
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M:%S")
         formatted = f"[{ts}] {message}"
-        print(f"[GLOBAL LOG] {formatted}")
+        print(f"[GLOBAL LOG] {formatted}", flush=True)
         with self._lock:
             self._global_logs.append(formatted)
 
@@ -238,6 +245,9 @@ class PipelineCache:
     def set_node_status(self, node_id: str, status: str):
         with self._lock:
             self._node_statuses[node_id] = status
+            if status in ["waiting", "running"]:
+                if node_id in self._cache:
+                    self._cache[node_id]["logs"] = []
 
     def get_is_running(self) -> bool:
         with self._lock:
@@ -246,6 +256,63 @@ class PipelineCache:
     def set_is_running(self, val: bool):
         with self._lock:
             self._is_running = val
+
+    def save_node_to_disk(self, node_id: str):
+        with self._lock:
+            node_data = self._cache.get(node_id)
+            if not node_data or node_data.get("status") != "success":
+                return
+            
+            try:
+                # Extract serializable metadata
+                meta = {k: v for k, v in node_data.items() if k not in ["_df", "_ports_df"]}
+                meta_path = self.cache_dir / f"{node_id}_meta.json"
+                with open(meta_path, "w") as f:
+                    json.dump(meta, f)
+                    
+                if "_df" in node_data and node_data["_df"] is not None:
+                    df_path = self.cache_dir / f"{node_id}.parquet"
+                    node_data["_df"].write_parquet(str(df_path))
+                    
+                if "_ports_df" in node_data and node_data["_ports_df"]:
+                    for port, df in node_data["_ports_df"].items():
+                        if df is not None:
+                            df_path = self.cache_dir / f"{node_id}_port_{port}.parquet"
+                            df.write_parquet(str(df_path))
+            except Exception as e:
+                print(f"Failed to save disk cache for {node_id}: {e}")
+
+    def load_node_from_disk(self, node_id: str) -> bool:
+        with self._lock:
+            meta_path = self.cache_dir / f"{node_id}_meta.json"
+            if not meta_path.exists():
+                return False
+                
+            try:
+                with open(meta_path, "r") as f:
+                    meta = json.load(f)
+                    
+                # load single df
+                df_path = self.cache_dir / f"{node_id}.parquet"
+                if df_path.exists():
+                    meta["_df"] = pl.read_parquet(str(df_path))
+                else:
+                    meta["_df"] = None
+                    
+                # load multi ports
+                if "ports" in meta:
+                    meta["_ports_df"] = {}
+                    for port in meta["ports"].keys():
+                        port_path = self.cache_dir / f"{node_id}_port_{port}.parquet"
+                        if port_path.exists():
+                            meta["_ports_df"][port] = pl.read_parquet(str(port_path))
+                            
+                self._cache[node_id] = meta
+                self._node_statuses[node_id] = meta.get("status", "success")
+                return True
+            except Exception as e:
+                print(f"Failed to load disk cache for {node_id}: {e}")
+                return False
 
     def get_status_payload(self) -> Dict[str, Any]:
         with self._lock:
@@ -273,7 +340,7 @@ class CacheManager:
             session_id = "default"
         with self._lock:
             if session_id not in self._caches:
-                self._caches[session_id] = PipelineCache()
+                self._caches[session_id] = PipelineCache(session_id)
             return self._caches[session_id]
 
 # Global singleton cache manager instance

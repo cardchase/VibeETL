@@ -6,6 +6,50 @@ from app.tools.base import BaseNode
 
 logger = logging.getLogger(__name__)
 
+def generate_reality_check_narrative(home, away, ft_h, ft_a, h_odds, a_odds, market_delta=None):
+    """Reconciles model predictions with real-world bookmaker odds context."""
+    narrative_parts = []
+    
+    if pd.isna(ft_h) or pd.isna(ft_a) or ft_h == "" or ft_a == "":
+        return ""
+        
+    try:
+        fh_raw = float(ft_h)
+        fa_raw = float(ft_a)
+    except (ValueError, TypeError):
+        return ""
+        
+    try:
+        ho = float(h_odds) if pd.notna(h_odds) and h_odds != "" else 2.0
+    except (ValueError, TypeError):
+        ho = 2.0
+        
+    try:
+        ao = float(a_odds) if pd.notna(a_odds) and a_odds != "" else 2.0
+    except (ValueError, TypeError):
+        ao = 2.0
+
+    # 1. Heavily Favored Home Side + Low Opponent xG -> Win to Nil Call
+    if ho <= 1.35 and fa_raw < 0.8:
+        narrative_parts.append(
+            f"💡 **Reality Check:** Market odds ({ho:.2f}) heavily favor {home}. "
+            f"With {away}'s expected goals suppressed at {fa_raw:.2f}, the highest-value angle is **{home} Win to Nil** or **{home} -1.5 Handicap**."
+        )
+    # 2. Tight Odds + High Variance -> Both Teams To Score / Over Call
+    elif 2.0 <= ho <= 2.8 and 2.0 <= ao <= 2.8 and (fh_raw + fa_raw) >= 2.7:
+        narrative_parts.append(
+            f"💡 **Reality Check:** Bookmakers expect a tight contest ({ho:.2f} vs {ao:.2f}). "
+            f"Rather than taking a risky match result, the data highlights **Both Teams to Score (BTTS - Yes)** as the primary target."
+        )
+    # 3. Model/Odds Mismatch (Upset Opportunity)
+    elif ho > 2.5 and fh_raw > fa_raw + 0.5:
+        narrative_parts.append(
+            f"🔥 **Model Edge Detected:** Bookmakers are underestimating {home} at {ho:.2f}. "
+            f"The model identifies strong underlying metrics backing a **{home} Draw No Bet (DNB)** value play."
+        )
+        
+    return " ".join(narrative_parts)
+
 class SoccerReaderNode(BaseNode):
     MANIFEST = {
         "id": "soccer_reader",
@@ -116,121 +160,207 @@ class SoccerReaderNode(BaseNode):
             logger.warning(f"Soccer Reader: Missing Team columns {home_team_col} or {away_team_col}")
             return df
 
-        pd_df = df.to_pandas()
-        narratives = []
-
-        for _, row in pd_df.iterrows():
-            home = row[home_team_col]
-            away = row[away_team_col]
-            
-            ft_h = row[ft_h_col] if ft_h_col in columns else None
-            ft_a = row[ft_a_col] if ft_a_col in columns else None
-            ht_h = row[ht_h_col] if ht_h_col in columns else None
-            ht_a = row[ht_a_col] if ht_a_col in columns else None
-            sh_h = row[sh_h_col] if sh_h_col in columns else None
-            sh_a = row[sh_a_col] if sh_a_col in columns else None
-            h_odds = row[h_odds_col] if h_odds_col in columns else None
-            a_odds = row[a_odds_col] if a_odds_col in columns else None
-            
-            # Form / Momentum Columns (from Football Engine)
-            h_form = row['HomeTeam_Form_Last5_Pts'] if 'HomeTeam_Form_Last5_Pts' in columns else None
-            a_form = row['AwayTeam_Form_Last5_Pts'] if 'AwayTeam_Form_Last5_Pts' in columns else None
-            h_pts = float(h_form) if h_form is not None else 0
-            a_pts = float(a_form) if a_form is not None else 0
-            h_mom = row['HomeTeam_Scoring_Momentum_L3'] if 'HomeTeam_Scoring_Momentum_L3' in columns else None
-            a_mom = row['AwayTeam_Scoring_Momentum_L3'] if 'AwayTeam_Scoring_Momentum_L3' in columns else None
-
-            parts = []
-            
-            # FT Prediction Logic
-            if pd.notna(ft_h) and pd.notna(ft_a):
-                try:
-                    fh = int(round(float(ft_h)))
-                    fa = int(round(float(ft_a)))
-                    
-                    if fh > fa:
-                        if h_pts > a_pts:
-                            parts.append(f"In what promises to be a thrilling, high-scoring clash, {home} is tipped by the Engine to secure a {fh}-{fa} victory over {away}.")
-                        elif h_pts == a_pts:
-                            parts.append(f"The Engine expects a tight, tactical affair with {home} edging out {away} for a narrow {fh}-{fa} win.")
-                    elif fa > fh:
-                        if a_pts > h_pts:
-                            parts.append(f"Expect fireworks from the visitors as {away} is predicted to outgun {home} in an entertaining {fa}-{fh} away win.")
-                        else:
-                            parts.append(f"A gritty away performance is on the cards. The Engine predicts {away} to grind out a {fa}-{fh} victory against {home}.")
+        personalities = ["Conservative", "Exciting", "Underdog", "Defensive"]
+        has_personalities = any(f"{ft_h_col}_{p}" in columns for p in personalities)
+        
+        h_form_key = 'FT_HomeTeam_Form_Last5_Pts' if 'FT_HomeTeam_Form_Last5_Pts' in columns else 'HomeTeam_Form_Last5_Pts'
+        a_form_key = 'FT_AwayTeam_Form_Last5_Pts' if 'FT_AwayTeam_Form_Last5_Pts' in columns else 'AwayTeam_Form_Last5_Pts'
+        
+        def get_prediction_narrative(fh, fa, hp, ap, h_name, a_name, p_type):
+            if p_type == "Conservative":
+                if fh > fa:
+                    return f"Taking a balanced, data-driven approach, the Conservative model expects {h_name} to secure a {fh}-{fa} victory." if hp >= ap else f"Despite recent form, the Conservative model sees enough underlying metrics to back {h_name} for a {fh}-{fa} win."
+                elif fa > fh:
+                    return f"Trusting the fundamentals, the Conservative model backs {a_name} to pull off a {fa}-{fh} away win." if ap >= hp else f"The Conservative model predicts a gritty {fa}-{fh} away victory for {a_name}."
+                else:
+                    return f"The Conservative model anticipates a tightly contested {fh}-{fa} draw, reflecting the evenly matched underlying stats."
+            elif p_type == "Exciting":
+                if fh > fa:
+                    return f"Focusing purely on attacking potential, the Exciting model tips {h_name} to unleash their firepower in a {fh}-{fa} thriller."
+                elif fa > fh:
+                    return f"Expect an entertaining, high-tempo clash! The Exciting model predicts {a_name} will outgun their hosts in a {fa}-{fh} victory."
+                else:
+                    return f"With both teams expected to play expansively, the Exciting model forecasts an action-packed {fh}-{fa} draw."
+            elif p_type == "Underdog":
+                if fh > fa:
+                    return f"Hunting for value, the Underdog model sees a unique edge for {h_name}, predicting a {fh}-{fa} win."
+                elif fa > fh:
+                    return f"Spotting a potential upset, the Underdog model boldly backs {a_name} to defy the odds with a {fa}-{fh} away win."
+                else:
+                    return f"The Underdog model suggests {a_name} has what it takes to frustrate {h_name}, predicting a resilient {fh}-{fa} draw."
+            elif p_type == "Defensive":
+                if fh > fa:
+                    return f"Respecting defensive solidity, the Defensive model expects {h_name} to grind out a low-scoring {fh}-{fa} win."
+                elif fa > fh:
+                    return f"Prioritizing shape and discipline, the Defensive model predicts {a_name} to shut up shop and steal a {fa}-{fh} victory."
+                else:
+                    return f"This match has all the makings of a tactical stalemate. The Defensive model confidently predicts a low-event {fh}-{fa} draw."
+            else: # Base / Engine
+                if fh > fa:
+                    if hp > ap:
+                        return f"In what promises to be a thrilling clash, the Engine tips {h_name} to secure a {fh}-{fa} victory over {a_name}."
+                    elif hp == ap:
+                        return f"Expecting a tight, tactical affair, the Engine predicts {h_name} edging out {a_name} for a narrow {fh}-{fa} win."
                     else:
-                        if h_pts + a_pts == 0:
-                            parts.append(f"This match has all the makings of a defensive stalemate, with the Engine predicting a 0-0 draw between {home} and {away}.")
-                        else:
-                            parts.append(f"A closely fought battle is expected, with the Engine pointing towards a highly competitive {fh}-{fa} draw between {home} and {away}.")
-                except:
-                    parts.append(f"The Engine is analyzing the clash between {home} and {away}.")
-            else:
-                parts.append(f"The Engine is analyzing the clash between {home} and {away}.")
+                        return f"The Engine sees {h_name} overcoming their poor form to grab a {fh}-{fa} win."
+                elif fa > fh:
+                    if ap > hp:
+                        return f"Expect fireworks from the visitors as the Engine expects {a_name} to outgun {h_name} in an entertaining {fa}-{fh} away win."
+                    else:
+                        return f"A gritty away performance is on the cards. The Engine predicts {a_name} to grind out a {fa}-{fh} victory against {h_name}."
+                else:
+                    if hp + ap == 0:
+                        return f"This match has all the makings of a defensive stalemate, with the Engine predicting a 0-0 draw."
+                    else:
+                        return f"A closely fought battle is expected, with the Engine pointing towards a highly competitive {fh}-{fa} draw."
 
-            # HT vs FT / SH Logic (Momentum shifts)
-            if pd.notna(ht_h) and pd.notna(ht_a) and pd.notna(ft_h) and pd.notna(ft_a):
+        def process_row_for_narrative(row: dict, p_suffix: str, prefix: str) -> str:
+            home = row.get(home_team_col)
+            away = row.get(away_team_col)
+            if not home or not away:
+                return ""
+            
+            h_odds = row.get(h_odds_col) if h_odds_col in row else None
+            a_odds = row.get(a_odds_col) if a_odds_col in row else None
+            
+            h_form = row.get(h_form_key) if h_form_key in row else None
+            a_form = row.get(a_form_key) if a_form_key in row else None
+            
+            try:
+                h_pts = float(h_form) if h_form is not None and h_form != "" else 0.0
+            except (ValueError, TypeError):
+                h_pts = 0.0
+                
+            try:
+                a_pts = float(a_form) if a_form is not None and a_form != "" else 0.0
+            except (ValueError, TypeError):
+                a_pts = 0.0
+                
+            base_parts = []
+            
+            # Momentum / Form Logic (Universal context)
+            if pd.notna(h_form) and pd.notna(a_form) and h_form != "" and a_form != "":
+                if h_pts >= 12 and a_pts < 5:
+                    base_parts.append(f"Momentum is completely on the home side; {home} has been on an absolute tear recently, while {away} is struggling immensely.")
+                elif a_pts >= 12 and h_pts < 5:
+                    base_parts.append(f"The form book strongly favors the visitors. {away} is riding a massive wave of momentum, whereas {home} has been in dismal form.")
+                elif h_pts >= 10 and a_pts >= 10:
+                    base_parts.append(f"Both teams come into this clash with fantastic recent momentum, making this an unstoppable force meeting an immovable object.")
+                elif h_pts <= 3 and a_pts <= 3:
+                    base_parts.append(f"Neither side has any momentum coming into this match, with both {home} and {away} desperately searching for a much-needed win.")
+
+            cur_ft_h_col = f"{ft_h_col}_{p_suffix}" if p_suffix else ft_h_col
+            cur_ft_a_col = f"{ft_a_col}_{p_suffix}" if p_suffix else ft_a_col
+            cur_ht_h_col = f"{ht_h_col}_{p_suffix}" if p_suffix else ht_h_col
+            cur_ht_a_col = f"{ht_a_col}_{p_suffix}" if p_suffix else ht_a_col
+            cur_sh_h_col = f"{sh_h_col}_{p_suffix}" if p_suffix else sh_h_col
+            cur_sh_a_col = f"{sh_a_col}_{p_suffix}" if p_suffix else sh_a_col
+            
+            cur_ft_h = row.get(cur_ft_h_col)
+            cur_ft_a = row.get(cur_ft_a_col)
+            cur_ht_h = row.get(cur_ht_h_col)
+            cur_ht_a = row.get(cur_ht_a_col)
+            cur_sh_h = row.get(cur_sh_h_col)
+            cur_sh_a = row.get(cur_sh_a_col)
+            
+            if pd.notna(cur_ft_h) and pd.notna(cur_ft_a) and cur_ft_h != "" and cur_ft_a != "":
                 try:
-                    hh = float(ht_h)
-                    ha = float(ht_a)
-                    fh = float(ft_h)
-                    fa = float(ft_a)
-                    
-                    # If we have SH directly from Predictor, use it. Otherwise derive from FT - HT.
-                    h_2nd_half = float(sh_h) if pd.notna(sh_h) else (fh - hh)
-                    a_2nd_half = float(sh_a) if pd.notna(sh_a) else (fa - ha)
-                    
+                    fh = int(round(float(cur_ft_h)))
+                    fa = int(round(float(cur_ft_a)))
+                    base_parts.append(get_prediction_narrative(fh, fa, h_pts, a_pts, home, away, prefix))
+                except (ValueError, TypeError):
+                    base_parts.append(f"{prefix} is analyzing the clash between {home} and {away}.")
+                    return " ".join(base_parts)
+            else:
+                base_parts.append(f"{prefix} is analyzing the clash between {home} and {away}.")
+                return " ".join(base_parts)
+
+            # HT/SH Logic
+            if pd.notna(cur_ht_h) and pd.notna(cur_ht_a) and cur_ht_h != "" and cur_ht_a != "":
+                try:
+                    hh = float(cur_ht_h)
+                    ha = float(cur_ht_a)
+                    h_2nd_half = float(cur_sh_h) if pd.notna(cur_sh_h) and cur_sh_h != "" else (fh - hh)
+                    a_2nd_half = float(cur_sh_a) if pd.notna(cur_sh_a) and cur_sh_a != "" else (fa - ha)
                     if h_2nd_half > a_2nd_half and h_2nd_half >= 1.0:
-                        parts.append(f"Watch for a massive 2nd half surge from {home}, who are notoriously strong finishers in this scenario.")
+                        base_parts.append(f"Watch for a massive 2nd half surge from {home}, who are notoriously strong finishers in this scenario.")
                     elif a_2nd_half > h_2nd_half and a_2nd_half >= 1.0:
-                        parts.append(f"The 2nd half is where {away} really turns up the heat, expecting to outscore their opponents after the break.")
+                        base_parts.append(f"The 2nd half is where {away} really turns up the heat, expecting to outscore their opponents after the break.")
                     elif hh > ha and fh > fa:
-                        parts.append(f"{home} is predicted to come out of the gates blazing in the 1st half and sustain their lead.")
+                        base_parts.append(f"{home} is predicted to come out of the gates blazing in the 1st half and sustain their lead.")
                     elif ha > hh and fa > fh:
-                        parts.append(f"{away} looks incredibly dangerous in the 1st half and will aim to kill the game early.")
-                except:
+                        base_parts.append(f"{away} looks incredibly dangerous in the 1st half and will aim to kill the game early.")
+                except (ValueError, TypeError):
                     pass
 
-            # Odds Value Logic
-            if pd.notna(h_odds) and pd.notna(a_odds) and pd.notna(ft_h) and pd.notna(ft_a):
+            # Odds Logic
+            if pd.notna(h_odds) and pd.notna(a_odds) and h_odds != "" and a_odds != "":
                 try:
-                    fh = float(ft_h)
-                    fa = float(ft_a)
                     ho = float(h_odds)
                     ao = float(a_odds)
-                    
                     if fh > fa and ho >= 2.0:
-                        parts.append(f"With bookmakers pricing a home win at {ho:.2f}, there is tremendous betting value backing {home} here.")
+                        base_parts.append(f"With bookmakers pricing a home win at {ho:.2f}, there is tremendous betting value backing {home} here.")
                     if fh < fa and ao > 2.5:
-                        parts.append(f"The Engine spots a huge underdog opportunity! At odds of {ao:.2f}, {away} is a highly lucrative pick.")
+                        base_parts.append(f"A huge underdog opportunity! At odds of {ao:.2f}, {away} is a highly lucrative pick.")
                     elif fh > fa and ho < 1.5:
-                        parts.append(f"{home} is a massive favorite at {ho:.2f}, but the Engine confidently backs them to get the job done.")
-                except:
+                        base_parts.append(f"{home} is a massive favorite at {ho:.2f}, but {prefix.lower()} confidently backs them to get the job done.")
+                except (ValueError, TypeError):
                     pass
                     
-            # Momentum / Form Logic
-            if pd.notna(h_form) and pd.notna(a_form):
-                try:
-                    h_pts = float(h_form)
-                    a_pts = float(a_form)
-                    
-                    if h_pts >= 12 and a_pts < 5:
-                        parts.append(f"Momentum is completely on the home side; {home} has been on an absolute tear recently, while {away} is struggling immensely.")
-                    elif a_pts >= 12 and h_pts < 5:
-                        parts.append(f"The form book strongly favors the visitors. {away} is riding a massive wave of momentum, whereas {home} has been in dismal form.")
-                    elif h_pts >= 10 and a_pts >= 10:
-                        parts.append(f"Both teams come into this clash with fantastic recent momentum, making this an unstoppable force meeting an immovable object.")
-                    elif h_pts <= 3 and a_pts <= 3:
-                        parts.append(f"Neither side has any momentum coming into this match, with both {home} and {away} desperately searching for a much-needed win.")
-                except:
-                    pass
+            # Inject Reality Check Engine
+            reality_check = generate_reality_check_narrative(home, away, cur_ft_h, cur_ft_a, h_odds, a_odds)
+            if reality_check:
+                base_parts.append(reality_check)
             
-            if not parts:
-                narratives.append(f"Match preview for {home} vs {away}.")
-            else:
-                narratives.append(" ".join(parts))
+            return " ".join(base_parts)
 
-        pd_df["Engine_Match_Narrative"] = narratives
-        logger.info(f"Soccer Predictor Reader generated {len(pd_df)} intelligent scout reports.")
+        # Apply vectorization using map_elements over a struct of all needed columns
+        required_cols = [home_team_col, away_team_col]
         
-        return pl.from_pandas(pd_df)
+        # safely add to required columns list if present
+        def add_col(c):
+            if c in columns and c not in required_cols:
+                required_cols.append(c)
+                
+        add_col(h_odds_col)
+        add_col(a_odds_col)
+        add_col(h_form_key)
+        add_col(a_form_key)
+        
+        if has_personalities:
+            for p in personalities:
+                add_col(f"{ft_h_col}_{p}")
+                add_col(f"{ft_a_col}_{p}")
+                add_col(f"{ht_h_col}_{p}")
+                add_col(f"{ht_a_col}_{p}")
+                add_col(f"{sh_h_col}_{p}")
+                add_col(f"{sh_a_col}_{p}")
+        else:
+            add_col(ft_h_col)
+            add_col(ft_a_col)
+            add_col(ht_h_col)
+            add_col(ht_a_col)
+            add_col(sh_h_col)
+            add_col(sh_a_col)
+
+        struct_col = pl.struct(required_cols)
+
+        if has_personalities:
+            for p in personalities:
+                df = df.with_columns(
+                    struct_col.map_elements(
+                        lambda row, _p=p: process_row_for_narrative(row, _p, _p), 
+                        return_dtype=pl.String
+                    ).alias(f"Engine_Match_Narrative_{p}")
+                )
+        else:
+            df = df.with_columns(
+                struct_col.map_elements(
+                    lambda row: process_row_for_narrative(row, "", "Engine"), 
+                    return_dtype=pl.String
+                ).alias("Engine_Match_Narrative")
+            )
+
+        logger.info(f"Soccer Predictor Reader generated {len(df)} intelligent scout reports.")
+        
+        return df

@@ -47,6 +47,11 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
                 existing_result = cache.get_node_result_payload(n["id"])
                 if existing_result and existing_result.get("status") in ["success", "skipped"]:
                     cached_node_ids.add(n["id"])
+                    if is_user_cached:
+                        cache.save_node_to_disk(n["id"])
+                elif is_user_cached:
+                    if cache.load_node_from_disk(n["id"]):
+                        cached_node_ids.add(n["id"])
 
         cache.clear_except(list(cached_node_ids))
         cache.reset_cancellations()
@@ -65,11 +70,16 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
         # Build predecessors mapping for topological sort
         # graphlib.TopologicalSorter expects: {node: {predecessor1, predecessor2, ...}}
         predecessors: Dict[str, Set[str]] = {n["id"]: set() for n in nodes_list}
+        
+        with open("debug_edges.json", "w") as f:
+            import json
+            json.dump(edges_list, f)
     
         # Track links for routing data during execution
         # target_node_id -> target_port -> List[(source_node_id, source_port)]
         data_links: Dict[str, Dict[str, List[tuple]]] = {n["id"]: {} for n in nodes_list}
 
+        valid_edges = []
         for edge in edges_list:
             src = edge.get("source")
             tgt = edge.get("target")
@@ -77,10 +87,42 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             tgt_port = edge.get("targetPort", "input")
 
             if src in predecessors and tgt in predecessors:
+                src_node = node_map.get(src)
+                tgt_node = node_map.get(tgt)
+                
+                # Check valid source ports
+                src_type = src_node.get("type")
+                valid_src_ports = {"output"}
+                if src_type == "filter":
+                    valid_src_ports = {"true", "false"}
+                elif src_type == "unique":
+                    valid_src_ports = {"unique", "duplicate"}
+                elif src_type in ['browse', 'file_output', 'fileOutput', 'database_output', 'databaseOutput', 'gcs_out', 'gcsOut', 'google_sheets_out', 'googleSheetsOut']:
+                    valid_src_ports = set()
+                
+                # Check valid target ports
+                tgt_type = tgt_node.get("type")
+                tgt_category = tgt_node.get("data", {}).get("category")
+                valid_tgt_ports = {"input"}
+                if tgt_category == "inout":
+                    valid_tgt_ports = set()
+                elif tgt_type == "join":
+                    valid_tgt_ports = {"left", "right"}
+                elif tgt_type == "predictor":
+                    valid_tgt_ports = {"historical", "upcoming", "input"}
+                
+                if src_port not in valid_src_ports or tgt_port not in valid_tgt_ports:
+                    cache.add_global_log(f"Warning: Ignored phantom edge from {src_node.get('data', {}).get('label', src)} to {tgt_node.get('data', {}).get('label', tgt)} on invalid ports ({src_port} -> {tgt_port})")
+                    continue
+                
+                valid_edges.append(edge)
                 predecessors[tgt].add(src)
                 if tgt_port not in data_links[tgt]:
                     data_links[tgt][tgt_port] = []
-                data_links[tgt][tgt_port].append((src, src_port))
+                if (src, src_port) not in data_links[tgt][tgt_port]:
+                    data_links[tgt][tgt_port].append((src, src_port))
+                
+        edges_list = valid_edges
 
         # Determine required nodes via backward traversal (DAG Pruning)
         needed_nodes = set()
@@ -209,9 +251,13 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
                 if dependency_failed:
                     break
                 
-                # Backward compatibility: single dataframe if 1 connection, list if >1 connection
                 if port_dfs:
-                    inputs[port] = port_dfs[0] if len(port_dfs) == 1 else port_dfs
+                    if node_type == "union":
+                        inputs[port] = port_dfs
+                    else:
+                        inputs[port] = port_dfs[0]
+                        if len(port_dfs) > 1:
+                            node_logs.append(f"Warning: Node '{node_name}' expects a single input on port '{port}', but received {len(port_dfs)}. Using the first one.")
 
             if dependency_failed:
                 duration = (time.time() - start_time) * 1000
@@ -302,6 +348,10 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
 
                 # Save full output to cache for downstream nodes to use (frontend payload truncation is handled by the cache)
                 cache.set_node_result(node_id, full_df, duration, all_logs, node_semantic_metadata, ui_payload=res_df)
+                
+                is_user_cached = n.get("parameters", {}).get("isCached", False)
+                if is_user_cached:
+                    cache.save_node_to_disk(node_id)
             except Exception as e:
                 duration = (time.time() - start_time) * 1000
                 err_msg = str(e)

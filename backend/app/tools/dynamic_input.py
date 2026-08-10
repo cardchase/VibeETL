@@ -37,7 +37,11 @@ class DynamicInputNode(BaseNode):
                     break
 
         if file_path_col not in df_input.columns:
-            raise ValueError(f"Could not find file path column '{file_path_col}' in upstream data.")
+            return self.graceful_bypass(
+                df=df_input,
+                missing_cols=[file_path_col],
+                expected_config={'File Path Column': file_path_col}
+            )
 
         file_paths = df_input[file_path_col].drop_nulls().to_list()
         if not file_paths:

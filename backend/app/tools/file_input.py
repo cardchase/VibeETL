@@ -108,6 +108,24 @@ class FileInputNode(BaseNode):
                     target_type = str(t).lower()
                     if "int" in target_type:
                         cast_exprs.append(pl.col(col).cast(pl.Int64, strict=False))
+                    elif "float" in target_type or "double" in target_type:
+                        cast_exprs.append(pl.col(col).cast(pl.Float64, strict=False))
+                    elif "string" in target_type or "text" in target_type or "str" in target_type:
+                        cast_exprs.append(pl.col(col).cast(pl.Utf8))
+                    elif "bool" in target_type:
+                        cast_exprs.append(pl.col(col).cast(pl.Boolean, strict=False))
+                    elif "datetime" in target_type or "timestamp" in target_type:
+                        formats = ["%d %b %Y %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y %H:%M:%S"]
+                        expr = pl.coalesce([pl.col(col).cast(pl.Utf8).str.to_datetime(format=f, strict=False) for f in formats])
+                        cast_exprs.append(expr)
+                    elif "date" in target_type:
+                        formats = ["%d %b %Y", "%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y"]
+                        expr = pl.coalesce([pl.col(col).cast(pl.Utf8).str.to_date(format=f, strict=False) for f in formats])
+                        cast_exprs.append(expr)
+                    elif "time" in target_type:
+                        formats = ["%H:%M:%S", "%I:%M %p", "%H:%M"]
+                        expr = pl.coalesce([pl.col(col).cast(pl.Utf8).str.to_time(format=f, strict=False) for f in formats])
+                        cast_exprs.append(expr)
                     elif "percent" in target_type:
                         expr = pl.col(col).cast(pl.Utf8)
                         expr = expr.str.replace_all(r'[%]', '').cast(pl.Float64, strict=False) / 100.0

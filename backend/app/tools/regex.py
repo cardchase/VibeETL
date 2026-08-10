@@ -27,14 +27,17 @@ class RegexNode(BaseNode):
         output_columns = self.parameters.get("outputColumns", [])
 
         if not column or not pattern or not output_columns:
-            self.log("Missing column, pattern, or output configuration. Passing input data unchanged.")
-            return df
+            return self.graceful_bypass(
+                df=df,
+                missing_cols=["<Config Incomplete>"],
+                expected_config={'Column': column, 'Pattern': pattern, 'Output Columns': str(output_columns)}
+            )
 
         if column not in df.columns:
-            from app.tools.base import SchemaCompatibilityError
-            raise SchemaCompatibilityError(
-                f"Schema Compatibility Error in 'regex' node: Column '{column}' "
-                f"is missing from the upstream schema. Available columns: {df.columns}"
+            return self.graceful_bypass(
+                df=df,
+                missing_cols=[column],
+                expected_config={'Regex Column': column}
             )
 
         self.log(f"Applying Regex pattern '{pattern}' to column '{column}'.")

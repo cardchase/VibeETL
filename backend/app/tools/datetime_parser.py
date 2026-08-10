@@ -52,14 +52,11 @@ class DateTimeNode(BaseNode):
         custom_fmt = self.parameters.get("custom_format", "")
         output_column = self.parameters.get("output_column", "").strip()
 
-        if not column:
-            self.log("No column selected. Passing data unchanged.")
-            return df
-
         if column not in df.columns:
-            raise SchemaCompatibilityError(
-                f"Schema Compatibility Error in 'datetime' node: Column '{column}' "
-                f"is missing from upstream schema."
+            return self.graceful_bypass(
+                df=df,
+                missing_cols=[column],
+                expected_config={'Datetime Column': column}
             )
 
         target_col = output_column if output_column else column

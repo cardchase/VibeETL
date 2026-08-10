@@ -50,8 +50,11 @@ class GeminiAINode(BaseNode):
         bypass_warning = self.parameters.get("bypass_warning", False)
 
         if not input_column or input_column not in df.columns:
-            self.log("Invalid or missing input column. Passing data unchanged.")
-            return df
+            return self.graceful_bypass(
+                df=df,
+                missing_cols=[input_column] if input_column else ["<None Specified>"],
+                expected_config={'Input Column': input_column or "<None Specified>"}
+            )
 
         # Configure API Key
         key_to_use = api_key if api_key else os.environ.get("GEMINI_API_KEY", "")

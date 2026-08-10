@@ -4,6 +4,7 @@ import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
+import { API_BASE } from '../config';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, activeTabId, style = {} }) => {
@@ -97,7 +98,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
     try {
       const sessionId = window.sessionId || 'default';
       const portParam = activePort ? `&port=${activePort}` : '';
-      const res = await fetch(`http://localhost:8001/api/node/data?session_id=${sessionId}&node_id=${nodeId}${portParam}`);
+      const res = await fetch(`${API_BASE}/api/node/data?session_id=${sessionId}&node_id=${nodeId}${portParam}`);
       if (!res.ok) throw new Error("Failed to fetch full data");
       const data = await res.json();
       setFullData(data.rows || []);
@@ -442,7 +443,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
                         className="copy-logs-btn" 
                         onClick={async () => {
                           try {
-                            const res = await fetch(`http://localhost:8001/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}&session_id=${activeTabId}`);
+                            const res = await fetch(`${API_BASE}/api/download/csv?nodeId=${nodeId}&portId=${activePort || ''}&session_id=${activeTabId}`);
                             if (!res.ok) {
                               const errData = await res.json();
                               alert(`Download failed: ${errData.detail || res.statusText}`);
@@ -635,7 +636,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
         }} onClick={() => setPreviewImage(null)}>
           <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
             <img 
-              src={`http://localhost:8001/api/local-image?path=${encodeURIComponent(previewImage)}`} 
+              src={`${API_BASE}/api/local-image?path=${encodeURIComponent(previewImage)}`} 
               style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', backgroundColor: 'white' }}
               alt="Preview"
               onClick={(e) => e.stopPropagation()}

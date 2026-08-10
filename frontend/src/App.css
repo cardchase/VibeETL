@@ -721,13 +721,28 @@
 
 /* Connection Handles style overrides */
 .node-handle {
-  width: 8px !important;
-  height: 8px !important;
+  width: 14px !important;
+  height: 14px !important;
   background: var(--bg-primary) !important;
-  border: 2px solid var(--border-dark) !important;
+  border: 3px solid var(--border-dark) !important;
   border-radius: 50% !important;
   z-index: 10 !important;
   transition: all 0.15s ease;
+  position: absolute;
+}
+
+/* Create a massive invisible clickable area around the handle for accessibility */
+.node-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border-radius: 50%;
+  cursor: crosshair;
 }
 
 /* Force edges to render IN FRONT of nodes */
@@ -741,7 +756,7 @@
 .node-handle:hover {
   background: var(--color-accent) !important;
   border-color: var(--color-accent) !important;
-  transform: scale(1.3);
+  transform: scale(1.4);
 }
 
 .left-handle {
@@ -1267,3 +1282,6 @@
 .ag-theme-quartz .ag-header-cell {
   border-right: 1px solid var(--border-color) !important;
 }
+
+/* Ensure React Flow wrapper is exact size for collision */
+.react-flow__node-vibeNode { width: 34px !important; height: 34px !important; min-width: 34px !important; min-height: 34px !important; }

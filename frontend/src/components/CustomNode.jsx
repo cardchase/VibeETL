@@ -44,13 +44,36 @@ const CustomNode = ({ id, data, selected, type }) => {
 
   let filterCondition = '';
   if (type === 'filter') {
-    if (data?.parameters?.filter_type === 'custom' && data?.parameters?.custom_expression) {
-      const expr = data.parameters.custom_expression;
+    if (data?.parameters?.filterType === 'custom' && data?.parameters?.customExpression) {
+      const expr = data.parameters.customExpression;
       filterCondition = `EXP: ${expr.length > 25 ? expr.substring(0, 25) + '...' : expr}`;
+    } else if (data?.parameters?.conditions && Array.isArray(data.parameters.conditions)) {
+      const conds = data.parameters.conditions.filter(c => c && c.column);
+      if (conds.length === 1) {
+        const c = conds[0];
+        filterCondition = `[${c.column}] ${c.operator.replace(/_/g, ' ')} ${c.value}`.trim();
+      } else if (conds.length > 1) {
+        filterCondition = `${conds.length} rules applied`;
+      }
     } else if (data?.parameters?.column) {
+      // Fallback for older saved nodes
       const op = data.parameters.operator || '';
       const val = data.parameters.value !== undefined && data.parameters.value !== '' ? ` '${data.parameters.value}'` : '';
       filterCondition = `[${data.parameters.column}] ${op}${val}`.trim();
+    }
+    description = filterCondition;
+  } else if (type === 'predictor') {
+    const p = data?.parameters?.personality || 'Conservative';
+    const tgt = data?.parameters?.targetColumns ? data.parameters.targetColumns.join(', ') : 'Targets';
+    description = `${tgt} (${p.split(' ')[0]})`;
+  } else if (type === 'formula') {
+    if (data?.parameters?.expression) {
+      const expr = data.parameters.expression;
+      description = expr.length > 25 ? expr.substring(0, 25) + '...' : expr;
+    }
+  } else if (type === 'sort') {
+    if (data?.parameters?.column) {
+      description = `${data.parameters.column} ${data.parameters.descending ? 'DESC' : 'ASC'}`;
     }
   }
 
@@ -144,27 +167,6 @@ const CustomNode = ({ id, data, selected, type }) => {
             style={{ top: '70%' }}
             className="node-handle left-handle join-right-handle"
             onClick={(e) => handleAnchorClick(e, 'target', 'right')}
-          />
-        </>
-      ) : type === 'predictor' ? (
-        <>
-          <div className="join-port-label left-label" title="Historical / Training Data" style={{background: '#8b5cf6', color: 'white'}}>H</div>
-          <Handle
-            type="target"
-            position={targetPosition}
-            id="historical"
-            style={{ top: '30%' }}
-            className="node-handle left-handle join-left-handle"
-            onClick={(e) => handleAnchorClick(e, 'target', 'historical')}
-          />
-          <div className="join-port-label right-label" title="Upcoming / Predict Data" style={{background: '#0ea5e9', color: 'white'}}>U</div>
-          <Handle
-            type="target"
-            position={targetPosition}
-            id="upcoming"
-            style={{ top: '70%' }}
-            className="node-handle left-handle join-right-handle"
-            onClick={(e) => handleAnchorClick(e, 'target', 'upcoming')}
           />
         </>
       ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'folder_input', 'folderInput', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn', 'odds_portal_scraper', 'oddsPortalScraper', 'odds_portal_upcoming', 'oddsPortalUpcoming'].includes(type)) ? (
@@ -279,6 +281,36 @@ const CustomNode = ({ id, data, selected, type }) => {
             style={{ top: '70%' }}
             className="node-handle right-handle false-handle"
             onClick={(e) => handleAnchorClick(e, 'source', 'duplicate')}
+          />
+        </>
+      ) : type === 'join' ? (
+        <>
+          <div className="filter-port-label true-label" style={{background: '#8b5cf6', color: 'white'}}>L</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="L"
+            style={{ top: '25%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'L')}
+          />
+          <div className="filter-port-label true-label" style={{background: '#8b5cf6', color: 'white'}}>J</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="J"
+            style={{ top: '50%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'J')}
+          />
+          <div className="filter-port-label true-label" style={{background: '#8b5cf6', color: 'white'}}>R</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="R"
+            style={{ top: '75%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'R')}
           />
         </>
       ) : (!['browse', 'file_output', 'fileOutput', 'database_output', 'databaseOutput', 'gcs_out', 'gcsOut', 'google_sheets_out', 'googleSheetsOut'].includes(type)) ? (

@@ -655,8 +655,29 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
         {detectedSchema.length > 0 && (
           <div style={{ marginTop: '10px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
-            <div style={{ padding: '10px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              Schema Blueprint Matrix
+            <div style={{ padding: '10px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Schema Blueprint Matrix</span>
+              {Object.keys(schemaOverrides || {}).length > 0 && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onUpdateParams(id, { ...parameters, schemaOverrides: {} });
+                  }}
+                  style={{
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    padding: '2px 8px',
+                    fontSize: '0.65rem',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)'
+                  }}
+                  title="Revert all columns to their auto-detected original types"
+                >
+                  Revert to Original
+                </button>
+              )}
             </div>
             <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
@@ -2290,26 +2311,6 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
 
     return (
       <div className="join-config-container">
-        <div className="form-group">
-          <label className="form-label">Join Type</label>
-          <div className="venn-diagram-selector">
-            {['inner', 'left', 'right', 'outer'].map(type => (
-              <div 
-                key={type} 
-                className={`venn-item ${how === type ? 'active' : ''}`}
-                onClick={() => handleJoinTypeClick(type)}
-                title={`${type.charAt(0).toUpperCase() + type.slice(1)} Join`}
-              >
-                <div className={`venn-icon venn-${type}`}>
-                  <div className="venn-circle left-circle"></div>
-                  <div className="venn-circle right-circle"></div>
-                </div>
-                <span className="venn-label">{type}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
         <div className="join-schemas-split">
           {/* Left Input */}
           <div className="schema-panel left-panel">
@@ -2381,6 +2382,85 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                 ))
               )}
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSamplingConfig = () => {
+    const sampleType = parameters.sample_type || 'first_n';
+    const nRecords = parameters.n_records !== undefined ? parameters.n_records : 100;
+    const groupBy = parameters.group_by || [];
+
+    const options = [
+      { label: "First N rows", value: "first_n" },
+      { label: "Last N rows", value: "last_n" },
+      { label: "Skip 1st N rows", value: "skip_n" },
+      { label: "1 of every N rows", value: "every_n" },
+      { label: "1 in N chance to include each row", value: "chance_n" },
+      { label: "First N% of rows", value: "first_percent" },
+      { label: "Random N rows", value: "random_n" }
+    ];
+
+    return (
+      <div className="sampling-config" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="radio-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {options.map(opt => (
+            <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
+              <input 
+                type="radio" 
+                name="sample_type"
+                value={opt.value}
+                checked={sampleType === opt.value}
+                onChange={(e) => handleParamChange('sample_type', e.target.value)}
+                style={{ accentColor: 'var(--color-accent)' }}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label style={{ fontSize: '13px', fontWeight: 600 }}>N =</label>
+          <SafeInput 
+            type="number"
+            value={nRecords}
+            onChange={(e) => {
+              const val = e.target.value;
+              handleParamChange('n_records', val === '' ? '' : Number(val));
+            }}
+            style={{ width: '100px' }}
+          />
+        </div>
+
+        <div className="group-by-section">
+          <label className="form-label">Grouping (Optional):</label>
+          <div className="column-list" style={{ border: '1px solid var(--border-color)', borderRadius: '4px', maxHeight: '150px', overflowY: 'auto', padding: '8px', background: 'var(--bg-secondary)' }}>
+            {upstreamSchema.length === 0 ? (
+              <div style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>No input schema available</div>
+            ) : (
+              upstreamSchema.map(col => {
+                const colName = col.name || col; // fallback in case it's a string
+                return (
+                  <label key={colName} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', cursor: 'pointer', fontSize: '12px' }}>
+                    <input
+                      type="checkbox"
+                      checked={groupBy.includes(colName)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          handleParamChange('group_by', [...groupBy, colName]);
+                        } else {
+                          handleParamChange('group_by', groupBy.filter(c => c !== colName));
+                        }
+                      }}
+                      style={{ accentColor: 'var(--color-accent)' }}
+                    />
+                    {colName}
+                  </label>
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -2964,6 +3044,19 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
         );
       }
       
+      if (fieldDef.type === 'number') {
+        return (
+          <div key={idx} className="form-group">
+            <label className="form-label">{fieldDef.label}</label>
+            <SafeInput
+              type="number"
+              value={val !== undefined ? val : (fieldDef.default || 0)}
+              onChange={(e) => handleParamChange(fieldDef.field, parseFloat(e.target.value) || 0)}
+            />
+          </div>
+        );
+      }
+      
       if (fieldDef.type === 'boolean') {
         return (
           <div key={idx} className="form-group">
@@ -2984,9 +3077,12 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           <div key={idx} className="form-group">
             <label className="form-label">{fieldDef.label}</label>
             <SafeSelect value={val} onChange={(e) => handleParamChange(fieldDef.field, e.target.value)}>
-              {fieldDef.options?.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
+              {fieldDef.options?.map(opt => {
+                if (typeof opt === 'object' && opt !== null) {
+                  return <option key={opt.value} value={opt.value}>{opt.label}</option>;
+                }
+                return <option key={opt} value={opt}>{opt}</option>;
+              })}
             </SafeSelect>
           </div>
         );
@@ -3100,6 +3196,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
            type === 'formula' ? renderFormulaConfig() :
            type === 'visualization' ? renderVisualizationConfig() :
            type === 'join' ? renderJoinConfig() :
+           type === 'sampling' ? renderSamplingConfig() :
            type === 'summarize' ? renderSummarizeConfig() :
            (type === 'odds_portal_scraper' || type === 'odds_portal_upcoming') ? renderOddsPortalScraperConfig() :
            (toolDef && toolDef.ui_schema) ? renderDynamicForm(toolDef.ui_schema) : null}

@@ -40,7 +40,11 @@ class ReportBuilderNode(BaseNode):
         engine = self.parameters.get("formattingEngine", "AI Assistant (Intelligent)")
 
         if markdown_col not in df.columns:
-            raise ValueError(f"Column '{markdown_col}' not found in upstream data.")
+            return self.graceful_bypass(
+                df=df,
+                missing_cols=[markdown_col],
+                expected_config={'Markdown Column': markdown_col}
+            )
 
         # Dynamically install markdown library if missing
         try:

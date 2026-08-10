@@ -24,8 +24,27 @@ class BaseNode:
         sid = getattr(self, "session_id", "default")
         workflow_name = getattr(self, "workflow_name", sid)
         
-        print(f"[{timestamp}] [{workflow_name}] [NODE LOG - {node_name}] {message}")
+        print(f"[{timestamp}] [{workflow_name}] [NODE LOG - {node_name}] {message}", flush=True)
         self.logs.append(f"[{timestamp}] [{workflow_name}] [{node_name}] {message}")
+
+    def graceful_bypass(self, df: pl.DataFrame, missing_cols: List[str], expected_config: Dict[str, str]) -> pl.DataFrame:
+        """
+        Enterprise-grade graceful degradation. 
+        Logs a detailed warning when required columns are missing and returns the DataFrame unmodified,
+        preventing hard crashes in the pipeline execution loop.
+        """
+        node_name = self.MANIFEST.get("name", self.node_id).upper()
+        self.log(f"⚠️ {node_name} BYPASSED: Missing required configuration columns.")
+        
+        config_str = ", ".join([f"{k}='{v}'" for k, v in expected_config.items()])
+        self.log(f"   -> Expected Configuration: {config_str}")
+        self.log(f"   -> Actually Missing from Input: {missing_cols}")
+        
+        available_cols = list(df.columns)
+        self.log(f"   -> Input Schema Provided ({len(available_cols)} columns): {available_cols[:10]}{'...' if len(available_cols) > 10 else ''}")
+        self.log("   -> ACTION: Returning data unmodified. Ensure upstream Select/Filter nodes have not dropped these core columns.")
+        
+        return df
 
     def execute(self, inputs: Dict[str, pl.DataFrame]) -> pl.DataFrame:
         """

@@ -64,13 +64,35 @@ class OddsAnalyzerNode(BaseNode):
         o_away = self.parameters.get("oddsAwayCol", "FT_AwayOdds")
         match_id = self.parameters.get("matchIdentifier", "")
 
+        # Enforce Conservative baseline for EV calculations if it exists
+        if "Predicted_FT_HomeScore_Conservative" in df.columns and "Predicted_FT_AwayScore_Conservative" in df.columns:
+            p_home = "Predicted_FT_HomeScore_Conservative"
+            p_away = "Predicted_FT_AwayScore_Conservative"
+            self.log("Enforcing strict statistical calibration: Using Conservative predictions for Expected Value (EV).")
+            
         # Verify columns exist
         missing = [c for c in [p_home, p_away, o_home, o_draw, o_away] if c and c not in df.columns]
         if missing:
-            raise ValueError(f"Missing required columns in dataset: {missing}")
+            return self.graceful_bypass(
+                df=df,
+                missing_cols=missing,
+                expected_config={
+                    'Prob Home': p_home, 'Prob Away': p_away,
+                    'Odds Home': o_home, 'Odds Draw': o_draw, 'Odds Away': o_away
+                }
+            )
 
         pd_df = df.to_pandas()
         results = []
+        
+        home_win_prob_list = []
+        draw_prob_list = []
+        away_win_prob_list = []
+        ev_h_list = []
+        ev_d_list = []
+        ev_a_list = []
+
+        rho = -0.13  # Standard empirical correlation parameter for professional football leagues
 
         for idx, row in pd_df.iterrows():
             lambda_home = row.get(p_home, 0)
@@ -78,6 +100,12 @@ class OddsAnalyzerNode(BaseNode):
             
             # Handle nulls
             if math.isnan(lambda_home) or math.isnan(lambda_away):
+                home_win_prob_list.append(None)
+                draw_prob_list.append(None)
+                away_win_prob_list.append(None)
+                ev_h_list.append(None)
+                ev_d_list.append(None)
+                ev_a_list.append(None)
                 continue
                 
             home_win_prob = 0.0
@@ -90,6 +118,20 @@ class OddsAnalyzerNode(BaseNode):
                 for a in range(10):
                     prob_a = poisson.pmf(a, lambda_away)
                     joint_prob = prob_h * prob_a
+                    
+                    # Apply Dixon-Coles adjustment for low scorelines
+                    if h == 0 and a == 0:
+                        tau = 1.0 - (lambda_home * lambda_away * rho)
+                    elif h == 0 and a == 1:
+                        tau = 1.0 + (lambda_home * rho)
+                    elif h == 1 and a == 0:
+                        tau = 1.0 + (lambda_away * rho)
+                    elif h == 1 and a == 1:
+                        tau = 1.0 - rho
+                    else:
+                        tau = 1.0
+                        
+                    joint_prob *= max(0.0, tau)
                     
                     if h > a:
                         home_win_prob += joint_prob
@@ -113,6 +155,13 @@ class OddsAnalyzerNode(BaseNode):
             ev_h = ((home_win_prob * odds_h) - 1) * 100 if odds_h and not math.isnan(odds_h) else 0
             ev_d = ((draw_prob * odds_d) - 1) * 100 if odds_d and not math.isnan(odds_d) else 0
             ev_a = ((away_win_prob * odds_a) - 1) * 100 if odds_a and not math.isnan(odds_a) else 0
+            
+            home_win_prob_list.append(home_win_prob * 100)
+            draw_prob_list.append(draw_prob * 100)
+            away_win_prob_list.append(away_win_prob * 100)
+            ev_h_list.append(ev_h)
+            ev_d_list.append(ev_d)
+            ev_a_list.append(ev_a)
             
             m_id = str(row.get(match_id, f"Row {idx}")) if match_id and match_id in row else f"Match {idx}"
 
@@ -139,8 +188,14 @@ class OddsAnalyzerNode(BaseNode):
 
         html_content = self.generate_html_report(results)
         
-        # Let's create a report dataframe
-        report_df = pl.DataFrame(results)
+        pd_df['Prob_Home'] = home_win_prob_list
+        pd_df['Prob_Draw'] = draw_prob_list
+        pd_df['Prob_Away'] = away_win_prob_list
+        pd_df['EV_Home'] = ev_h_list
+        pd_df['EV_Draw'] = ev_d_list
+        pd_df['EV_Away'] = ev_a_list
+        
+        report_df = pl.from_pandas(pd_df)
         
         # Embed the HTML payload in the first row of a special column
         payload_series = pl.Series("__vibe_html_payload__", [html_content] + [None] * (len(report_df) - 1))
