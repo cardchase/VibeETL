@@ -958,29 +958,7 @@ function App({ isSandbox = false }) {
       const activeTag = document.activeElement?.tagName;
       if (activeTag === 'INPUT' || activeTag === 'SELECT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
 
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        const selectedNodes = nodes.filter(n => n.selected || n.id === selectedNodeId);
-        const selectedEdges = edges.filter(edge => edge.selected || edge.id === selectedEdgeId);
-        
-        if (selectedNodes.length > 0 || selectedEdges.length > 0) {
-          e.preventDefault();
-          const selectedNodeIds = selectedNodes.map(n => n.id);
-          
-          if (selectedNodes.length > 0) {
-            setNodes(nds => nds.filter(n => !selectedNodeIds.includes(n.id)));
-            setSelectedNodeId(null);
-          }
-          
-          if (selectedNodeIds.length > 0 || selectedEdges.length > 0) {
-            setEdges(eds => eds.filter(edge => 
-              !selectedEdges.some(e => e.id === edge.id) &&
-              !selectedNodeIds.includes(edge.source) && 
-              !selectedNodeIds.includes(edge.target)
-            ));
-            setSelectedEdgeId(null);
-          }
-        }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         e.preventDefault();
         const selectedNodes = nodes.filter(n => n.selected || n.id === selectedNodeId);
         
@@ -1633,6 +1611,13 @@ function App({ isSandbox = false }) {
     }
   }, [selectedNodeId]);
 
+  const onEdgesDelete = useCallback((deleted) => {
+    const deletedIds = deleted.map(e => e.id);
+    if (deletedIds.includes(selectedEdgeId)) {
+      setSelectedEdgeId(null);
+    }
+  }, [selectedEdgeId]);
+
   // Resolve the current selected node object
   const selectedNode = useMemo(() => {
     return nodes.find((n) => n.id === selectedNodeId) || null;
@@ -2226,13 +2211,20 @@ function App({ isSandbox = false }) {
     const dagreGraph = new dagre.graphlib.Graph();
     dagreGraph.setDefaultEdgeLabel(() => ({}));
     
-    // Config: nodesep is horizontal distance, ranksep is vertical distance for LR direction
-    const isHorizontal = true; // Most nodes flow left to right
-    dagreGraph.setGraph({ rankdir: isHorizontal ? 'LR' : 'TB', nodesep: 150, ranksep: 200 });
+    // Config: nodesep is vertical distance between nodes in a column, ranksep is horizontal distance between columns
+    const isHorizontal = true; 
+    dagreGraph.setGraph({ 
+      rankdir: isHorizontal ? 'LR' : 'TB', 
+      align: 'UL',         // Align nodes to the Upper Left (forces inputs to align vertically)
+      ranker: 'longest-path', // Forces all source nodes (inputs) to the absolute left
+      nodesep: 40,  // Tighter vertical spacing
+      ranksep: 25,  // Reduced by another 50% based on user feedback
+      edgesep: 10
+    });
 
     nodes.forEach((node) => {
-      // Approximate node size
-      dagreGraph.setNode(node.id, { width: 250, height: 100 });
+      // Deceive dagre with a smaller width to force a much tighter horizontal packing
+      dagreGraph.setNode(node.id, { width: 120, height: 80 });
     });
 
     edges.forEach((edge) => {
@@ -2241,19 +2233,41 @@ function App({ isSandbox = false }) {
 
     dagre.layout(dagreGraph);
 
+    // Find the absolute leftmost X coordinate in the calculated layout
+    let minX = Infinity;
+    nodes.forEach(node => {
+      const pos = dagreGraph.node(node.id);
+      if (pos && pos.x < minX) minX = pos.x;
+    });
+
+    const targetIds = new Set(edges.map(e => e.target));
+
     const newNodes = nodes.map((node) => {
       const nodeWithPosition = dagreGraph.node(node.id);
+      
+      // Determine if this is a true "Source Input" tool
+      const isInputCategory = node.data?.category === 'inout' || node.data?.label?.toLowerCase().includes('input');
+      const isSourceNode = !targetIds.has(node.id);
+      
+      // If it's a Source Input, snap it to the absolute left of the workflow
+      const finalX = (isInputCategory && isSourceNode) ? minX : nodeWithPosition.x;
+      
       return {
         ...node,
         position: {
-          x: nodeWithPosition.x - 125, // offset by half width
-          y: nodeWithPosition.y - 50   // offset by half height
+          x: finalX - 60, // offset by half width (120 / 2)
+          y: nodeWithPosition.y - 40  // offset by half height (80 / 2)
         },
       };
     });
 
     setNodes(newNodes);
     setIsDirty(true);
+    
+    // Automatically fit view to show the newly spaced out workflow
+    setTimeout(() => {
+      window.dispatchEvent(new Event('vibe-fit-view'));
+    }, 50);
   };
 
   const inspectedNode = getInspectedNode();
@@ -2366,6 +2380,7 @@ function App({ isSandbox = false }) {
                 onEdgeSelect={setSelectedEdgeId}
                 onAddNode={handleAddNode}
                 onNodesDelete={onNodesDelete}
+                onEdgesDelete={onEdgesDelete}
                 onNodeDragStop={(e, node) => {
                   isDraggingNode.current = false;
                   // Force a tabs sync to capture the new coordinates
