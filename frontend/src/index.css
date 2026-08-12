@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Open+Sans:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap');
 
 :root {
   --font-primary: 'Outfit', 'Outfit Fallback', sans-serif;
@@ -47,6 +47,33 @@
   --shadow-glow: 0 0 15px rgba(37, 99, 235, 0.08);
 }
 
+[data-theme='dark'] {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-panel: #161b22;
+  
+  --border-color: #30363d;
+  --border-dark: #484f58;
+  --border-glow: rgba(59, 130, 246, 0.3);
+  
+  --text-primary: #c9d1d9;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+
+  --color-inout-glow: rgba(46, 125, 50, 0.25);
+  --color-prep-glow: rgba(2, 136, 209, 0.25);
+  --color-join-glow: rgba(123, 31, 162, 0.25);
+  --color-transform-glow: rgba(230, 81, 0, 0.25);
+  --color-cloud-glow: rgba(2, 132, 199, 0.25);
+  --color-accent-glow: rgba(37, 99, 235, 0.25);
+  
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 15px rgba(37, 99, 235, 0.15);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -61,6 +88,16 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* Global Font Weight Modifiers */
+body[data-font-weight="light"] *:not(b, strong, h1, h2, h3, h4, h5, h6, .lucide) {
+  font-weight: 300 !important;
+}
+body[data-font-weight="bold"] *:not(b, strong, h1, h2, h3, h4, h5, h6, .lucide) {
+  font-weight: 600 !important;
 }
 
 /* Custom Scrollbars */

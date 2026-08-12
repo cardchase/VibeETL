@@ -1,9 +1,10 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import * as Icons from 'lucide-react';
-import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize, Columns, Rows, Wand } from 'lucide-react';
+import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize, Columns, Rows, Wand, Settings } from 'lucide-react';
 import { API_BASE } from '../config';
 import { useLayout } from '../contexts/LayoutContext';
+import SettingsModal from './SettingsModal';
 
 const CATEGORY_TITLES = {
   'favorites': '⭐ Favorites',
@@ -24,6 +25,7 @@ const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWork
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [authStatus, setAuthStatus] = useState('checking');
   const [uploadSuccessMessage, setUploadSuccessMessage] = useState('');
   const authFileInputRef = useRef(null);
@@ -434,6 +436,16 @@ const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWork
           Auto
         </label>
 
+        {/* Settings */}
+        <button
+          className="run-button"
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', marginLeft: '8px' }}
+          onClick={() => setIsSettingsOpen(true)}
+          title="Open User Settings"
+        >
+          <Icons.Settings size={14} />
+        </button>
+
         {/* Cache controls */}
         {selectedNode && (
           <button
@@ -716,6 +728,10 @@ const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWork
             </div>
           </div>
         </div>
+      )}
+
+      {isSettingsOpen && (
+        <SettingsModal onClose={() => setIsSettingsOpen(false)} />
       )}
 
       {hoveredToolInfo && createPortal(

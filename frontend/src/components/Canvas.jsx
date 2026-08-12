@@ -15,6 +15,7 @@ import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Check, Copy, Sci
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
 import ContainerNode from './ContainerNode';
+import { useSettings } from '../contexts/SettingsContext';
 
 const nodeTypes = {
   vibeNode: CustomNode,
@@ -117,6 +118,7 @@ const CanvasContent = ({
   const [isCopied, setIsCopied] = useState(false);
   const [menuConfig, setMenuConfig] = useState({ visible: false, x: 0, y: 0, type: null, nodeId: null });
   const [minimapTarget, setMinimapTarget] = useState(null);
+  const { settings } = useSettings();
   
   // Continuously monitor for minimap portal target changes since ConfigWindow remounts it
   useEffect(() => {
@@ -142,10 +144,16 @@ const CanvasContent = ({
     const selectedEdgesList = edges.filter(e => e.selected);
     
     if (selectedNodes.length > 0) {
+      const selectedNodeIds = selectedNodes.map(n => n.id);
       if (onNodesDelete) onNodesDelete(selectedNodes);
       onNodesChange(selectedNodes.map(n => ({ id: n.id, type: 'remove' })));
+      
+      const connectedEdges = edges.filter(e => selectedNodeIds.includes(e.source) || selectedNodeIds.includes(e.target));
+      if (connectedEdges.length > 0) {
+        if (onEdgesDelete) onEdgesDelete(connectedEdges);
+        onEdgesChange(connectedEdges.map(e => ({ id: e.id, type: 'remove' })));
+      }
     }
-    
     if (selectedEdgesList.length > 0) {
       if (onEdgesDelete) onEdgesDelete(selectedEdgesList);
       onEdgesChange(selectedEdgesList.map(e => ({ id: e.id, type: 'remove' })));
@@ -158,8 +166,8 @@ const CanvasContent = ({
 
   useEffect(() => {
     const handleFitView = () => {
-      // 1. Initial quick fit to get correct vertical centering and zoom
-      fitView({ padding: 0.1, maxZoom: 1.0, duration: 0 });
+      // 1. Fit the view to get optimal zoom to fit the entire workflow
+      fitView({ padding: 0.1, maxZoom: 1.0, minZoom: 0.05, duration: 0 });
       
       // 2. Adjust it immediately to be left-aligned
       setTimeout(() => {
@@ -500,7 +508,7 @@ const CanvasContent = ({
 
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edges.map(e => ({ ...e, type: settings?.wireStyle || 'smoothstep' }))}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -518,6 +526,7 @@ const CanvasContent = ({
           if (onNodesDelete) onNodesDelete(nodes);
         }}
         onEdgesDelete={onEdgesDelete}
+        minZoom={0.05}
         snapToGrid={true}
         snapGrid={[16, 16]}
         panOnDrag={isPanMode}
@@ -531,7 +540,16 @@ const CanvasContent = ({
             <Maximize size={16} />
           </ControlButton>
         </Controls>
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="rgba(0, 0, 0, 0.08)" />
+        <Background 
+          variant={
+            settings?.canvasBackground === 'lines' ? BackgroundVariant.Lines : 
+            settings?.canvasBackground === 'cross' ? BackgroundVariant.Cross : 
+            BackgroundVariant.Dots
+          } 
+          gap={16} 
+          size={1} 
+          color={settings?.theme === 'dark' ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)"} 
+        />
         <FindNodePanel nodes={nodes} onNodeSelect={onNodeSelect} />
       </ReactFlow>
     </div>

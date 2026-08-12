@@ -14,10 +14,11 @@ const CustomNode = ({ id, data, selected, type }) => {
   const sourcePosition = layoutDirection === 'horizontal' ? Position.Right : Position.Bottom;
   const targetPosition = layoutDirection === 'horizontal' ? Position.Left : Position.Top;
 
-  // Determine display description dynamically based on common parameter fields (supports custom tools out-of-the-box!)
   let description = '';
   if (data?.parameters?.filePath) {
     description = data.parameters.filePath;
+  } else if (data?.parameters?.folderPath) {
+    description = data.parameters.folderPath;
   } else if (data?.parameters?.outputPath) {
     description = data.parameters.outputPath;
   } else if (data?.parameters?.tableName) {
