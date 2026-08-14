@@ -1,0 +1,126 @@
+{
+  "nodes": [
+    {
+      "id": "node_1",
+      "type": "odds_portal_scraper",
+      "position": {
+        "x": -990,
+        "y": 98
+      },
+      "data": {
+        "label": "OddsPortal Scraper",
+        "category": "source",
+        "icon": "Database",
+        "parameters": {
+          "maxWorkers": 10,
+          "targetUrl": "https://www.oddsportal.com/football/germany/bundesliga/results/",
+          "scrapeMode": "historical",
+          "autoSaveCsvPath": "D:/Project/VibeETL/outputs/bundesliga_intermediate.csv",
+          "scrapeAllSeasons": true,
+          "autoSaveBatchSize": 1
+        },
+        "error": null,
+        "executionIndex": 1,
+        "status": "error",
+        "resultSummary": {
+          "row_count": 0
+        }
+      },
+      "measured": {
+        "width": 34,
+        "height": 34
+      },
+      "selected": true,
+      "dragging": false
+    },
+    {
+      "id": "node_2",
+      "type": "browse",
+      "position": {
+        "x": -830,
+        "y": 50
+      },
+      "data": {
+        "label": "Browse",
+        "category": "inout",
+        "icon": "Search",
+        "parameters": {
+          "info": "View Data in Results Panel"
+        },
+        "error": null,
+        "executionIndex": 2,
+        "status": "error",
+        "resultSummary": {
+          "row_count": 0
+        }
+      },
+      "measured": {
+        "width": 34,
+        "height": 34
+      },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_3",
+      "type": "fileOutput",
+      "position": {
+        "x": -830,
+        "y": 178
+      },
+      "data": {
+        "label": "File Output",
+        "category": "inout",
+        "icon": "Save",
+        "parameters": {
+          "saveFile": true,
+          "outputPath": "D:/Project/VibeETL/outputs/bundesliga.csv",
+          "outputFormat": "csv",
+          "sheetName": "Sheet1"
+        },
+        "error": null,
+        "executionIndex": 3,
+        "status": "error",
+        "resultSummary": {
+          "row_count": 0
+        }
+      },
+      "measured": {
+        "width": 34,
+        "height": 34
+      },
+      "selected": false,
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_1785218509436_519",
+      "source": "node_1",
+      "target": "node_2",
+      "sourceHandle": "output",
+      "targetHandle": "input",
+      "style": {
+        "stroke": "#ef4444",
+        "strokeWidth": 1.5
+      },
+      "animated": false,
+      "selected": false,
+      "type": "default"
+    },
+    {
+      "id": "edge_1785218509436_85",
+      "source": "node_1",
+      "target": "node_3",
+      "sourceHandle": "output",
+      "targetHandle": "input",
+      "style": {
+        "stroke": "#ef4444",
+        "strokeWidth": 1.5
+      },
+      "animated": false,
+      "selected": false,
+      "type": "default"
+    }
+  ]
+}

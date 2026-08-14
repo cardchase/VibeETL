@@ -267,8 +267,15 @@ class PipelineCache:
                 # Extract serializable metadata
                 meta = {k: v for k, v in node_data.items() if k not in ["_df", "_ports_df"]}
                 meta_path = self.cache_dir / f"{node_id}_meta.json"
+                
+                def default_serializer(obj):
+                    from datetime import date, datetime
+                    if isinstance(obj, (datetime, date)):
+                        return obj.isoformat()
+                    raise TypeError(f"Type {type(obj)} not serializable")
+                    
                 with open(meta_path, "w") as f:
-                    json.dump(meta, f)
+                    json.dump(meta, f, default=default_serializer)
                     
                 if "_df" in node_data and node_data["_df"] is not None:
                     df_path = self.cache_dir / f"{node_id}.parquet"

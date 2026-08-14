@@ -6,6 +6,15 @@ import concurrent.futures
 import polars as pl
 import signal
 
+import logging
+import sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
 def force_exit_handler(sig, frame):
     print("\n[!] Ctrl+C detected! Forcefully shutting down all scraping tasks immediately...")
     os._exit(1)
@@ -64,10 +73,23 @@ def sync_and_deduplicate_csvs(output_dir: str, target_slug: str = None):
             continue
             
         try:
-            df_merged = pl.concat(dfs, how="vertical_relaxed").unique()
-            df_merged.write_csv(final_path)
+            df_merged = pl.concat(dfs, how="vertical_relaxed")
+            
+            # Deduplicate based on URL. Keep the row with the LEAST nulls if duplicates exist.
+            df_merged = df_merged.with_columns(
+                pl.sum_horizontal(pl.all().is_null()).alias("null_count")
+            ).sort("null_count").unique(subset=["URL"], keep="first").drop("null_count")
+            
+            # Split into fully populated (for outputs/) vs all (for intermediates/)
+            critical_cols = ["FT_HomeOdds", "DNB_Home", "DC_FT_1X", "BTTS_Yes", "OU25_Over"]
+            df_final_clean = df_merged
+            for col in critical_cols:
+                if col in df_final_clean.columns:
+                    df_final_clean = df_final_clean.filter(pl.col(col).is_not_null())
+                    
+            df_final_clean.write_csv(final_path)
             df_merged.write_csv(inter_path)
-            print(f"Synced and deduplicated {slug}. Total rows: {len(df_merged)}")
+            print(f"Synced and deduplicated {slug}. Golden rows: {len(df_final_clean)}, Incomplete rows: {len(df_merged) - len(df_final_clean)}")
         except Exception as e:
             print(f"Failed to sync {slug}: {e}")
 
@@ -116,10 +138,6 @@ def process_competition(url: str, tabs: int = 3, headless: bool = False):
     try:
         df = node.execute({"input": None})
         if df is not None and not df.is_empty():
-            pl.Config.set_tbl_rows(100)
-            pl.Config.set_tbl_cols(20)
-            pl.Config.set_fmt_str_lengths(135)
-            print(f"\n{df}\n")
             df.write_csv(final_csv)
             print(f"Finished extraction for {slug}. Saved {len(df)} total rows to {final_csv}")
         else:
@@ -145,11 +163,16 @@ def main():
 
     if args.browsers is None and args.tabs is None:
         print("\n=== OddsPortal Scraper Setup ===")
-        print("1. Daytime Mode   (1 Browser, 3 Tabs per browser)  - Visible browsers, lighter load")
+        print("1. Daytime Mode   (1 Browser, 3 Tabs per browser)   - Visible browsers, lighter load")
         print("2. Nighttime Mode (10 Browsers, 3 Tabs per browser) - Headless (invisible) browsers, maximum speed")
+        print("2.1 Custom Vis    (3 Browsers, 3 Tabs per browser)  - Visible browsers, balanced speed")
+        print("3. Heavy Mode     (10 Browsers, 5 Tabs per browser) - Headless, aggressive speed")
+        print("3.1 Heavy Vis     (10 Browsers, 5 Tabs per browser) - Visible browsers, aggressive speed")
+        print("4. God Mode       (10 Browsers, 10 Tabs per browser)- Headless, extreme speed, push limits")
+        print("5. Test Mode      (10 Browsers, 10 Tabs per browser)- Visible browsers, extreme speed, push limits")
         print("================================\n")
         while True:
-            choice = input("Select an option (1 or 2): ").strip()
+            choice = input("Select an option (1, 2, 2.1, 3, 3.1, 4, or 5): ").strip()
             if choice == "1":
                 args.browsers = 1
                 args.tabs = 3
@@ -159,8 +182,33 @@ def main():
                 args.tabs = 3
                 args.headless = True
                 break
+            elif choice == "2.1":
+                args.browsers = 3
+                args.tabs = 3
+                args.headless = False
+                break
+            elif choice == "3":
+                args.browsers = 10
+                args.tabs = 5
+                args.headless = True
+                break
+            elif choice == "3.1":
+                args.browsers = 10
+                args.tabs = 5
+                args.headless = False
+                break
+            elif choice == "4":
+                args.browsers = 10
+                args.tabs = 10
+                args.headless = True
+                break
+            elif choice == "5":
+                args.browsers = 10
+                args.tabs = 10
+                args.headless = False
+                break
             else:
-                print("Invalid choice. Please enter 1 or 2.")
+                print("Invalid choice. Please enter 1, 2, 3, 3.1, 4, or 5.")
     else:
         # Fallbacks if they only provide one argument
         if args.browsers is None: args.browsers = 1
@@ -223,8 +271,12 @@ def main():
         def get_priority(slug, url):
             url_lower = url.lower()
             
-            # Top tier - most popular, highest volume
-            top_tier = ['england/premier-league', 'spain/laliga', 'germany/bundesliga', 'italy/serie-a', 'france/ligue-1', 'europe/champions-league', 'europe/europa-league']
+            # Top tier - strict marquee leagues requested by user
+            top_tier = [
+                'europe/champions-league', 'europe/europa-league', 'europe/conference-league',
+                'england/premier-league', 'england/championship',
+                'france/ligue-1', 'spain/laliga', 'germany/bundesliga', 'italy/serie-a'
+            ]
             for term in top_tier:
                 if term in url_lower:
                     return 1

@@ -19,6 +19,7 @@ class GeminiAINode(BaseNode):
             {"field": "output_column", "type": "column_creatable", "label": "Output Column Name", "default": "AI_Response"},
             {"field": "prompt_template", "type": "textarea", "label": "Prompt (use {ColumnName} to inject data)", "default": "Extract the sentiment from: {Input}"},
             {"field": "api_key", "type": "string", "label": "Gemini API Key (Optional if GEMINI_API_KEY env is set)", "default": ""},
+            {"field": "enable_google_search", "type": "boolean", "label": "Enable Web Search (Google Grounding)", "default": False},
             {"field": "bypass_warning", "type": "boolean", "label": "Acknowledge Rate Limits (Bypass >500 Row Warning)", "default": False}
         ]
     }
@@ -47,6 +48,7 @@ class GeminiAINode(BaseNode):
         output_column = self.parameters.get("output_column", "AI_Response")
         prompt_template = self.parameters.get("prompt_template", "Extract the sentiment from: {Input}")
         api_key = self.parameters.get("api_key", "").strip()
+        enable_google_search = self.parameters.get("enable_google_search", False)
         bypass_warning = self.parameters.get("bypass_warning", False)
 
         if not input_column or input_column not in df.columns:
@@ -63,6 +65,13 @@ class GeminiAINode(BaseNode):
 
         client = genai.Client(api_key=key_to_use)
         model_name = 'gemini-1.5-flash'
+        
+        # Configure Tools (Google Search Grounding)
+        config_kwargs = {}
+        if enable_google_search:
+            from google.genai import types
+            config_kwargs["tools"] = [{"google_search": {}}]
+            self.log("🌐 Google Search Grounding is ENABLED. The AI will browse the live web for context.")
 
         self.log(f"Preparing to run Gemini AI on column '{input_column}' into '{output_column}' for {df.height} rows...")
         
@@ -88,7 +97,8 @@ class GeminiAINode(BaseNode):
                     try:
                         response = client.models.generate_content(
                             model=model_name,
-                            contents=[formatted_prompt, uploaded_file]
+                            contents=[formatted_prompt, uploaded_file],
+                            config=types.GenerateContentConfig(**config_kwargs) if enable_google_search else None
                         )
                         ai_responses.append(response.text.strip())
                     finally:
@@ -98,7 +108,8 @@ class GeminiAINode(BaseNode):
                     # Text-only processing
                     response = client.models.generate_content(
                         model=model_name,
-                        contents=formatted_prompt
+                        contents=formatted_prompt,
+                        config=types.GenerateContentConfig(**config_kwargs) if enable_google_search else None
                     )
                     ai_responses.append(response.text.strip())
 

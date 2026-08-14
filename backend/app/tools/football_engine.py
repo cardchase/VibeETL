@@ -134,12 +134,14 @@ class FootballEngineNode(BaseNode):
                 # Stack Home and Away teams vertically to create a longitudinal dataframe
                 home_stats = pl_valid.select([
                     pl.col("__match_id__"), 
+                    pl.col("__engine_date__"),
                     pl.col(h_team).alias("team"),
                     pl.col(h_score_col).cast(pl.Float64).alias("goals_scored"),
                     pl.col(a_score_col).cast(pl.Float64).alias("goals_conceded")
                 ])
                 away_stats = pl_valid.select([
                     pl.col("__match_id__"), 
+                    pl.col("__engine_date__"),
                     pl.col(a_team).alias("team"),
                     pl.col(a_score_col).cast(pl.Float64).alias("goals_scored"),
                     pl.col(h_score_col).cast(pl.Float64).alias("goals_conceded")
@@ -156,7 +158,22 @@ class FootballEngineNode(BaseNode):
                 ])
                 
                 # Ensure it's correctly sorted by team and match sequence
-                valid_history = valid_history.sort(["team", "__match_id__"])
+                valid_history = valid_history.sort(["team", "__engine_date__", "__match_id__"])
+                
+                # Compute 14-day rolling games played safely via Pandas to prevent Polars indexing deadlocks
+                try:
+                    vh_pd = valid_history.select(["team", "__engine_date__", "__match_id__"]).to_pandas()
+                    vh_pd["__engine_date__"] = pd.to_datetime(vh_pd["__engine_date__"], errors='coerce').fillna(pd.Timestamp("1970-01-01"))
+                    vh_pd = vh_pd.sort_values(["team", "__engine_date__", "__match_id__"]).reset_index(drop=True)
+                    
+                    res = vh_pd.groupby("team").rolling("14D", on="__engine_date__", closed="right")["__match_id__"].count()
+                    vh_pd["curr_Games_Played_L14D"] = res.values
+                    
+                    games_l14_pl = pl.DataFrame(vh_pd[["__match_id__", "team", "curr_Games_Played_L14D"]])
+                    valid_history = valid_history.join(games_l14_pl, on=["__match_id__", "team"], how="left")
+                except Exception as e:
+                    self.log(f"Warning: Could not compute L14D rolling count safely: {e}")
+                    valid_history = valid_history.with_columns(pl.lit(0).alias("curr_Games_Played_L14D"))
                 
                 # Calculate rolling stats (inclusive of the current match)
                 valid_history = valid_history.with_columns([
@@ -170,14 +187,25 @@ class FootballEngineNode(BaseNode):
                     pl.col("curr_Form_Last5_Pts").shift(1).over("team").fill_null(0.0).alias("Form_Last5_Pts"),
                     pl.col("curr_Scoring_Momentum_L3").shift(1).over("team").fill_null(0.0).alias("Scoring_Momentum_L3"),
                     pl.col("curr_Defense_Leak_L3").shift(1).over("team").fill_null(0.0).alias("Defense_Leak_L3"),
+                    pl.col("curr_Games_Played_L14D").shift(1).over("team").fill_null(0).alias("Games_Played_L14D"),
                 ])
                 
                 # For future matches (null scores), we need the most recent stats prior to it
                 future_matches = team_stats.filter(pl.col("goals_scored").is_null() | pl.col("goals_conceded").is_null())
                 
                 if len(future_matches) > 0:
-                    valid_for_asof = valid_history.select(["team", "__match_id__", "curr_Form_Last5_Pts", "curr_Scoring_Momentum_L3", "curr_Defense_Leak_L3"]).sort("__match_id__")
+                    valid_for_asof = valid_history.select(["team", "__match_id__", "curr_Form_Last5_Pts", "curr_Scoring_Momentum_L3", "curr_Defense_Leak_L3", "curr_Games_Played_L14D"]).sort("__match_id__")
+                    # Tell Polars the data is explicitly sorted to prevent UserWarning
+                    try:
+                        valid_for_asof = valid_for_asof.set_sorted("__match_id__")
+                    except AttributeError:
+                        pass
+                        
                     future_for_asof = future_matches.select(["team", "__match_id__"]).sort("__match_id__")
+                    try:
+                        future_for_asof = future_for_asof.set_sorted("__match_id__")
+                    except AttributeError:
+                        pass
                     
                     # Backward asof join gives us the most recent valid match's "current" stats
                     joined_futures = future_for_asof.join_asof(
@@ -186,14 +214,15 @@ class FootballEngineNode(BaseNode):
                         pl.col("curr_Form_Last5_Pts").fill_null(0.0).alias("Form_Last5_Pts"),
                         pl.col("curr_Scoring_Momentum_L3").fill_null(0.0).alias("Scoring_Momentum_L3"),
                         pl.col("curr_Defense_Leak_L3").fill_null(0.0).alias("Defense_Leak_L3"),
-                    ]).select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3"])
+                        pl.col("curr_Games_Played_L14D").fill_null(0).alias("Games_Played_L14D"),
+                    ]).select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3", "Games_Played_L14D"])
                     
                     all_features = pl.concat([
-                        valid_history.select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3"]),
+                        valid_history.select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3", "Games_Played_L14D"]),
                         joined_futures
                     ])
                 else:
-                    all_features = valid_history.select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3"])
+                    all_features = valid_history.select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3", "Games_Played_L14D"])
                 
                 # Join rolling features back to the main dataframe for Home and Away
                 pl_valid = pl_valid.join(
@@ -202,6 +231,7 @@ class FootballEngineNode(BaseNode):
                         "Form_Last5_Pts": f"{prefix}_HomeTeam_Form_Last5_Pts",
                         "Scoring_Momentum_L3": f"{prefix}_HomeTeam_Scoring_Momentum_L3",
                         "Defense_Leak_L3": f"{prefix}_HomeTeam_Defense_Leak_L3",
+                        "Games_Played_L14D": f"{prefix}_HomeTeam_Games_Played_L14D",
                     }),
                     left_on=["__match_id__", h_team], right_on=["__match_id__", h_team],
                     how="left"
@@ -213,12 +243,13 @@ class FootballEngineNode(BaseNode):
                         "Form_Last5_Pts": f"{prefix}_AwayTeam_Form_Last5_Pts",
                         "Scoring_Momentum_L3": f"{prefix}_AwayTeam_Scoring_Momentum_L3",
                         "Defense_Leak_L3": f"{prefix}_AwayTeam_Defense_Leak_L3",
+                        "Games_Played_L14D": f"{prefix}_AwayTeam_Games_Played_L14D",
                     }),
                     left_on=["__match_id__", a_team], right_on=["__match_id__", a_team],
                     how="left"
                 )
                 
-                features_added += 6
+                features_added += 8
                 
         # Re-attach unwed rows
         valid_rows = pl_valid.to_pandas()

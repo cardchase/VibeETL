@@ -11,7 +11,7 @@ import {
   SelectionMode,
   Panel
 } from '@xyflow/react';
-import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Check, Copy, Scissors, ClipboardPaste, Trash2, Maximize } from 'lucide-react';
+import { Hand, MousePointer, Search, X, Box, Wand, CheckSquare, Check, Copy, Scissors, ClipboardPaste, Trash2, Maximize, Database } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import CustomNode from './CustomNode';
 import ContainerNode from './ContainerNode';
@@ -111,6 +111,8 @@ const CanvasContent = ({
   onMoveEnd,
   onCopyConfig,
   onPasteConfig,
+  onCacheAndRun,
+  onClearGlobalCache,
 }) => {
   const reactFlowWrapper = useRef(null);
   const { screenToFlowPosition, fitView, getViewport, setViewport, getNodes, setCenter } = useReactFlow();
@@ -140,24 +142,7 @@ const CanvasContent = ({
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true }));
   };
   const handleDelete = () => {
-    const selectedNodes = nodes.filter(n => n.selected);
-    const selectedEdgesList = edges.filter(e => e.selected);
-    
-    if (selectedNodes.length > 0) {
-      const selectedNodeIds = selectedNodes.map(n => n.id);
-      if (onNodesDelete) onNodesDelete(selectedNodes);
-      onNodesChange(selectedNodes.map(n => ({ id: n.id, type: 'remove' })));
-      
-      const connectedEdges = edges.filter(e => selectedNodeIds.includes(e.source) || selectedNodeIds.includes(e.target));
-      if (connectedEdges.length > 0) {
-        if (onEdgesDelete) onEdgesDelete(connectedEdges);
-        onEdgesChange(connectedEdges.map(e => ({ id: e.id, type: 'remove' })));
-      }
-    }
-    if (selectedEdgesList.length > 0) {
-      if (onEdgesDelete) onEdgesDelete(selectedEdgesList);
-      onEdgesChange(selectedEdgesList.map(e => ({ id: e.id, type: 'remove' })));
-    }
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }));
   };
   const handleSelectAll = () => {
     const changes = nodes.map(n => ({ id: n.id, type: 'select', selected: true }));
@@ -321,24 +306,38 @@ const CanvasContent = ({
             }
           }
           
-          // Prevent stacking via Vertical Deflection ONLY for auto-layout
+          // Prevent stacking via Intelligent Dense Packing
           let conflict = true;
           let loopCounter = 0;
+          const startPos = { ...position };
           
-          while (conflict && loopCounter < 50) {
-            // eslint-disable-next-line no-loop-func
+          const gridX = 220;
+          const gridY = 140;
+          
+          // Smart expanding cluster: priorities Up, Down, Right, then Diagonals
+          const smartOffsets = [
+            {dx: 0, dy: -1}, {dx: 0, dy: 1}, {dx: 1, dy: 0}, {dx: 1, dy: -1}, {dx: 1, dy: 1},
+            {dx: 0, dy: -2}, {dx: 0, dy: 2}, {dx: 2, dy: 0}, {dx: 2, dy: -1}, {dx: 2, dy: 1},
+            {dx: -1, dy: -1}, {dx: -1, dy: 0}, {dx: -1, dy: 1},
+            {dx: 1, dy: -2}, {dx: 1, dy: 2}, {dx: 2, dy: -2}, {dx: 2, dy: 2},
+            {dx: 0, dy: -3}, {dx: 0, dy: 3}, {dx: 3, dy: 0}, {dx: 3, dy: -1}, {dx: 3, dy: 1},
+            {dx: 1, dy: -3}, {dx: 1, dy: 3}, {dx: 3, dy: -2}, {dx: 3, dy: 2},
+            {dx: 0, dy: -4}, {dx: 0, dy: 4}, {dx: 4, dy: 0}, {dx: 4, dy: -1}, {dx: 4, dy: 1},
+          ];
+          
+          while (conflict && loopCounter < smartOffsets.length) {
             conflict = nodes.some(n => 
               Math.abs(n.position.x - position.x) < 160 && 
               Math.abs(n.position.y - position.y) < 100
             );
             
             if (conflict) {
-              loopCounter++;
-              // Shift exactly "1 tool height + spacing" downward
+              const offset = smartOffsets[loopCounter];
               position = {
-                x: position.x,
-                y: position.y + (80) + 60
+                x: startPos.x + (offset.dx * gridX),
+                y: startPos.y + (offset.dy * gridY)
               };
+              loopCounter++;
             }
           }
         }
@@ -453,11 +452,12 @@ const CanvasContent = ({
                 </button>
               </>
             )}
+            
             <button
               className="mode-btn"
               onClick={handleDelete}
               title="Delete Selected Nodes"
-              style={{ color: '#ef4444' }}
+              style={{ color: 'var(--color-error)' }}
             >
               <Trash2 size={14} />
               <span>Delete</span>
@@ -508,7 +508,11 @@ const CanvasContent = ({
 
       <ReactFlow
         nodes={nodes}
-        edges={edges.map(e => ({ ...e, type: settings?.wireStyle || 'smoothstep' }))}
+        edges={edges.map(e => ({ 
+          ...e, 
+          type: settings?.wireStyle || 'default',
+          animated: settings?.animatedWires 
+        }))}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}

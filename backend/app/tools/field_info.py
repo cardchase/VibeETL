@@ -32,9 +32,19 @@ class FieldInfoNode(BaseNode):
         # We need to construct metadata for each column
         names = df.columns
         types = [str(dtype) for dtype in df.dtypes]
+        total_rows = df.height
         
         # Calculate null counts efficiently
         null_counts = df.null_count().row(0)
+        
+        # Calculate unique counts efficiently
+        unique_counts = df.select(pl.all().n_unique()).row(0)
+        
+        # Calculate fill rate
+        fill_rates = [
+            f"{((total_rows - nc) / total_rows * 100):.2f}%" if total_rows > 0 else "0.00%"
+            for nc in null_counts
+        ]
         
         # Try to get a sample value from the first valid row for each column
         sample_values = []
@@ -63,7 +73,10 @@ class FieldInfoNode(BaseNode):
             "Name": names,
             "Type": types,
             "Semantic_Type": semantic_types,
+            "Total_Rows": [total_rows] * len(names),
             "Null_Count": null_counts,
+            "Fill_Rate": fill_rates,
+            "Unique_Values": unique_counts,
             "Sample_Value": sample_values
         })
         

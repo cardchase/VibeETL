@@ -24,7 +24,13 @@ class BaseNode:
         sid = getattr(self, "session_id", "default")
         workflow_name = getattr(self, "workflow_name", sid)
         
-        print(f"[{timestamp}] [{workflow_name}] [NODE LOG - {node_name}] {message}", flush=True)
+        import logging
+        try:
+            logging.info(f"[{timestamp}] [{workflow_name}] [NODE LOG - {node_name}] {message}")
+        except UnicodeEncodeError:
+            safe_msg = message.encode('ascii', 'replace').decode('ascii')
+            logging.info(f"[{timestamp}] [{workflow_name}] [NODE LOG - {node_name}] {safe_msg}")
+            
         self.logs.append(f"[{timestamp}] [{workflow_name}] [{node_name}] {message}")
 
     def graceful_bypass(self, df: pl.DataFrame, missing_cols: List[str], expected_config: Dict[str, str]) -> pl.DataFrame:
