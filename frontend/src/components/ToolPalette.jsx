@@ -15,7 +15,7 @@ const CATEGORY_TITLES = {
   'misc': 'Miscellaneous'
 };
 
-const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onAddNode, isChatOpen, onToggleChat, isSandbox, onAutoLayout }) => {
+const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onCacheAndRun, onAddNode, isChatOpen, onToggleChat, isSandbox, onAutoLayout }) => {
   const { layoutDirection, toggleLayout } = useLayout();
   const fileInputRef = useRef(null);
   const dropdownRef = useRef(null);
@@ -456,16 +456,17 @@ const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWork
               border: '1px solid var(--border-color)'
             }}
             onClick={() => {
-              const currentlyCached = selectedNode.data?.parameters?.isCached;
-              onUpdateParams(selectedNode.id, { ...selectedNode.data?.parameters, isCached: !currentlyCached });
+              if (onCacheAndRun) {
+                const currentlyCached = selectedNode.data?.parameters?.isCached;
+                onCacheAndRun(selectedNode.id, currentlyCached);
+              }
             }}
             disabled={isRunning}
-            title={selectedNode.data?.parameters?.isCached ? "Un-cache Selected Node" : "Cache Selected Node"}
+            title={selectedNode.data?.parameters?.isCached ? "Un-cache Selected Node & Run" : "Cache Selected Node & Run"}
           >
             <Icons.Database size={12} />
           </button>
         )}
-
         <button
           className="run-button"
           style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5' }}

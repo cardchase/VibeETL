@@ -92,12 +92,15 @@ body {
   transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* Global Font Weight Modifiers */
-body[data-font-weight="light"] *:not(b, strong, h1, h2, h3, h4, h5, h6, .lucide) {
-  font-weight: 300 !important;
-}
-body[data-font-weight="bold"] *:not(b, strong, h1, h2, h3, h4, h5, h6, .lucide) {
+/* Global Text Style Modifiers (MS Word Style) */
+body[data-font-bold="true"] *:not(b, strong, h1, h2, h3, h4, h5, h6, .lucide) {
   font-weight: 600 !important;
+}
+body[data-font-italic="true"] *:not(i, em, .lucide) {
+  font-style: italic !important;
+}
+body[data-font-underline="true"] *:not(.lucide) {
+  text-decoration: underline !important;
 }
 
 /* Custom Scrollbars */
@@ -179,4 +182,23 @@ input[type="checkbox"] {
 
 .ag-theme-quartz .ag-cell {
   line-height: 24px;
+}
+
+/* Custom Flashy Animated Wires (zoom zoom) */
+.react-flow__edge.animated path.react-flow__edge-path {
+  stroke-dasharray: 10 15 !important;
+  animation: vibeetl-flow 0.4s linear infinite !important;
+  stroke: var(--color-primary);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px rgba(67, 97, 238, 0.4));
+}
+
+@keyframes vibeetl-flow {
+  from { stroke-dashoffset: 25; }
+  to { stroke-dashoffset: 0; }
+}
+
+[data-theme="dark"] .react-flow__edge.animated path.react-flow__edge-path {
+  stroke: var(--color-accent-glow);
+  filter: drop-shadow(0 0 4px var(--color-accent));
 }

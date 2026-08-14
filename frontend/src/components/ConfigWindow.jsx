@@ -168,7 +168,7 @@ const OPERATOR_LABELS = {
   'is_blank': 'IS BLANK', 'is_not_blank': 'IS NOT BLANK'
 };
 
-const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableTools = [], results = {}, nodes = [], edges = [], setNodes, style = {} }) => {
+const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableTools = [], results = {}, nodes = [], edges = [], setNodes, style = {}, onCacheAndRun, onClearGlobalCache }) => {
   const [uploading, setUploading] = useState(false);
   const [nodeToAdd, setNodeToAdd] = useState('');
   const [uploadError, setUploadError] = useState('');
@@ -3160,6 +3160,28 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
     });
   };
 
+  const renderEmptyState = () => {
+    return (
+      <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+        <div style={{ marginBottom: '15px', color: 'var(--color-accent)', opacity: 0.8 }}>
+          <Settings size={48} />
+        </div>
+        <h4 style={{ color: 'var(--text-primary)', marginBottom: '10px', fontWeight: 600 }}>No Configuration Required</h4>
+        <p style={{ fontSize: '0.85rem', lineHeight: '1.6', marginBottom: '15px' }}>
+          This node is fully automated and operates dynamically on the incoming data stream.
+        </p>
+        {toolDef && (toolDef.description || toolDef.tooltip || toolDef.extended_description) && (
+          <div style={{ background: 'var(--bg-tertiary)', padding: '15px', borderRadius: '6px', borderLeft: '3px solid var(--color-accent)', textAlign: 'left' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '5px', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Protocol Info</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
+              {toolDef.extended_description || toolDef.description || toolDef.tooltip}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="config-sidebar" style={{ ...style, display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -3170,8 +3192,8 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button 
-              onClick={() => onUpdateParams(id, { ...parameters, isCached: !parameters.isCached })}
-              title={parameters.isCached ? "Uncache Node Output" : "Cache Node Output"}
+              onClick={(e) => { e.stopPropagation(); if (onCacheAndRun) onCacheAndRun(id, parameters.isCached); }}
+              title={parameters.isCached ? "Uncache Node Output & Run" : "Cache Node Output & Run"}
               style={{ 
                 background: 'none', border: 'none', cursor: 'pointer', 
                 color: parameters.isCached ? 'var(--color-accent)' : 'var(--text-muted)',
@@ -3180,6 +3202,19 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             >
               <Database size={14} />
             </button>
+            {parameters.isCached && (
+              <button
+                onClick={(e) => { e.stopPropagation(); if (onClearGlobalCache) onClearGlobalCache(); }}
+                title="Clear Global Cache"
+                style={{ 
+                  background: 'none', border: 'none', cursor: 'pointer', 
+                  color: '#ef4444',
+                  display: 'flex', alignItems: 'center', padding: '2px', borderRadius: '4px'
+                }}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>ID: {id}</span>
           </div>
         </div>
@@ -3199,7 +3234,7 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
            type === 'sampling' ? renderSamplingConfig() :
            type === 'summarize' ? renderSummarizeConfig() :
            (type === 'odds_portal_scraper' || type === 'odds_portal_upcoming') ? renderOddsPortalScraperConfig() :
-           (toolDef && toolDef.ui_schema) ? renderDynamicForm(toolDef.ui_schema) : null}
+           (toolDef && toolDef.ui_schema && toolDef.ui_schema.length > 0) ? renderDynamicForm(toolDef.ui_schema) : renderEmptyState()}
         </div>
       </div>
       

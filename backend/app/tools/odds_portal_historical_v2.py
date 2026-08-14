@@ -78,7 +78,7 @@ HEADERS = [
     "DC_2H_1X", "DC_2H_12", "DC_2H_X2"    
 ]
 
-class OddsPortalScraperNode(BaseNode):
+class OddsPortalScraperNodeV2(BaseNode):
     """
     ETL Node for harvesting odds data from OddsPortal.
     
@@ -235,16 +235,18 @@ class OddsPortalScraperNode(BaseNode):
                             except Exception as e:
                                 self.log(f"Warning: Could not read existing CSV for resume: {e}")
                     
+                    consecutive_fully_scraped_pages = 0
+                    
                     for s_idx, season_url in enumerate(season_urls):
                         if hasattr(self, "is_cancelled") and self.is_cancelled():
+                            break
+                        if consecutive_fully_scraped_pages >= 2:
+                            self.log("✨ INTELLIGENCE ENGINE: Reached purely historical data (2 fully populated pages). Halting backward scan to save time.")
                             break
                             
                         season_slug = season_url.split('football/')[-1] if 'football/' in season_url else season_url
                         self.log(f"  [Season {s_idx+1}/{len(season_urls)}] Backward Scan: {season_slug}")
-                        
-                        # Pass 0 here so EVERY season gets scanned independently. 
-                        # It will no longer skip older seasons just because a newer season was perfectly scraped.
-                        match_links, _ = await self.extract_match_links(competition_page, season_url, scraped_urls, 0)
+                        match_links, consecutive_fully_scraped_pages = await self.extract_match_links(competition_page, season_url, scraped_urls, consecutive_fully_scraped_pages)
                         
                         original_len = len(match_links)
                         match_links = [m for m in match_links if m not in scraped_urls]
@@ -517,8 +519,7 @@ class OddsPortalScraperNode(BaseNode):
                 if page_total_valid_links > 0 and page_total_valid_links == page_already_scraped_links:
                     consecutive_fully_scraped_pages += 1
                     self.log(f"  [Page {page_num}] 100% of matches ({page_total_valid_links}) are already in dataset. Consecutive full pages: {consecutive_fully_scraped_pages}")
-                    if consecutive_fully_scraped_pages >= 5:
-                        self.log("🛑 INTELLIGENCE ENGINE: Reached purely historical data (5 fully populated pages). Halting backward scan for this season.")
+                    if consecutive_fully_scraped_pages >= 2:
                         break
                 elif page_total_valid_links > 0:
                     consecutive_fully_scraped_pages = 0
@@ -1182,7 +1183,7 @@ class OddsPortalScraperNode(BaseNode):
                         sub_tab = page.get_by_text(sub_regex).filter(visible=True).first
                         try:
                             patch_log(f"    ⏳ Waiting for sub tab '{sub_tab_text}' to appear...")
-                            await sub_tab.wait_for(timeout=2500)
+                            await sub_tab.wait_for(timeout=25000)
                         except:
                             pass
                         if await sub_tab.count() > 0:
@@ -1289,7 +1290,15 @@ class OddsPortalScraperNode(BaseNode):
                     await target.click(timeout=3000)
                     await page.wait_for_timeout(1000)
                     
-
+                    # Forcible Jiggle for React Hydration immediately after clicking OU
+                    patch_log(f"    ⚠️ Forcing Over/Under React Hydration Jiggle...")
+                    try:
+                        await page.get_by_text(re.compile(r"^1st Half$", re.I)).filter(visible=True).first.click(timeout=1000)
+                        await page.wait_for_timeout(200)
+                        await page.get_by_text(re.compile(r"^Full Time$", re.I)).filter(visible=True).first.click(timeout=1000)
+                    except:
+                        pass
+                    await page.wait_for_timeout(1000)
                 else:
                     if not page_reloaded and attempt == 0:
                         self.log("Smart Refresh: Over/Under tab missing. Reloading page...")
@@ -1303,11 +1312,11 @@ class OddsPortalScraperNode(BaseNode):
                 empty_ou_count = 0
                 for loop_i in range(120):
                     if loop_i == 20 or loop_i == 60: # 10s and 30s
-                        patch_log(f"    ⚠️ Over/Under DOM Hydration stalled. Jiggling tabs (Slow) to force React update...")
+                        patch_log(f"    ⚠️ Over/Under DOM Hydration stalled. Jiggling tabs to force React update...")
                         try:
                             # Default is Full Time, jiggle to 1st Half and back
                             await page.get_by_text(re.compile(r"^1st Half$", re.I)).filter(visible=True).first.click(timeout=1000)
-                            await page.wait_for_timeout(1000)
+                            await page.wait_for_timeout(200)
                             await page.get_by_text(re.compile(r"^Full Time$", re.I)).filter(visible=True).first.click(timeout=1000)
                         except:
                             pass
@@ -1344,11 +1353,31 @@ class OddsPortalScraperNode(BaseNode):
                 for _ in range(60):
                     # Try to expand accordions repeatedly until data is found
                     try:
+                        modern_rows = await page.locator('[data-testid="over-under-collapsed-row"]').all()
+                        if not modern_rows:
+                            all_trs = await page.locator('tr, div').all()
+                            modern_rows = []
+                            for tr in all_trs:
+                                try:
+                                    text = await tr.inner_text()
+                                    class_val = await tr.get_attribute("class") or ""
+                                    if ("Over/Under" in text or "O/U" in text) and "cursor-pointer" in class_val:
+                                        modern_rows.append(tr)
+                                except: pass
+                        
                         try:
                             await page.evaluate('''() => {
                                 document.querySelectorAll('[data-testid="over-under-collapsed-row"]').forEach(r => r.click());
+                                document.querySelectorAll('tr.cursor-pointer, div.cursor-pointer').forEach(el => {
+                                    if (el.innerText && (el.innerText.includes('Over/Under') || el.innerText.includes('O/U'))) el.click();
+                                });
                             }''')
                         except: pass
+
+                        for row in modern_rows:
+                            try:
+                                await row.click(force=True, timeout=500)
+                            except: pass
                     except: pass
                     
                     await page.wait_for_timeout(500)

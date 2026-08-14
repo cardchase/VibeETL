@@ -38,6 +38,7 @@ class PredictorNode(BaseNode):
                     "Exciting (High Scoring & Upsets)", 
                     "Underdog Seeker (Boosts Weaker Teams)", 
                     "Defensive Stalemate (Low Scoring)",
+                    "Form-Heavy (Recency Bias)",
                     "All Personalities (Outputs Multiple Columns)"
                 ],
                 "default": "Conservative (Default, Most Accurate)"
@@ -97,7 +98,7 @@ class PredictorNode(BaseNode):
             'Match_Status', 'Winner', 'Result'
         }
         
-        def apply_personality(predictions, is_classification, is_poisson, personality_type, target_name):
+        def apply_personality(predictions, is_classification, is_poisson, personality_type, target_name, df_full=None):
             if is_classification or not is_poisson:
                 return predictions
                 
@@ -109,31 +110,49 @@ class PredictorNode(BaseNode):
             
             # Preserve relative distribution dynamics instead of flat multiplication
             if "Exciting" in personality_type:
-                # Boost attacking tempo conditionally based on baseline xG variance
-                preds_array = np.where(preds_array > 1.2, preds_array * 1.35 + 0.2, preds_array * 1.1)
-                self.log(f"💥 Applied 'Exciting' personality to {target_name} (Dynamic attacking boost)")
+                # Push the lambda harder to shift the Poisson mode from 1 goal to 3 goals
+                preds_array = np.where(preds_array > 1.0, preds_array * 1.5 + 0.4, preds_array * 1.25)
+                self.log(f"💥 Applied 'Exciting' personality to {target_name} (Aggressive attacking boost)")
+                
             elif "Defensive" in personality_type:
-                # Penalize goal expectation dynamically without flattening lower bounds
-                preds_array = np.maximum(0.2, preds_array * 0.72)
-                self.log(f"🛡️ Applied 'Defensive' personality to {target_name} (Dynamic lower bounds)")
+                # Squash expected goals heavily by a percentage to force 0-0 or 1-0 modes
+                preds_array = np.maximum(0.1, preds_array * 0.6)
+                self.log(f"🛡️ Applied 'Defensive' personality to {target_name} (Heavy defensive suppression)")
+                
             elif "Underdog" in personality_type:
-                # Boost weaker team xG relative to home/away target
+                # Invert the traditional strengths drastically to force upset modes
                 if "Away" in target_name:
-                    preds_array = preds_array * 1.3 + 0.3
-                    self.log(f"🐕 Applied 'Underdog' personality to {target_name} (Away boost)")
+                    preds_array = preds_array * 1.4 + 0.5
+                    self.log(f"🐕 Applied 'Underdog' personality to {target_name} (Massive Away boost)")
                 else:
-                    preds_array = preds_array * 0.95
+                    preds_array = preds_array * 0.8
                     self.log(f"🐕 Applied 'Underdog' personality to {target_name} (Home penalty)")
+            elif "Form-Heavy" in personality_type and not is_classification and df_full is not None:
+                team_type = "HomeTeam" if "Home" in target_name else "AwayTeam"
+                form_col = None
+                for c in df_full.columns:
+                    if team_type in c and "Form_Last5_Pts" in c:
+                        form_col = c
+                        break
+                if form_col:
+                    form_vals = df_full[form_col].fillna(7.0).values
+                    # Base is ~7 pts. 0 pts = 0.7x multiplier, 15 pts = 1.3x multiplier
+                    scale_factor = 0.7 + (form_vals / 15.0) * 0.6
+                    preds_array = preds_array * scale_factor
+                    self.log(f"🔥 Applied 'Form-Heavy' personality to {target_name} (Form multiplier applied)")
                     
             return preds_array
             
         def store_predictions(raw_preds, is_class, is_poiss, p_type, tgt, df_full, msg_suffix=""):
             if "All Personalities" in p_type:
-                for p_name in ["Conservative", "Exciting", "Underdog", "Defensive"]:
-                    adj_preds = apply_personality(raw_preds, is_class, is_poiss, p_name, tgt)
+                # Always provide the raw base prediction as the root column
+                df_full[f"Predicted_{tgt}"] = apply_personality(raw_preds, is_class, is_poiss, "Conservative", tgt, df_full)
+                
+                for p_name in ["Conservative", "Exciting", "Underdog", "Defensive", "Form-Heavy"]:
+                    adj_preds = apply_personality(raw_preds, is_class, is_poiss, p_name, tgt, df_full)
                     df_full[f"Predicted_{tgt}_{p_name}"] = adj_preds
             else:
-                adj_preds = apply_personality(raw_preds, is_class, is_poiss, p_type, tgt)
+                adj_preds = apply_personality(raw_preds, is_class, is_poiss, p_type, tgt, df_full)
                 df_full[f"Predicted_{tgt}"] = adj_preds
             self.log(f"Generated predictions for {len(df_infer)} empty rows{msg_suffix}.")
         

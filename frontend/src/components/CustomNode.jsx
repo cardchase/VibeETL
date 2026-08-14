@@ -98,9 +98,16 @@ const CustomNode = ({ id, data, selected, type }) => {
       
       const leftCount = leftNode?.data?.resultSummary?.row_count ?? '?';
       const rightCount = rightNode?.data?.resultSummary?.row_count ?? '?';
-      const outCount = data.resultSummary.row_count ?? 0;
       
-      description = `L:${leftCount} R:${rightCount} ➔ ${outCount}`;
+      const hasRun = data.resultSummary?.ports && Object.keys(data.resultSummary.ports).length > 0;
+      if (hasRun) {
+        const lCount = data.resultSummary.ports.L?.row_count ?? 0;
+        const rCount = data.resultSummary.ports.R?.row_count ?? 0;
+        const jCount = data.resultSummary.ports.J?.row_count ?? (data.resultSummary.row_count ?? 0);
+        description = `L:${lCount} | J:${jCount} | R:${rCount}`;
+      } else {
+        description = `In(L):${leftCount} In(R):${rightCount}`;
+      }
     } else if (type === 'union') {
       const edges = reactFlow.getEdges();
       const nodes = reactFlow.getNodes();

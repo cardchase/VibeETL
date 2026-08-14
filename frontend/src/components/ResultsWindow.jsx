@@ -39,10 +39,14 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
 
   const nodeResult = nodeId ? results?.[nodeId] : null;
   const hasPorts = nodeResult?.ports && Object.keys(nodeResult.ports).length > 0;
-  const availablePorts = hasPorts ? Object.keys(nodeResult.ports) : [];
+  // Filter out redundant 'output' port if we have meaningful specific ports like L, J, R, true, false
+  const availablePorts = hasPorts ? Object.keys(nodeResult.ports).filter(p => {
+    if (p === 'output' && Object.keys(nodeResult.ports).length > 1) return false;
+    return true;
+  }) : [];
 
-  // Determine active port to show. Default to 'true' if available, otherwise first port, or fallback to default
-  const activePort = selectedPort || (availablePorts.includes('true') ? 'true' : (availablePorts[0] || null));
+  // Determine active port to show. Default to 'true' if available, otherwise 'J' (Inner Join), otherwise first port, or fallback to default
+  const activePort = selectedPort || (availablePorts.includes('true') ? 'true' : availablePorts.includes('J') ? 'J' : (availablePorts[0] || null));
   const activePortData = hasPorts && activePort ? nodeResult.ports[activePort] : null;
 
   // Extract preview data and columns
@@ -255,7 +259,7 @@ const ResultsWindow = ({ selectedNode, originalNode, results, globalLogs, active
                 className={`port-btn ${activePort === port ? 'active' : ''}`}
                 onClick={() => setSelectedPort(port)}
               >
-                {port === 'true' ? 'T (True)' : port === 'false' ? 'F (False)' : port.toUpperCase()}
+                {port === 'true' ? 'T (True)' : port === 'false' ? 'F (False)' : port === 'J' ? 'J (Inner Join)' : port === 'L' ? 'L (Left Unjoined)' : port === 'R' ? 'R (Right Unjoined)' : port.toUpperCase()}
               </button>
             ))}
           </div>

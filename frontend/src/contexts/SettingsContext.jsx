@@ -4,30 +4,37 @@ const SettingsContext = createContext();
 
 export const useSettings = () => useContext(SettingsContext);
 
+const DEFAULT_SETTINGS = {
+  primaryFont: 'Outfit',
+  secondaryFont: 'Inter',
+  theme: 'light',
+  canvasBackground: 'dots',
+  wireStyle: 'default',
+  animatedWires: false,
+  fontStyleBold: false,
+  fontStyleItalic: false,
+  fontStyleUnderline: false
+};
+
 export const SettingsProvider = ({ children }) => {
   const [settings, setSettings] = useState(() => {
     try {
       const saved = localStorage.getItem('vibeetl_settings');
-      if (saved) return JSON.parse(saved);
+      if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
     } catch (e) {
       console.warn("Failed to load settings", e);
     }
-    return {
-      primaryFont: 'Outfit',
-      secondaryFont: 'Inter',
-      theme: 'light',
-      canvasBackground: 'dots', // 'dots', 'lines', 'cross'
-      wireStyle: 'smoothstep',  // 'smoothstep', 'step', 'straight', 'default' (bezier)
-      fontWeight: 'normal'      // 'light', 'normal', 'bold'
-    };
+    return DEFAULT_SETTINGS;
   });
 
   useEffect(() => {
     localStorage.setItem('vibeetl_settings', JSON.stringify(settings));
     
-    // Apply theme & font-weight
+    // Apply theme & text styles
     document.documentElement.setAttribute('data-theme', settings.theme);
-    document.body.setAttribute('data-font-weight', settings.fontWeight || 'normal');
+    document.body.setAttribute('data-font-bold', settings.fontStyleBold);
+    document.body.setAttribute('data-font-italic', settings.fontStyleItalic);
+    document.body.setAttribute('data-font-underline', settings.fontStyleUnderline);
     
     // Apply fonts
     const root = document.documentElement;
@@ -45,8 +52,12 @@ export const SettingsProvider = ({ children }) => {
     setSettings(prev => ({ ...prev, ...updates }));
   };
 
+  const resetSettings = () => {
+    setSettings(DEFAULT_SETTINGS);
+  };
+
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings }}>
+    <SettingsContext.Provider value={{ settings, updateSettings, resetSettings }}>
       {children}
     </SettingsContext.Provider>
   );

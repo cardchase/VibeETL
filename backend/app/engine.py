@@ -97,6 +97,8 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
                     valid_src_ports = {"true", "false"}
                 elif src_type == "unique":
                     valid_src_ports = {"unique", "duplicate"}
+                elif src_type == "join":
+                    valid_src_ports = {"J", "L", "R", "output"}
                 elif src_type in ['browse', 'file_output', 'fileOutput', 'database_output', 'databaseOutput', 'gcs_out', 'gcsOut', 'google_sheets_out', 'googleSheetsOut']:
                     valid_src_ports = set()
                 
@@ -152,10 +154,45 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             if k in needed_nodes
         }
 
-        # Topological sort on the pruned graph
+        # Topological sort using Custom DFS (Prioritizing spatial layout: Top-Bottom, Left-Right)
+        # This guarantees that the engine completes an entire 'wire' (branch) first before hopping 
+        # to a parallel branch, providing a much more intuitive execution visual for the user.
         try:
-            ts = TopologicalSorter(pruned_predecessors)
-            execution_order = list(ts.static_order())
+            in_degree = {n: 0 for n in needed_nodes}
+            adj = {n: [] for n in needed_nodes}
+            
+            for node, preds in pruned_predecessors.items():
+                in_degree[node] = len(preds)
+                for p in preds:
+                    adj[p].append(node)
+                    
+            def get_node_id_num(n_id):
+                import re
+                match = re.search(r'\d+', n_id)
+                return int(match.group()) if match else 0
+
+            # Initial roots
+            stack = [n for n in needed_nodes if in_degree[n] == 0]
+            # Sort roots descending by node ID so the smallest node is popped first
+            stack.sort(key=get_node_id_num, reverse=True)
+            
+            execution_order = []
+            while stack:
+                curr = stack.pop()
+                execution_order.append(curr)
+                
+                newly_unlocked = []
+                for child in adj[curr]:
+                    in_degree[child] -= 1
+                    if in_degree[child] == 0:
+                        newly_unlocked.append(child)
+                
+                # Sort newly unlocked children descending by node ID
+                newly_unlocked.sort(key=get_node_id_num, reverse=True)
+                stack.extend(newly_unlocked)
+                
+            if len(execution_order) != len(needed_nodes):
+                raise ValueError("Graph contains a cycle.")
             
             # Improved UI Communication Logging
             total_nodes = len(node_map_initial)
@@ -167,7 +204,7 @@ def execute_pipeline(pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
             nodes_to_execute = [nid for nid in execution_order if nid not in cached_node_ids]
             cache.add_global_log(f"Execution Plan: {len(nodes_to_execute)} nodes queued for active execution.")
             
-            cache.add_global_log(f"Topological sort successful. Execution order: {execution_order}")
+            cache.add_global_log(f"DFS Topological sort successful. Execution order: {execution_order}")
         except Exception as e:
             error_msg = f"Circular dependency detected in graph: {e}"
             cache.add_global_log(error_msg)

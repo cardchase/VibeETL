@@ -52,6 +52,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 def read_root():
     return {"message": "VibeETL Engine is running.", "status": "active"}
 
+import sys
+
 @app.get("/api/tools")
 def get_tools():
     """
@@ -63,6 +65,17 @@ def get_tools():
             manifest = node_class.MANIFEST.copy()
             if "id" not in manifest:
                 manifest["id"] = node_id
+            
+            # Dynamically load the associated .txt documentation file if it exists
+            try:
+                module_file = sys.modules[node_class.__module__].__file__
+                txt_file = os.path.splitext(module_file)[0] + ".txt"
+                if os.path.exists(txt_file):
+                    with open(txt_file, "r", encoding="utf-8") as f:
+                        manifest["extended_description"] = f.read().strip()
+            except Exception:
+                pass
+
             # Ensure default_params is generated from ui_schema
             default_params = {}
             for field in manifest.get("ui_schema", []):

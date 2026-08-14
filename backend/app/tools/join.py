@@ -48,6 +48,13 @@ class JoinNode(BaseNode):
             right_key = self.parameters.get("right_key")
             right_keys = [right_key.strip()] if isinstance(right_key, str) else right_key
 
+        if not left_keys and self.parameters.get("left_on"):
+            left_on = self.parameters.get("left_on")
+            left_keys = [left_on.strip()] if isinstance(left_on, str) else left_on
+        if not right_keys and self.parameters.get("right_on"):
+            right_on = self.parameters.get("right_on")
+            right_keys = [right_on.strip()] if isinstance(right_on, str) else right_on
+
         # Filter empty strings (in case they were lists containing empty strings)
         left_keys = [k for k in left_keys if k]
         right_keys = [k for k in right_keys if k]

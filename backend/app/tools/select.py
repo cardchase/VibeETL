@@ -81,7 +81,11 @@ class SelectNode(BaseNode):
                         expr = pl.coalesce([expr.cast(pl.Utf8).str.to_time(format=f, strict=False) for f in formats])
                     else:
                         pl_type = self._map_to_polars_type(target_type)
-                        expr = expr.cast(pl_type, strict=False)
+                        # Special handling for casting strings with floats to integers (e.g., "1.0" -> 1)
+                        if pl_type == pl.Int64:
+                            expr = expr.cast(pl.Float64, strict=False).cast(pl.Int64, strict=False)
+                        else:
+                            expr = expr.cast(pl_type, strict=False)
                     
                 # Apply alias if rename differs from original name
                 if rename and rename != name:

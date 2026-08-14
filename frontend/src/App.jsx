@@ -299,6 +299,21 @@ function App({ isSandbox = false }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeTab.edges || []);
   const currentViewportRef = React.useRef(activeTab.viewport || { x: 50, y: 50, zoom: 1.0 });
 
+  // Ghost Wire Sweeper: Automatically destroy any edge that doesn't have a valid source and target node
+  React.useEffect(() => {
+    if (!nodes || !edges || edges.length === 0) return;
+    
+    const validEdges = edges.filter(e => 
+      nodes.some(n => n.id === e.source) && 
+      nodes.some(n => n.id === e.target)
+    );
+    
+    if (validEdges.length !== edges.length) {
+      console.warn(`🧹 Ghost Wire Sweeper: Removed ${edges.length - validEdges.length} dangling edges.`);
+      setEdges(validEdges);
+    }
+  }, [nodes, edges, setEdges]);
+
   const [isRunningMap, setIsRunningMap] = useState(() => {
     try {
       const saved = localStorage.getItem('vibeetl_is_running_map');
@@ -1050,6 +1065,29 @@ function App({ isSandbox = false }) {
             console.error("Paste failed", err);
           }
         }
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        const activeTag = document.activeElement?.tagName;
+        if (activeTag === 'INPUT' || activeTag === 'SELECT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+        
+        const selectedNodes = nodes.filter(n => n.selected || n.id === selectedNodeId);
+        const selectedEdgesList = edges.filter(e => e.selected || e.id === selectedEdgeId);
+        
+        if (selectedNodes.length > 0) {
+          const selectedNodeIds = selectedNodes.map(n => n.id);
+          
+          setNodes(nds => nds.filter(n => !selectedNodeIds.includes(n.id)));
+          setEdges(eds => eds.filter(e => 
+            !selectedNodeIds.includes(e.source) && 
+            !selectedNodeIds.includes(e.target)
+          ));
+          setSelectedNodeId(null);
+        }
+        
+        if (selectedEdgesList.length > 0) {
+          const selectedEdgeIds = selectedEdgesList.map(e => e.id);
+          setEdges(eds => eds.filter(e => !selectedEdgeIds.includes(e.id)));
+          setSelectedEdgeId(null);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -1697,15 +1735,34 @@ function App({ isSandbox = false }) {
     setGlobalLogs(["Global cache and all node locks cleared. Pipeline ready for fresh execution."]);
   };
 
-  const handleRunPipeline = async () => {
+  const handleCacheAndRun = (nodeId, currentlyCached) => {
+    const updatedNodes = nodes.map((node) => {
+      if (node.id === nodeId) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            parameters: { ...node.data.parameters, isCached: !currentlyCached }
+          }
+        };
+      }
+      return node;
+    });
+    setNodes(updatedNodes);
+    handleRunPipeline(updatedNodes);
+  };
+
+  const handleRunPipeline = async (nodesOverride = null) => {
+    const overrideIsArray = Array.isArray(nodesOverride);
     const currentTabId = activeTabId;
     if (isRunningMap[currentTabId]) return;
     setIsRunning(true, currentTabId);
     setGlobalLogs(['Triggering pipeline execution...', 'Serializing DAG graph structure...']);
 
     // Set all nodes' status to waiting
+    const nodesToUse = overrideIsArray ? nodesOverride : nodes;
     setNodes((nds) =>
-      nds.map((node) => ({
+      nodesToUse.map((node) => ({
         ...node,
         data: { ...node.data, status: node.type === 'comment' ? 'idle' : 'waiting' }
       }))
@@ -1717,9 +1774,10 @@ function App({ isSandbox = false }) {
     const dagPayload = {
       session_id: currentTabId,
       workflow_name: currentTabName,
-      nodes: nodes.filter(n => n.type !== 'comment').map((n) => ({
+      nodes: nodesToUse.filter(n => n.type !== 'comment').map((n) => ({
         id: n.id,
         type: n.type,
+        position: n.position,
         parentId: n.parentId,
         parameters: n.data.parameters || {},
         data: { label: n.data.label, enabled: n.data.enabled !== false }
@@ -2288,6 +2346,7 @@ function App({ isSandbox = false }) {
         availableTools={availableTools}
         selectedNode={selectedNode}
         onUpdateParams={handleUpdateParams}
+        onCacheAndRun={handleCacheAndRun}
         isChatOpen={isChatOpen}
         onToggleChat={() => setIsChatOpen(!isChatOpen)}
         isSandbox={isSandbox}
@@ -2306,6 +2365,8 @@ function App({ isSandbox = false }) {
             nodes={nodes}
             edges={edges}
             setNodes={setNodes}
+            onCacheAndRun={handleCacheAndRun}
+            onClearGlobalCache={handleClearGlobalCache}
             style={{ width: `${sidebarWidth}px` }}
           />
         </ErrorBoundary>
@@ -2379,6 +2440,9 @@ function App({ isSandbox = false }) {
                 }}
                 onEdgeSelect={setSelectedEdgeId}
                 onAddNode={handleAddNode}
+                onUpdateParams={handleUpdateParams}
+                onCacheAndRun={handleCacheAndRun}
+                onClearGlobalCache={handleClearGlobalCache}
                 onNodesDelete={onNodesDelete}
                 onEdgesDelete={onEdgesDelete}
                 onNodeDragStop={(e, node) => {

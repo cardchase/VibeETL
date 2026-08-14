@@ -1,0 +1,126 @@
+{
+  "nodes": [
+    {
+      "id": "node_1",
+      "type": "odds_portal_scraper",
+      "position": {
+        "x": -890,
+        "y": 198
+      },
+      "data": {
+        "label": "OddsPortal Scraper",
+        "category": "source",
+        "icon": "Database",
+        "parameters": {
+          "maxWorkers": 10,
+          "targetUrl": "https://www.oddsportal.com/football/france/ligue-1/results/",
+          "scrapeMode": "historical",
+          "autoSaveCsvPath": "D:/Project/VibeETL/outputs/ligue1_intermediate.csv",
+          "scrapeAllSeasons": true,
+          "autoSaveBatchSize": 1
+        },
+        "error": null,
+        "executionIndex": 1,
+        "status": "success",
+        "resultSummary": {
+          "row_count": 3225
+        }
+      },
+      "measured": {
+        "width": 34,
+        "height": 34
+      },
+      "selected": true,
+      "dragging": false
+    },
+    {
+      "id": "node_2",
+      "type": "browse",
+      "position": {
+        "x": -730,
+        "y": 150
+      },
+      "data": {
+        "label": "Browse",
+        "category": "inout",
+        "icon": "Search",
+        "parameters": {
+          "info": "View Data in Results Panel"
+        },
+        "error": null,
+        "executionIndex": 2,
+        "status": "success",
+        "resultSummary": {
+          "row_count": 3225
+        }
+      },
+      "measured": {
+        "width": 34,
+        "height": 34
+      },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "node_3",
+      "type": "fileOutput",
+      "position": {
+        "x": -730,
+        "y": 278
+      },
+      "data": {
+        "label": "File Output",
+        "category": "inout",
+        "icon": "Save",
+        "parameters": {
+          "saveFile": true,
+          "outputPath": "D:/Project/VibeETL/outputs/ligue1.csv",
+          "outputFormat": "csv",
+          "sheetName": "Sheet1"
+        },
+        "error": null,
+        "executionIndex": 3,
+        "status": "success",
+        "resultSummary": {
+          "row_count": 3225
+        }
+      },
+      "measured": {
+        "width": 34,
+        "height": 34
+      },
+      "selected": false,
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_1785219819040_917",
+      "source": "node_1",
+      "target": "node_2",
+      "sourceHandle": "output",
+      "targetHandle": "input",
+      "style": {
+        "stroke": "#10b981",
+        "strokeWidth": 1.5
+      },
+      "animated": false,
+      "selected": false,
+      "type": "default"
+    },
+    {
+      "id": "edge_1785219819040_740",
+      "source": "node_1",
+      "target": "node_3",
+      "sourceHandle": "output",
+      "targetHandle": "input",
+      "style": {
+        "stroke": "#10b981",
+        "strokeWidth": 1.5
+      },
+      "animated": false,
+      "selected": false,
+      "type": "default"
+    }
+  ]
+}
