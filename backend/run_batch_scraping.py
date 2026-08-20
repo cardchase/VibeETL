@@ -8,6 +8,8 @@ import signal
 
 import logging
 import sys
+sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
+sys.stderr.reconfigure(encoding='utf-8', line_buffering=True)
 
 logging.basicConfig(
     level=logging.INFO,

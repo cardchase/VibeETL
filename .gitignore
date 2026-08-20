@@ -2,18 +2,20 @@ backend/app/__pycache__/
 backend/app/tools/__pycache__/
 backend/app/utils/__pycache__/
 backend/.autosaves/
-backend/app/__pycache__/
-backend/app/tools/__pycache__/
-backend/app/utils/__pycache__/
-backend/.autosaves/
 backend/.vibe/
+backend/.vibe_cache/
 backend/uploads/
 backend/venv/
 frontend/node_modules/
+backend/scratch/
 scratch/
 *.log
-n o d e _ m o d u l e s /  
- o u t p u t s /  
- b a c k e n d / o u t p u t s /  
+node_modules/
+outputs/
+backend/outputs/
 .env
 backend/.env
+backend/vibe_etl.db
+.agents/
+__pycache__/
+backend/__pycache__/

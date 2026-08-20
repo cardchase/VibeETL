@@ -137,16 +137,23 @@ class OddsPortalUpcomingNode(BaseNode):
         
         async with async_playwright() as p:
             headless_mode = str(self.parameters.get("headless", "true")).lower() == "true"
+            
+            browser_args = [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-gpu'
+            ]
+            
+            if headless_mode:
+                browser_args.extend([
+                    '--headless=new', 
+                    '--window-position=-2400,-2400'
+                ])
+
             # We use an authentic user agent to avoid trivial bot blocking
             browser = await p.chromium.launch(
                 headless=headless_mode,
-                args=[
-                    '--no-sandbox', 
-                    '--disable-setuid-sandbox', 
-                    '--headless=new', 
-                    '--window-position=-2400,-2400',
-                    '--disable-gpu'
-                ]
+                args=browser_args
             )
             context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
@@ -247,7 +254,8 @@ class OddsPortalUpcomingNode(BaseNode):
                             self.log(f"Skipping {original_len - len(match_links)} matches already scraped in this season.")
                         
                         max_workers = int(self.parameters.get("maxWorkers", 1))
-                        self.log(f"Found {len(match_links)} new matches to scrape. Starting concurrent extraction ({max_workers} at a time)...")
+                        print(f"Found {len(match_links)} new matches to scrape. Starting concurrent extraction ({max_workers} at a time)...")
+                        
                         semaphore = asyncio.Semaphore(max_workers)
                         
                         async def process_match(match_url, original_idx, is_retry=False):
@@ -975,7 +983,7 @@ class OddsPortalUpcomingNode(BaseNode):
             let fallbackOdds = null;
             
             // --- 1. MODERN STRUCTURED EXTRACTION ---
-            let modernRows = document.querySelectorAll('[data-testid="over-under-expanded-row"], [data-testid="bookmaker-table-row"]');
+            let modernRows = document.querySelectorAll('[data-testid="over-under-expanded-row"], [data-testid="bookmaker-table-row"], tr.h-9');
             if (modernRows.length > 0) {{
                 let foundAnyModernOdds = false;
                 for (let row of modernRows) {{
@@ -985,15 +993,18 @@ class OddsPortalUpcomingNode(BaseNode):
                     
                     if (oddsNodes.length >= 2) {{
                         let oddsArr = Array.from(oddsNodes).map(n => {{
-                            let t = n.innerText.trim();
+                            let t = (n.innerText || n.textContent || '').trim();
                             if (t === '-') return null;
                             let cleanT = t.replace(/[^0-9+.\\-\\/]/g, '');
-                            let match = cleanT.match(/^[+-]?\\d+\\.\\d+$/);
+                            let match = cleanT.match(/^[+-]?\\d+(\\.\\d+)?$/);
                             return match ? parseFloat(cleanT) : null;
                         }});
                         
-                        // ONLY accept odds if it matches the expected count for the market!
-                        if (oddsArr.length >= {expected_odds_count}) {{
+                        let actualOdds = oddsArr.slice(0, {expected_odds_count});
+                        let validOddsCount = actualOdds.filter(x => x !== null).length;
+                        
+                        // ONLY accept odds if it matches the expected count for the market (and is not a completely empty row)!
+                        if (oddsArr.length >= {expected_odds_count} && validOddsCount > 0) {{
                             anyOddsFound = true;
                             foundAnyModernOdds = true;
                             if (isBet365) {{
@@ -1015,13 +1026,17 @@ class OddsPortalUpcomingNode(BaseNode):
                 let allElements = Array.from(tableContainer.querySelectorAll('div, a, span, p')).reverse();
                 for (let el of allElements) {{
                     let text = el.innerText || el.alt || el.title || '';
+                    if (!text || text.trim() === '') continue;
                     if (text.length > 200 || el.children.length > 15) continue;
                     
                     let lower = text.toLowerCase();
                     if (lower.includes('payout') || lower.includes('average')) continue;
     
                     let oddsArr = extractOddsFromText(text);
-                    if (oddsArr.length >= {expected_odds_count}) {{
+                    let actualOdds = oddsArr.slice(0, {expected_odds_count});
+                    let validOddsCount = actualOdds.filter(x => x !== null).length;
+                    
+                    if (oddsArr.length >= {expected_odds_count} && validOddsCount > 0) {{
                         anyOddsFound = true; 
                         
                         if (lower.includes('bet365')) {{
@@ -1159,16 +1174,22 @@ class OddsPortalUpcomingNode(BaseNode):
                                 await page.wait_for_timeout(2000) # Give React a moment to load tab data
                         else:
                             # Sub tab missing, meaning this market segment doesn't exist for this match
+                            if hasattr(self, "log"):
+                                self.log(f"Sub tab '{sub_tab_text}' missing for market '{main_tab_text}'.")
                             return []
                     
-                    # 3. Smart poll for ANY data to render to confirm load status
-                    # We will wait up to 120 seconds (120 loops of 10000ms) for odds to appear.
-                    # We will not instantly abort on empty_market, as OddsPortal flashes this while loading.
+                    # 3. Smart poll for ANY data
                     empty_market_count = 0
                     rows_present_count = 0
-                    for _ in range(120):
-                        await page.wait_for_timeout(10000)
+                    loading_count = 0
+                    while True:
+                        if hasattr(self, "is_cancelled") and self.is_cancelled():
+                            return []
+                        await page.wait_for_timeout(1000)
                         state = await page.evaluate(get_evaluate_tab_state(main_tab_texts, sub_tab_text, expected_odds_count))
+                        if main_tab_text == "Double Chance" and sub_tab_text == "2nd Half":
+                            if hasattr(self, "log"):
+                                self.log(f"DEBUG POLL STATE: {state}")
                         if state["status"] == "loaded":
                             return state["odds"]
                         elif state["status"] == "empty_market":
@@ -1183,6 +1204,9 @@ class OddsPortalUpcomingNode(BaseNode):
                         else:
                             empty_market_count = 0
                             rows_present_count = 0
+                            loading_count += 1
+                            if loading_count >= 15:
+                                return []
                             
                     # If we reach here, we timed out
                     if hasattr(self, "is_cancelled") and self.is_cancelled():
@@ -1192,11 +1216,12 @@ class OddsPortalUpcomingNode(BaseNode):
                     await page.reload(wait_until="domcontentloaded", timeout=30000)
                     await page.wait_for_timeout(4000)
                     continue
-                    return []
 
                 except Exception as e:
-                    if hasattr(self, "is_cancelled") and self.is_cancelled():
-                        return []
+                    # We silently catch timeout exceptions to allow other odds to continue
+                    if hasattr(self, "log"):
+                        self.log(f"Exception in navigate_and_scrape for {main_tab_text} -> {sub_tab_text}: {e}")
+                    
                     if not page_reloaded and attempt == 0:
                         self.log(f"Smart Refresh: Error clicking {label}. Reloading page...")
                         page_reloaded = True
@@ -1215,17 +1240,18 @@ class OddsPortalUpcomingNode(BaseNode):
         if h2_odds and len(h2_odds) >= 3: extracted_row["SH_HomeOdds"], extracted_row["SH_DrawOdds"], extracted_row["SH_AwayOdds"] = h2_odds[:3]
 
         # Double Chance Bound-Safe Dynamic Unpacking Map Matrix
-        dc_ft = await navigate_and_scrape("Double Chance", "Full Time", 2)
+        dc_ft = await navigate_and_scrape("Double Chance", "Full Time", 3)
         if dc_ft:
             if len(dc_ft) >= 3: extracted_row["DC_FT_1X"], extracted_row["DC_FT_12"], extracted_row["DC_FT_X2"] = dc_ft[0], dc_ft[1], dc_ft[2]
             elif len(dc_ft) == 2: extracted_row["DC_FT_1X"], extracted_row["DC_FT_12"], extracted_row["DC_FT_X2"] = None, dc_ft[0], dc_ft[1]
             
-        dc_1h = await navigate_and_scrape("Double Chance", "1st Half", 2)
+        dc_1h = await navigate_and_scrape("Double Chance", "1st Half", 3)
         if dc_1h:
             if len(dc_1h) >= 3: extracted_row["DC_1H_1X"], extracted_row["DC_1H_12"], extracted_row["DC_1H_X2"] = dc_1h[0], dc_1h[1], dc_1h[2]
             elif len(dc_1h) == 2: extracted_row["DC_1H_1X"], extracted_row["DC_1H_12"], extracted_row["DC_1H_X2"] = None, dc_1h[0], dc_1h[1]
             
-        dc_2h = await navigate_and_scrape("Double Chance", "2nd Half", 2)
+        dc_2h = await navigate_and_scrape("Double Chance", "2nd Half", 3)
+            
         if dc_2h:
             if len(dc_2h) >= 3: extracted_row["DC_2H_1X"], extracted_row["DC_2H_12"], extracted_row["DC_2H_X2"] = dc_2h[0], dc_2h[1], dc_2h[2]
             elif len(dc_2h) == 2: extracted_row["DC_2H_1X"], extracted_row["DC_2H_12"], extracted_row["DC_2H_X2"] = None, dc_2h[0], dc_2h[1]
@@ -1304,32 +1330,7 @@ class OddsPortalUpcomingNode(BaseNode):
                     break
                 
                 # Expand all the goal-line accordions so we can see the bookmaker odds
-                await page.evaluate("""
-                () => {
-                    let modernRows = document.querySelectorAll('[data-testid="over-under-collapsed-row"]');
-                    if (modernRows.length > 0) {
-                        modernRows.forEach(row => row.click());
-                        return;
-                    }
-                    
-                    // Legacy fallback
-                    document.querySelectorAll('div, span, p').forEach(b => {
-                        let text = b.innerText || '';
-                        if (text.trim().match(/^Over\\/Under \\+\\d+(\\.\\d+)?$/i) && b.children.length === 0) {
-                            let clicker = b.closest('div.flex') || b.parentElement;
-                            if (!clicker) return;
-                            let container = clicker.parentElement;
-                            let innerTable = container ? container.querySelector('div[style*="display: none"], div.hidden') : null;
-                            let isCollapsed = innerTable || (clicker.nextElementSibling && clicker.nextElementSibling.clientHeight === 0);
-                            
-                            if (isCollapsed) {
-                                clicker.click();
-                            }
-                        }
-                    });
-                }
-                """)
-                
+                # We do this aggressively inside the extraction loop to handle newly loaded rows
                 # Smart poll for the odds extraction logic to find numbers!
                 ou_data = {}
                 for _ in range(60):
@@ -1337,6 +1338,12 @@ class OddsPortalUpcomingNode(BaseNode):
                     ou_data = await page.evaluate(r"""
                 () => {
                     let results = {};
+                    
+                    // Click any collapsed rows
+                    let modernRows = document.querySelectorAll('[data-testid="over-under-collapsed-row"]');
+                    if (modernRows.length > 0) {
+                        modernRows.forEach(row => row.click());
+                    }
                     
                     // --- 1. Robust Structured Extraction (Modern UI) ---
                     let rows = document.querySelectorAll('[data-testid="over-under-expanded-row"]');
@@ -1357,7 +1364,7 @@ class OddsPortalUpcomingNode(BaseNode):
                             if (!val.includes('.')) val = val + ".0";
                             let line = "OU" + val.replace(".", "");
                             
-                            let oddsEls = row.querySelectorAll('[data-testid="odd-container"] .odds-text, [data-testid="odd-container"] p');
+                            let oddsEls = row.querySelectorAll('[data-testid="odd-container"] .odds-text, [data-testid="odd-container"] p, [data-testid="odd-container"] a.odds-link, [data-testid="odd-container"] a');
                             let over = null, under = null;
                             if (oddsEls.length >= 2) {
                                 over = parseFloat(oddsEls[0].textContent || oddsEls[0].innerText) || null;

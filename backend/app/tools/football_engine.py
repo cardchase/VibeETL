@@ -208,14 +208,17 @@ class FootballEngineNode(BaseNode):
                         pass
                     
                     # Backward asof join gives us the most recent valid match's "current" stats
-                    joined_futures = future_for_asof.join_asof(
-                        valid_for_asof, on="__match_id__", by="team", strategy="backward"
-                    ).with_columns([
-                        pl.col("curr_Form_Last5_Pts").fill_null(0.0).alias("Form_Last5_Pts"),
-                        pl.col("curr_Scoring_Momentum_L3").fill_null(0.0).alias("Scoring_Momentum_L3"),
-                        pl.col("curr_Defense_Leak_L3").fill_null(0.0).alias("Defense_Leak_L3"),
-                        pl.col("curr_Games_Played_L14D").fill_null(0).alias("Games_Played_L14D"),
-                    ]).select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3", "Games_Played_L14D"])
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=UserWarning, message="Sortedness of columns cannot be checked.*")
+                        joined_futures = future_for_asof.join_asof(
+                            valid_for_asof, on="__match_id__", by="team", strategy="backward"
+                        ).with_columns([
+                            pl.col("curr_Form_Last5_Pts").fill_null(0.0).alias("Form_Last5_Pts"),
+                            pl.col("curr_Scoring_Momentum_L3").fill_null(0.0).alias("Scoring_Momentum_L3"),
+                            pl.col("curr_Defense_Leak_L3").fill_null(0.0).alias("Defense_Leak_L3"),
+                            pl.col("curr_Games_Played_L14D").fill_null(0).alias("Games_Played_L14D"),
+                        ]).select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3", "Games_Played_L14D"])
                     
                     all_features = pl.concat([
                         valid_history.select(["__match_id__", "team", "Form_Last5_Pts", "Scoring_Momentum_L3", "Defense_Leak_L3", "Games_Played_L14D"]),
