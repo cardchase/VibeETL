@@ -1025,7 +1025,7 @@ class OddsPortalScraperNodeV2(BaseNode):
                     let bookieNode = row.querySelector('[data-testid="outrights-expanded-bookmaker-name"]');
                     let bookieName = bookieNode ? (bookieNode.textContent || "").toLowerCase() : "";
                     let isBet365 = text.toLowerCase().includes('bet365') || !!row.querySelector('[title*="bet365" i]') || !!row.querySelector('img[alt*="bet365" i]') || bookieName.includes('bet365');
-                    let oddsNodes = row.querySelectorAll('[data-testid="odd-container"] .odds-text, [data-testid="odd-container"] p');
+                    let oddsNodes = row.querySelectorAll('[data-testid="odd-container"] .odds-text, [data-testid="odd-container"] p, [data-testid="odd-container"] a.odds-link, [data-testid="odd-container"] a');
                     
                     if (oddsNodes.length >= 2) {{
                         let oddsArr = Array.from(oddsNodes).map(n => {{
@@ -1043,14 +1043,16 @@ class OddsPortalScraperNodeV2(BaseNode):
                             if (isBet365) {{
                                 bet365Odds = oddsArr;
                                 break;
-                            }} else if (!fallbackOdds) {{
+                            }} else if (!fallbackOdds || (fallbackOdds.includes(null) && !oddsArr.includes(null))) {{
                                 fallbackOdds = oddsArr;
                             }}
                         }}
                     }}
                 }}
                 
-                // We do NOT return rows_present_no_odds here, because we want to try the fallback generic extraction!
+                if (!anyOddsFound) {{
+                    return {{ status: "rows_present_no_odds", odds: [] }};
+                }}
             }}
             
             // --- 2. FALLBACK GENERIC EXTRACTION ---
@@ -1071,7 +1073,7 @@ class OddsPortalScraperNodeV2(BaseNode):
                         if (lower.includes('bet365')) {{
                             bet365Odds = oddsArr;
                             break; 
-                        }} else if (!fallbackOdds) {{
+                        }} else if (!fallbackOdds || (fallbackOdds.includes(null) && !oddsArr.includes(null))) {{
                             fallbackOdds = oddsArr; 
                         }}
                     }}
@@ -1564,17 +1566,17 @@ class OddsPortalScraperNodeV2(BaseNode):
         if btts_2h and len(btts_2h) >= 2: extracted_row["BTTS_2H_Yes"], extracted_row["BTTS_2H_No"] = btts_2h[:2]
 
         # 2. Double Chance Bound-Safe Dynamic Unpacking Map Matrix
-        dc_ft = await navigate_and_scrape("Double Chance", "Full Time", 2)
+        dc_ft = await navigate_and_scrape("Double Chance", "Full Time", 3)
         if dc_ft:
             if len(dc_ft) >= 3: extracted_row["DC_FT_1X"], extracted_row["DC_FT_12"], extracted_row["DC_FT_X2"] = dc_ft[0], dc_ft[1], dc_ft[2]
             elif len(dc_ft) == 2: extracted_row["DC_FT_1X"], extracted_row["DC_FT_12"], extracted_row["DC_FT_X2"] = None, dc_ft[0], dc_ft[1]
             
-        dc_1h = await navigate_and_scrape("Double Chance", "1st Half", 2)
+        dc_1h = await navigate_and_scrape("Double Chance", "1st Half", 3)
         if dc_1h:
             if len(dc_1h) >= 3: extracted_row["DC_1H_1X"], extracted_row["DC_1H_12"], extracted_row["DC_1H_X2"] = dc_1h[0], dc_1h[1], dc_1h[2]
             elif len(dc_1h) == 2: extracted_row["DC_1H_1X"], extracted_row["DC_1H_12"], extracted_row["DC_1H_X2"] = None, dc_1h[0], dc_1h[1]
             
-        dc_2h = await navigate_and_scrape("Double Chance", "2nd Half", 2)
+        dc_2h = await navigate_and_scrape("Double Chance", "2nd Half", 3)
         if dc_2h:
             if len(dc_2h) >= 3: extracted_row["DC_2H_1X"], extracted_row["DC_2H_12"], extracted_row["DC_2H_X2"] = dc_2h[0], dc_2h[1], dc_2h[2]
             elif len(dc_2h) == 2: extracted_row["DC_2H_1X"], extracted_row["DC_2H_12"], extracted_row["DC_2H_X2"] = None, dc_2h[0], dc_2h[1]

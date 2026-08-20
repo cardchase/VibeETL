@@ -1,0 +1,337 @@
+import React, { memo, useState } from 'react';
+import { Handle, Position, useReactFlow } from '@xyflow/react';
+import * as Icons from 'lucide-react';
+import { useLayout } from '../contexts/LayoutContext';
+
+const CustomNode = ({ id, data, selected, type }) => {
+  const IconComponent = data.icon ? (Icons[data.icon] || Icons.Square) : Icons.Square;
+  const category = data?.category || 'inout';
+  const status = data?.status || 'idle'; // idle, success, error, running
+  
+  const [isHoveringCancel, setIsHoveringCancel] = useState(false);
+  const reactFlow = useReactFlow();
+  const { layoutDirection } = useLayout();
+  const sourcePosition = layoutDirection === 'horizontal' ? Position.Right : Position.Bottom;
+  const targetPosition = layoutDirection === 'horizontal' ? Position.Left : Position.Top;
+
+  let description = '';
+  if (data?.parameters?.filePath) {
+    description = data.parameters.filePath;
+  } else if (data?.parameters?.folderPath) {
+    description = data.parameters.folderPath;
+  } else if (data?.parameters?.outputPath) {
+    description = data.parameters.outputPath;
+  } else if (data?.parameters?.tableName) {
+    description = `Table: ${data.parameters.tableName}`;
+  } else if (data?.parameters?.connectionString) {
+    description = data.parameters.connectionString;
+  } else if (data?.parameters?.pattern) {
+    description = `/${data.parameters.pattern}/`;
+  } else if (data?.parameters?.imagePath) {
+    description = data.parameters.imagePath;
+  } else if (data?.parameters?.column) {
+    const op = data.parameters.operator || '';
+    const val = data.parameters.value || '';
+    const dir = data.parameters.descending !== undefined ? (data.parameters.descending ? 'DESC' : 'ASC') : '';
+    description = `${data.parameters.column}${op ? ' ' + op : ''}${val ? ' ' + val : ''}${dir ? ' ' + dir : ''}`;
+  } else if (data?.parameters?.columns && Array.isArray(data.parameters.columns)) {
+    const activeCols = data.parameters.columns.filter(c => c && c.keep).length;
+    description = `${activeCols} cols`;
+  } else if (type === 'browse') {
+    description = 'View Data';
+  } else if (data?.description) {
+    description = data.description;
+  }
+
+  let filterCondition = '';
+  if (type === 'filter') {
+    if (data?.parameters?.filterType === 'custom' && data?.parameters?.customExpression) {
+      const expr = data.parameters.customExpression;
+      filterCondition = `EXP: ${expr.length > 25 ? expr.substring(0, 25) + '...' : expr}`;
+    } else if (data?.parameters?.conditions && Array.isArray(data.parameters.conditions)) {
+      const conds = data.parameters.conditions.filter(c => c && c.column);
+      if (conds.length === 1) {
+        const c = conds[0];
+        filterCondition = `[${c.column}] ${c.operator.replace(/_/g, ' ')} ${c.value}`.trim();
+      } else if (conds.length > 1) {
+        filterCondition = `${conds.length} rules applied`;
+      }
+    } else if (data?.parameters?.column) {
+      // Fallback for older saved nodes
+      const op = data.parameters.operator || '';
+      const val = data.parameters.value !== undefined && data.parameters.value !== '' ? ` '${data.parameters.value}'` : '';
+      filterCondition = `[${data.parameters.column}] ${op}${val}`.trim();
+    }
+    description = filterCondition;
+  } else if (type === 'predictor') {
+    const p = data?.parameters?.personality || 'Conservative';
+    const tgt = data?.parameters?.targetColumns ? data.parameters.targetColumns.join(', ') : 'Targets';
+    description = `${tgt} (${p.split(' ')[0]})`;
+  } else if (type === 'formula') {
+    if (data?.parameters?.expression) {
+      const expr = data.parameters.expression;
+      description = expr.length > 25 ? expr.substring(0, 25) + '...' : expr;
+    }
+  } else if (type === 'sort') {
+    if (data?.parameters?.column) {
+      description = `${data.parameters.column} ${data.parameters.descending ? 'DESC' : 'ASC'}`;
+    }
+  }
+
+  // If node has executed successfully, replace the sub-label with the output row counts!
+  if (status === 'success' && data?.resultSummary) {
+    if (type === 'filter' && data.resultSummary.ports) {
+      const trueCount = data.resultSummary.ports['true']?.row_count || 0;
+      const falseCount = data.resultSummary.ports['false']?.row_count || 0;
+      description = filterCondition ? `${filterCondition}\nT: ${trueCount} | F: ${falseCount} rows` : `T: ${trueCount} | F: ${falseCount} rows`;
+    } else if (type === 'unique' && data.resultSummary.ports) {
+      const uniqueCount = data.resultSummary.ports['unique']?.row_count || 0;
+      const duplicateCount = data.resultSummary.ports['duplicate']?.row_count || 0;
+      description = `U: ${uniqueCount} | D: ${duplicateCount} rows`;
+    } else if (type === 'join') {
+      const edges = reactFlow.getEdges();
+      const nodes = reactFlow.getNodes();
+      const leftEdge = edges.find(e => e.target === id && e.targetHandle === 'left');
+      const rightEdge = edges.find(e => e.target === id && e.targetHandle === 'right');
+      const leftNode = leftEdge ? nodes.find(n => n.id === leftEdge.source) : null;
+      const rightNode = rightEdge ? nodes.find(n => n.id === rightEdge.source) : null;
+      
+      const leftCount = leftNode?.data?.resultSummary?.row_count ?? '?';
+      const rightCount = rightNode?.data?.resultSummary?.row_count ?? '?';
+      
+      const hasRun = data.resultSummary?.ports && Object.keys(data.resultSummary.ports).length > 0;
+      if (hasRun) {
+        const lCount = data.resultSummary.ports.L?.row_count ?? 0;
+        const rCount = data.resultSummary.ports.R?.row_count ?? 0;
+        const jCount = data.resultSummary.ports.J?.row_count ?? (data.resultSummary.row_count ?? 0);
+        description = `L:${lCount} | J:${jCount} | R:${rCount}`;
+      } else {
+        description = `In(L):${leftCount} In(R):${rightCount}`;
+      }
+    } else if (type === 'union') {
+      const edges = reactFlow.getEdges();
+      const nodes = reactFlow.getNodes();
+      const incomingEdges = edges.filter(e => e.target === id);
+      const incomingCounts = incomingEdges.map(e => {
+        const sourceNode = nodes.find(n => n.id === e.source);
+        const count = sourceNode?.data?.resultSummary?.row_count ?? '?';
+        return `[${e.source}]: ${count}`;
+      });
+      const inStr = incomingCounts.length > 0 ? incomingCounts.join('\n') : '0';
+      const outCount = data.resultSummary.row_count ?? 0;
+      description = `In:\n${inStr}\n➔ Out: ${outCount}`;
+    } else if (data.resultSummary.row_count !== undefined) {
+      if (description && type !== 'select' && type !== 'formula' && type !== 'cleanse') {
+        description = `${description}\n➔ Out: ${data.resultSummary.row_count} rows`;
+      } else {
+        description = `${data.resultSummary.row_count} rows`;
+      }
+    }
+  }
+
+  const isCached = data?.parameters?.isCached || false;
+
+  const handleAnchorClick = (e, handleType, handleId) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('vibe-handle-click', { 
+      detail: { nodeId: id, handleType, handleId } 
+    }));
+  };
+
+  const buildTooltip = () => {
+    let t = `${data?.label || type} Tool`;
+    if (data?.description) t += `\n${data.description}`;
+    t += `\nStatus: ${status}`;
+    if (data?.parameters && Object.keys(data.parameters).length > 0) {
+      t += `\nConfig: ${Object.keys(data.parameters).join(', ')}`;
+    }
+    if (status === 'skipped') t += `\n(Bypassed: Data is cached downstream)`;
+    return t;
+  };
+
+  return (
+    <div 
+      className={`custom-node ${category} ${selected ? 'selected' : ''} ${isCached ? 'is-cached' : ''}`} 
+      style={status === 'skipped' ? { opacity: 0.55 } : {}}
+      title={buildTooltip()}
+    >
+      {/* Target port (Left) for all nodes except FileInput, DatabaseInput, and ImageCaption */}
+      {type === 'join' ? (
+        <>
+          <div className="join-port-label left-label">L</div>
+          <Handle
+            type="target"
+            position={targetPosition}
+            id="left"
+            style={{ top: '30%' }}
+            className="node-handle left-handle join-left-handle"
+            onClick={(e) => handleAnchorClick(e, 'target', 'left')}
+          />
+          <div className="join-port-label right-label">R</div>
+          <Handle
+            type="target"
+            position={targetPosition}
+            id="right"
+            style={{ top: '70%' }}
+            className="node-handle left-handle join-right-handle"
+            onClick={(e) => handleAnchorClick(e, 'target', 'right')}
+          />
+        </>
+      ) : (!['file_input', 'fileInput', 'database_input', 'databaseInput', 'folder_input', 'folderInput', 'gcs_in', 'gcsIn', 'google_sheets_in', 'googleSheetsIn', 'odds_portal_scraper', 'oddsPortalScraper', 'odds_portal_upcoming', 'oddsPortalUpcoming'].includes(type)) ? (
+        <Handle
+          type="target"
+          position={targetPosition}
+          id="input"
+          className="node-handle left-handle"
+          onClick={(e) => handleAnchorClick(e, 'target', 'input')}
+        />
+      ) : null}
+
+      {/* Node ID label floating above the square box */}
+      <div style={{ position: 'absolute', top: '-14px', width: '100px', textAlign: 'center', opacity: 0.4, fontSize: '0.55em', fontWeight: 'normal', color: 'var(--text-muted)', pointerEvents: 'none', left: '50%', transform: 'translateX(-50%)' }}>
+        [{id}]
+      </div>
+
+      {/* Node Square Box (The tool icon) */}
+      <div className={`node-icon-box ${category} ${status} ${selected ? 'selected' : ''}`}>
+        <IconComponent size={12} className="node-icon" />
+        
+        {/* Status indicator on the top corner */}
+        {status !== 'idle' && status !== 'waiting' && status !== 'running' && status !== 'skipped' && (
+          <div className={`node-status-dot ${status}`} title={`Status: ${status}`} />
+        )}
+        {status === 'running' && (
+          <div 
+            className="node-status-running" 
+            title="Processing... Click to stop this node."
+            onMouseEnter={() => setIsHoveringCancel(true)}
+            onMouseLeave={() => setIsHoveringCancel(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              fetch(`http://localhost:8001/api/cancel/${id}?session_id=${window.sessionId}`, { method: 'POST' }).catch(console.error);
+            }}
+            style={{ cursor: 'pointer', pointerEvents: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {isHoveringCancel ? (
+              <Icons.Square size={10} fill="#ef4444" color="#ef4444" />
+            ) : (
+              <Icons.Loader2 size={12} className="animate-spin" style={{ color: '#3b82f6' }} />
+            )}
+          </div>
+        )}
+        {status === 'skipped' && (
+          <div className="node-status-skipped" title="Bypassed: Data is cached downstream" style={{
+            position: 'absolute', top: -6, right: -6, background: '#f1f5f9', border: '1px solid #cbd5e1', 
+            borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10
+          }}>
+            <Icons.FastForward size={10} style={{ color: '#64748b' }} />
+          </div>
+        )}
+        
+        {/* Cached indicator on the top left corner */}
+        {isCached && (
+          <div className="node-cached-icon" title="Node Output is Cached">
+            <span style={{ fontSize: '10px', fontWeight: 'bold' }}>©</span>
+          </div>
+        )}
+      </div>
+
+      {/* Node Labels floating underneath the square box */}
+      <div className="node-labels-container">
+        <div className="node-label-main" style={{ textAlign: 'center' }}>
+          {data?.label || 'Node'} {id.match(/_(\d+)$/) ? `[${id.match(/_(\d+)$/)[1]}]` : ''}
+        </div>
+        {description && (
+          <div className="node-label-sub" title={description} style={{ whiteSpace: 'pre-line', lineHeight: '1.2' }}>
+            {description}
+          </div>
+        )}
+      </div>
+
+      {/* Source port (Right) for all nodes except terminal nodes */}
+      {type === 'filter' ? (
+        <>
+          <div className="filter-port-label true-label">T</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="true"
+            style={{ top: '30%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'true')}
+          />
+          <div className="filter-port-label false-label">F</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="false"
+            style={{ top: '70%' }}
+            className="node-handle right-handle false-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'false')}
+          />
+        </>
+      ) : type === 'unique' ? (
+        <>
+          <div className="filter-port-label true-label" style={{background: '#10b981', color: 'white'}}>U</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="unique"
+            style={{ top: '30%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'unique')}
+          />
+          <div className="filter-port-label false-label" style={{background: '#f43f5e', color: 'white'}}>D</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="duplicate"
+            style={{ top: '70%' }}
+            className="node-handle right-handle false-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'duplicate')}
+          />
+        </>
+      ) : type === 'join' ? (
+        <>
+          <div className="filter-port-label true-label" style={{background: '#8b5cf6', color: 'white'}}>L</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="L"
+            style={{ top: '25%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'L')}
+          />
+          <div className="filter-port-label true-label" style={{background: '#8b5cf6', color: 'white'}}>J</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="J"
+            style={{ top: '50%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'J')}
+          />
+          <div className="filter-port-label true-label" style={{background: '#8b5cf6', color: 'white'}}>R</div>
+          <Handle
+            type="source"
+            position={sourcePosition}
+            id="R"
+            style={{ top: '75%' }}
+            className="node-handle right-handle true-handle"
+            onClick={(e) => handleAnchorClick(e, 'source', 'R')}
+          />
+        </>
+      ) : (!['browse', 'file_output', 'fileOutput', 'database_output', 'databaseOutput', 'gcs_out', 'gcsOut', 'google_sheets_out', 'googleSheetsOut'].includes(type)) ? (
+        <Handle
+          type="source"
+          position={sourcePosition}
+          id="output"
+          className="node-handle right-handle"
+          onClick={(e) => handleAnchorClick(e, 'source', 'output')}
+        />
+      ) : null}
+    </div>
+  );
+};
+
+export default memo(CustomNode);

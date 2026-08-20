@@ -172,11 +172,21 @@ class PredictorNode(BaseNode):
             # Intelligent Data Leakage Prevention
             # Ensure targets and explicit post-match outcomes are removed from features
             features_to_drop = set(target_cols).union(post_match_outcomes)
+            
+            # Automatically drop high-cardinality or metadata string columns that cause the model to overfit/fail
+            for col in full_pd.columns:
+                if col not in features_to_drop and (full_pd[col].dtype == 'object' or str(full_pd[col].dtype) == 'string'):
+                    unique_count = full_pd[col].nunique()
+                    # Drop Date, Time, URL, and any column with massive unique categories (>50% or >1000)
+                    if unique_count > 1000 or 'url' in col.lower() or 'date' in col.lower() or 'time' in col.lower():
+                        features_to_drop.add(col)
+                        self.log(f"Auto-dropped feature '{col}' (high cardinality or metadata) to prevent overfitting.")
+
             feature_cols = [c for c in df.columns if c not in features_to_drop]
 
             self.log(f"--- PREDICTING: {target} ---")
             dropped = list(features_to_drop.intersection(set(df.columns)))
-            self.log(f"Preventing data leakage: Dropped {len(dropped)} future outcome variables.")
+            self.log(f"Preventing data leakage: Dropped {len(dropped)} future outcome variables and metadata.")
 
             # 1. Convert categories on the FULL dataframe first to prevent XGBoost category mismatch
             for col in feature_cols:

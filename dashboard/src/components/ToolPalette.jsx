@@ -1,0 +1,765 @@
+import React, { useMemo, useRef, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import * as Icons from 'lucide-react';
+import { Play, RefreshCw, Save, FolderOpen, Database, Bot, Search, Plus, X, Star, Maximize, Minimize, Columns, Rows, Wand, Settings } from 'lucide-react';
+import { API_BASE } from '../config';
+import { useLayout } from '../contexts/LayoutContext';
+import SettingsModal from './SettingsModal';
+
+const CATEGORY_TITLES = {
+  'favorites': '⭐ Favorites',
+  'inout': 'In / Out',
+  'prep': 'Preparation',
+  'transform': 'Transform',
+  'cloud': '☁️ Cloud Connectors',
+  'misc': 'Miscellaneous'
+};
+
+const ToolPalette = ({ onRunPipeline, onStopPipeline, onSaveWorkflow, onLoadWorkflow, onExportYAML, onClearGlobalCache, isRunning, autoRun, setAutoRun, availableTools = [], selectedNode, onUpdateParams, onCacheAndRun, onAddNode, isChatOpen, onToggleChat, isSandbox, onAutoLayout }) => {
+  const { layoutDirection, toggleLayout } = useLayout();
+  const fileInputRef = useRef(null);
+  const dropdownRef = useRef(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [authStatus, setAuthStatus] = useState('checking');
+  const [uploadSuccessMessage, setUploadSuccessMessage] = useState('');
+  const authFileInputRef = useRef(null);
+
+  const [hoveredToolInfo, setHoveredToolInfo] = useState(null);
+  const hoverTimeoutRef = useRef(null);
+
+  const [runStatus, setRunStatus] = useState('idle');
+  const [workspaceNode, setWorkspaceNode] = useState(null);
+  const prevIsRunning = useRef(isRunning);
+
+  useEffect(() => {
+    setWorkspaceNode(document.getElementById('workspace-container'));
+  }, []);
+
+  useEffect(() => {
+    if (prevIsRunning.current === true && isRunning === false) {
+      setRunStatus('completed');
+      const timer = setTimeout(() => {
+        setRunStatus('idle');
+      }, 2000);
+      return () => clearTimeout(timer);
+    } else if (isRunning === true) {
+      setRunStatus('running');
+    }
+    prevIsRunning.current = isRunning;
+  }, [isRunning]);
+
+  useEffect(() => {
+    const handleHistoryUpdate = (e) => {
+      setCanUndo(e.detail.canUndo);
+      setCanRedo(e.detail.canRedo);
+    };
+    window.addEventListener('vibe-history-update', handleHistoryUpdate);
+    return () => window.removeEventListener('vibe-history-update', handleHistoryUpdate);
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
+
+  useEffect(() => {
+    const checkAuth = () => {
+      fetch(`${API_BASE}/api/google/auth/status`)
+        .then(res => res.json())
+        .then(data => setAuthStatus(data.status))
+        .catch(err => console.error("Failed to fetch auth status", err));
+    };
+    // Run on mount, and re-run whenever modal is opened
+    checkAuth();
+    if (!isAuthModalOpen) {
+      setUploadSuccessMessage(''); // clear on close
+    }
+  }, [isAuthModalOpen]);
+
+  const handleAuthUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch(`${API_BASE}/api/google/auth/setup`, {
+      method: 'POST',
+      body: formData,
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          if (data.method === 'oauth') {
+            setAuthStatus('needs_login');
+            setUploadSuccessMessage("OAuth configuration uploaded successfully! Please click 'Sign in with Google' below.");
+          } else {
+            setAuthStatus('authenticated');
+            setUploadSuccessMessage("Successfully connected with Google Cloud Service Account!");
+          }
+        } else {
+          setUploadSuccessMessage("Error: " + data.detail);
+        }
+      })
+      .catch(err => setUploadSuccessMessage("Upload failed: " + err));
+    
+    // Reset input
+    e.target.value = '';
+  };
+
+  const handleAuthLogin = () => {
+    fetch(`${API_BASE}/api/google/auth/login`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          setAuthStatus('authenticated');
+          setUploadSuccessMessage("Successfully logged in with Google!");
+        } else {
+          setUploadSuccessMessage("Login failed: " + (data.detail || "Unknown error"));
+        }
+      })
+      .catch(err => setUploadSuccessMessage("Login request failed: " + err));
+  };
+
+  const handleAuthDelete = () => {
+    if (!window.confirm("Are you sure you want to remove your Google Cloud credentials?")) return;
+    
+    fetch(`${API_BASE}/api/google/auth/logout`, { method: 'POST' })
+      .then(res => res.json())
+      .then(() => {
+        setAuthStatus('needs_setup');
+        setUploadSuccessMessage('');
+      })
+      .catch(err => alert("Failed to remove credentials: " + err));
+  };
+
+  // Favorites State
+  const [favoriteToolIds, setFavoriteToolIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vibeetl_favorites');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn("Failed to load favorites", e);
+    }
+    return ['fileInput', 'browse', 'select', 'formula', 'unique'];
+  });
+
+  const toggleFavorite = (toolId, e) => {
+    e.stopPropagation();
+    setFavoriteToolIds(prev => {
+      const newFavorites = prev.includes(toolId) 
+        ? prev.filter(id => id !== toolId)
+        : [...prev, toolId];
+      localStorage.setItem('vibeetl_favorites', JSON.stringify(newFavorites));
+      return newFavorites;
+    });
+  };
+
+  const resetFavorites = () => {
+    const defaultFavs = ['fileInput', 'browse', 'select', 'formula', 'unique'];
+    setFavoriteToolIds(defaultFavs);
+    localStorage.removeItem('vibeetl_favorites');
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+        setSearchQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Drag start handler for tool items
+  const onDragStart = (event, nodeType) => {
+    event.dataTransfer.setData('application/reactflow', nodeType);
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  // Group tools by category
+  const categories = useMemo(() => {
+    const grouped = { favorites: [] };
+    
+    availableTools.forEach(tool => {
+      const cat = tool.category || 'misc';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(tool);
+      
+      if (favoriteToolIds.includes(tool.id)) {
+        grouped.favorites.push(tool);
+      }
+    });
+    return grouped;
+  }, [availableTools, favoriteToolIds]);
+
+  return (
+    <div className="tool-palette">
+      {/* Logo Section */}
+      <div className="palette-logo">
+        <div className="logo-icon">ETL</div>
+        <div className="logo-text">
+          VibeETL
+          {isSandbox && <span style={{ marginLeft: '10px', fontSize: '10px', background: '#ef4444', color: 'white', padding: '2px 6px', borderRadius: '4px', verticalAlign: 'middle', fontWeight: 'bold' }}>SANDBOX MODE</span>}
+        </div>
+      </div>
+
+      {/* Tool Categories Section */}
+      <div className="tool-dropdown-container" style={{ margin: '0 16px', display: 'flex', alignItems: 'center', position: 'relative' }} ref={dropdownRef}>
+        <button 
+          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          style={{
+            padding: '6px 12px',
+            borderRadius: '6px',
+            border: '1px solid var(--border-color)',
+            background: 'white',
+            color: 'var(--text-primary)',
+            fontSize: '0.8rem',
+            fontFamily: 'var(--font-primary)',
+            fontWeight: 600,
+            cursor: 'pointer',
+            minWidth: '160px',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}
+          title="Select a tool to add it to the canvas"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Plus size={14} />
+            <span>Add Tool...</span>
+          </div>
+        </button>
+
+        {isDropdownOpen && (
+          <div style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: '4px',
+            background: 'white',
+            border: '1px solid var(--border-color)',
+            borderRadius: '6px',
+            boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
+            width: '220px',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #e2e8f0' }}>
+              <Search size={14} style={{ color: '#94a3b8', marginRight: '8px' }} />
+              <input 
+                autoFocus
+                type="text" 
+                placeholder="Search tools..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ border: 'none', outline: 'none', width: '100%', fontSize: '12px' }}
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#94a3b8' }}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+              {availableTools
+                .filter(tool => 
+                  tool.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                  tool.id.toLowerCase().includes(searchQuery.toLowerCase())
+                )
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(tool => (
+                  <div 
+                    key={tool.id}
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('vibe-add-node', { detail: { type: tool.id } }));
+                      setIsDropdownOpen(false);
+                      setSearchQuery('');
+                    }}
+                    style={{ padding: '8px 12px', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid #f1f5f9' }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    {React.createElement(Icons[tool.icon] || Icons.Square, { size: 14, style: { color: '#64748b' } })}
+                    <span style={{ fontWeight: 600, color: '#334155' }}>{tool.name}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="tool-categories" style={{ overflowX: 'auto', overflowY: 'hidden', paddingTop: '10px', paddingBottom: '6px' }}>
+        {Object.entries(categories).map(([catKey, tools]) => {
+          if (tools.length === 0) return null;
+          return (
+          <div key={catKey} className="category-group">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px', marginBottom: '4px' }}>
+              <span className={`category-title ${catKey}`} style={{ margin: 0 }}>
+                {CATEGORY_TITLES[catKey] || catKey.split(/[-_]/).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+              </span>
+              {catKey === 'favorites' && (
+                <button 
+                  onClick={resetFavorites}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', display: 'flex', alignItems: 'center', padding: '2px' }}
+                  title="Reset Favorites to Default"
+                >
+                  <Icons.RotateCcw size={12} />
+                </button>
+              )}
+            </div>
+            <div className="category-items">
+              {tools.map(tool => {
+                const IconComponent = Icons[tool.icon] || Icons.Square;
+                return (
+                  <div
+                    key={tool.id}
+                    className={`tool-item ${catKey}`}
+                    draggable
+                    onDragStart={(e) => onDragStart(e, tool.id)}
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('vibe-add-node', { detail: { type: tool.id } }));
+                    }}
+                    onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      hoverTimeoutRef.current = setTimeout(() => {
+                        setHoveredToolInfo({ tool, rect });
+                      }, 2000);
+                    }}
+                    onMouseLeave={() => {
+                      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                      setHoveredToolInfo(null);
+                    }}
+                    style={{ cursor: 'pointer', position: 'relative' }}
+                  >
+                    <IconComponent size={18} strokeWidth={1.5} style={{ flexShrink: 0, color: `var(--color-${tool.category})` }} />
+                    <span>{tool.name}</span>
+                    <div 
+                      onClick={(e) => toggleFavorite(tool.id, e)}
+                      style={{
+                        position: 'absolute',
+                        top: '-6px',
+                        right: '-6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '50%',
+                        padding: '3px',
+                        background: '#fff',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                        zIndex: 10,
+                        cursor: 'pointer'
+                      }}
+                      title={favoriteToolIds.includes(tool.id) ? "Remove from Favorites" : "Add to Favorites"}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                    >
+                      <Star size={10} fill={favoriteToolIds.includes(tool.id) ? '#fbbf24' : 'none'} color={favoriteToolIds.includes(tool.id) ? '#fbbf24' : '#cbd5e1'} strokeWidth={favoriteToolIds.includes(tool.id) ? 1 : 2.5} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )})}
+      </div>
+      
+      {/* Execution Actions Section - Inline Top Right */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        marginLeft: 'auto'
+      }}>
+        {/* Run / Stop */}
+        {runStatus === 'running' ? (
+          <button
+            className="run-button"
+            onClick={onStopPipeline}
+            style={{ background: '#ef4444', color: 'white', border: '1px solid #dc2626' }}
+            title="Stop the running pipeline"
+          >
+            <Icons.Square size={14} fill="white" strokeWidth={3} />
+          </button>
+        ) : (
+          <button
+            className="run-button"
+            onClick={onRunPipeline}
+            disabled={runStatus === 'completed'}
+            title="Run the entire pipeline from start to finish"
+          >
+            {runStatus === 'completed' ? (
+              <Icons.Check size={16} color="var(--color-success)" strokeWidth={3} />
+            ) : (
+              <Play size={16} fill="white" />
+            )}
+          </button>
+        )}
+
+        {/* Auto-Run */}
+        <label className="auto-run-label" style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none' }} title="Toggle automatic execution on parameter changes">
+          <input
+            type="checkbox"
+            checked={autoRun}
+            onChange={(e) => setAutoRun(e.target.checked)}
+            style={{ accentColor: 'var(--color-accent)', margin: 0 }}
+          />
+          Auto
+        </label>
+
+        {/* Settings */}
+        <button
+          className="run-button"
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', marginLeft: '8px' }}
+          onClick={() => setIsSettingsOpen(true)}
+          title="Open User Settings"
+        >
+          <Icons.Settings size={14} />
+        </button>
+
+        {/* Cache controls */}
+        {selectedNode && (
+          <button
+            className="run-button"
+            style={{
+              background: selectedNode.data?.parameters?.isCached ? 'var(--color-error)' : 'var(--color-success)',
+              color: 'white',
+              border: '1px solid var(--border-color)'
+            }}
+            onClick={() => {
+              if (onCacheAndRun) {
+                const currentlyCached = selectedNode.data?.parameters?.isCached;
+                onCacheAndRun(selectedNode.id, currentlyCached);
+              }
+            }}
+            disabled={isRunning}
+            title={selectedNode.data?.parameters?.isCached ? "Un-cache Selected Node & Run" : "Cache Selected Node & Run"}
+          >
+            <Icons.Database size={12} />
+          </button>
+        )}
+        <button
+          className="run-button"
+          style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5' }}
+          onClick={() => {
+            if (window.confirm("Are you sure you want to clear all cached nodes? This will un-cache everything on the canvas.")) {
+              onClearGlobalCache();
+            }
+          }}
+          title="Clear all cached nodes in the workflow"
+        >
+          <Icons.Trash2 size={14} />
+        </button>
+
+        <div className="divider-vertical" style={{ height: '24px', width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+        {/* Undo / Redo */}
+        <button 
+          className="run-button" 
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', opacity: canUndo ? 1 : 0.5, cursor: canUndo ? 'pointer' : 'not-allowed' }} 
+          onClick={() => canUndo && window.dispatchEvent(new CustomEvent('vibe-undo'))} 
+          title="Undo"
+        >
+          <Icons.Undo size={16} />
+        </button>
+        <button 
+          className="run-button" 
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', opacity: canRedo ? 1 : 0.5, cursor: canRedo ? 'pointer' : 'not-allowed' }} 
+          onClick={() => canRedo && window.dispatchEvent(new CustomEvent('vibe-redo'))} 
+          title="Redo"
+        >
+          <Icons.Redo size={16} />
+        </button>
+
+        <div className="divider-vertical" style={{ height: '24px', width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+        {/* File actions */}
+        <input 
+          type="file" 
+          accept=".json" 
+          style={{ display: 'none' }} 
+          ref={fileInputRef} 
+          onChange={onLoadWorkflow} 
+        />
+        <button className="run-button" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }} onClick={() => fileInputRef.current?.click()} title="Load Workflow">
+          <FolderOpen size={16} />
+        </button>
+        <button className="run-button" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }} onClick={onSaveWorkflow} title="Save Workflow">
+          <Save size={16} />
+        </button>
+        <button className="run-button" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }} onClick={() => window.dispatchEvent(new CustomEvent('vibe-open-find'))} title="Find Tool on Canvas">
+          <Search size={16} />
+        </button>
+        
+        <div className="divider-vertical" style={{ height: '24px', width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+        <button className="run-button" style={{ background: 'var(--color-accent)', color: 'white', border: '1px solid var(--border-color)' }} onClick={onExportYAML} title="Export Agent YAML">
+          <Bot size={16} />
+        </button>
+        <button 
+          className="run-button" 
+          style={{ 
+            background: authStatus === 'authenticated' ? '#ecfdf5' : '#e8f0fe', 
+            color: authStatus === 'authenticated' ? '#10b981' : '#1a73e8', 
+            border: `1px solid ${authStatus === 'authenticated' ? '#a7f3d0' : '#d2e3fc'}`,
+            position: 'relative'
+          }} 
+          onClick={() => setIsAuthModalOpen(true)} 
+          title="Google Cloud Connections"
+        >
+          <Icons.Cloud size={16} />
+          {authStatus === 'authenticated' && (
+            <div style={{ position: 'absolute', bottom: -2, right: -2, background: 'white', borderRadius: '50%' }}>
+              <Icons.CheckCircle size={10} color="#10b981" />
+            </div>
+          )}
+        </button>
+        <button 
+          className="run-button" 
+          style={{ 
+            background: isChatOpen ? '#ede9fe' : 'var(--bg-secondary)', 
+            color: isChatOpen ? '#7c3aed' : 'var(--text-primary)', 
+            border: `1px solid ${isChatOpen ? '#c4b5fd' : 'var(--border-color)'}`,
+            fontWeight: 600
+          }} 
+          onClick={onToggleChat} 
+          title="Toggle AI Assistant"
+        >
+          <span style={{ fontSize: '12px' }}>✨</span>
+        </button>
+
+        <div className="divider-vertical" style={{ height: '24px', width: '1px', background: 'var(--border-color)', margin: '0 4px' }} />
+
+        {/* Layout / View */}
+        <button
+          className="run-button"
+          style={{ background: 'var(--panel-bg)', color: 'var(--text-color)', border: '1px solid var(--border-color)' }}
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+        >
+          {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={onAutoLayout}
+          title="Auto-Layout Nodes (Magic Wand)"
+        >
+          <Wand size={16} />
+        </button>
+        <button
+          className="run-button"
+          style={{ background: 'var(--panel-bg)', color: 'var(--text-color)', border: '1px solid var(--border-color)' }}
+          onClick={toggleLayout}
+          title={layoutDirection === 'horizontal' ? "Switch to Vertical Layout" : "Switch to Horizontal Layout"}
+        >
+          {layoutDirection === 'horizontal' ? <Rows size={16} /> : <Columns size={16} />}
+        </button>
+      </div>
+
+      {/* Google Auth Modal */}
+      {isAuthModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{
+            background: '#ffffff',
+            padding: '24px',
+            borderRadius: '12px',
+            width: '450px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontFamily: 'var(--font-primary)', color: '#333333' }}>☁️ Cloud Integrations</h3>
+              <button 
+                onClick={() => setIsAuthModalOpen(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#666666' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <p style={{ fontSize: '0.9rem', color: '#555555', margin: 0, lineHeight: 1.5 }}>
+              VibeETL needs credentials to bypass anonymous restrictions and access private Google Sheets.
+              You can upload either a <strong>Service Account JSON</strong> or an <strong>OAuth 2.0 Client Secret</strong>.
+              <br/><br/>
+              Don't have one? 
+              <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener noreferrer" style={{ color: '#1a73e8', textDecoration: 'none', fontWeight: 600, marginLeft: '4px' }}>Get a Service Account</a>
+              <span style={{ margin: '0 8px' }}>or</span>
+              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" style={{ color: '#1a73e8', textDecoration: 'none', fontWeight: 600 }}>Get an OAuth 2.0 Client Secret</a>.
+            </p>
+
+            <div style={{ padding: '16px', background: '#f8f9fa', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <div style={{ 
+                  width: '10px', height: '10px', borderRadius: '50%', 
+                  background: authStatus === 'authenticated' ? '#10b981' : (authStatus === 'needs_login' ? '#3b82f6' : '#f59e0b') 
+                }} />
+                <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#333333' }}>
+                  Google Sheets Status: {authStatus === 'authenticated' ? 'Connected' : (authStatus === 'needs_login' ? 'Login Required' : 'Not Connected')}
+                </span>
+              </div>
+              <p style={{ fontSize: '0.8rem', color: '#666666', margin: 0 }}>
+                {authStatus === 'authenticated' 
+                  ? 'Your global Service Account / OAuth credentials are active. Nodes will use them automatically. 💡 Remember: If using a Service Account, you must open your Google Sheet and "Share" it with your Service Account email (found inside your JSON file).'
+                  : (authStatus === 'needs_login' 
+                    ? 'OAuth Desktop Client credentials uploaded. You must now sign in to your Google Account to authorize access.'
+                    : 'Currently operating in anonymous fallback mode. Upload a Service Account JSON or OAuth Client Secret to unlock full access.')}
+              </p>
+            </div>
+
+            {uploadSuccessMessage && (
+              <div style={{ marginTop: '12px', padding: '12px', background: '#f0fdf4', color: '#166534', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '0.85rem', fontWeight: 500, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>✓ {uploadSuccessMessage}</div>
+                <button 
+                  onClick={() => setIsAuthModalOpen(false)} 
+                  style={{ background: '#16a34a', color: 'white', border: 'none', padding: '6px 16px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
+              {authStatus === 'authenticated' || authStatus === 'needs_login' ? (
+                <button 
+                  onClick={handleAuthDelete}
+                  style={{
+                    background: 'transparent',
+                    color: '#ef4444',
+                    border: '1px solid #fca5a5',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '0.8rem'
+                  }}
+                >
+                  Remove Credentials
+                </button>
+              ) : (
+                <div /> // Placeholder for flex-between
+              )}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {authStatus === 'needs_login' && (
+                  <button 
+                    onClick={handleAuthLogin}
+                    style={{
+                      background: '#ffffff',
+                      color: '#4285f4',
+                      border: '1px solid #4285f4',
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '0.9rem'
+                    }}
+                  >
+                    <Icons.LogIn size={16} />
+                    Sign in with Google
+                  </button>
+                )}
+                <input 
+                  type="file" 
+                  accept=".json" 
+                  ref={authFileInputRef}
+                  style={{ display: 'none' }}
+                  onChange={handleAuthUpload}
+                />
+                <button 
+                  onClick={() => authFileInputRef.current?.click()}
+                  style={{
+                    background: '#1a73e8',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  <Icons.UploadCloud size={16} />
+                  {authStatus === 'authenticated' ? 'Replace Credentials JSON' : 'Upload Credentials JSON'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSettingsOpen && (
+        <SettingsModal onClose={() => setIsSettingsOpen(false)} />
+      )}
+
+      {hoveredToolInfo && createPortal(
+        <div style={{
+          position: 'absolute',
+          top: hoveredToolInfo.rect.bottom + 10,
+          left: Math.min(hoveredToolInfo.rect.left, window.innerWidth - 300),
+          background: 'white',
+          border: '1px solid var(--border-color)',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+          padding: '12px 14px',
+          borderRadius: '8px',
+          maxWidth: '300px',
+          zIndex: 99999,
+          pointerEvents: 'none',
+          fontFamily: 'var(--font-primary)'
+        }}>
+          <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {React.createElement(Icons[hoveredToolInfo.tool.icon] || Icons.Square, { size: 16, style: { color: 'var(--color-primary)' } })}
+            {hoveredToolInfo.tool.name}
+          </h4>
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: hoveredToolInfo.tool.description || 'No documentation available.' }} />
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
+
+export default ToolPalette;

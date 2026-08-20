@@ -997,8 +997,8 @@ class OddsPortalScraperNode(BaseNode):
                     
                     let cleanT = t.replace(/[^0-9+.\\-\\/]/g, ''); // Strip arrows/symbols
                     
-                    if (cleanT.match(/^[+-]?\\d+\\.\\d+$/)) {{ // Decimal (1, 2 or 3+ decimals)
-                        extracted.push(Math.abs(parseFloat(cleanT)));
+                    if (cleanT.match(/^\\d+\\.\\d+$/)) {{ // Decimal (1, 2 or 3+ decimals)
+                        extracted.push(parseFloat(cleanT));
                     }} else if (cleanT.match(/^\\d{1,3}\\/\\d{1,3}$/)) {{ // Fractional
                         let p = cleanT.split('/');
                         extracted.push((parseFloat(p[0]) / parseFloat(p[1])) + 1);
@@ -1024,15 +1024,15 @@ class OddsPortalScraperNode(BaseNode):
                     let bookieNode = row.querySelector('[data-testid="outrights-expanded-bookmaker-name"]');
                     let bookieName = bookieNode ? (bookieNode.textContent || "").toLowerCase() : "";
                     let isBet365 = text.toLowerCase().includes('bet365') || !!row.querySelector('[title*="bet365" i]') || !!row.querySelector('img[alt*="bet365" i]') || bookieName.includes('bet365');
-                    let oddsNodes = row.querySelectorAll('[data-testid="odd-container"] .odds-text, [data-testid="odd-container"] p');
+                    let oddsNodes = row.querySelectorAll('[data-testid="odd-container"] .odds-text, [data-testid="odd-container"] p, [data-testid="odd-container"] a.odds-link, [data-testid="odd-container"] a');
                     
                     if (oddsNodes.length >= 2) {{
                         let oddsArr = Array.from(oddsNodes).map(n => {{
                             let t = n.innerText.trim();
                             if (t === '-') return null;
                             let cleanT = t.replace(/[^0-9+.\\-\\/]/g, '');
-                            let match = cleanT.match(/^[+-]?\\d+\\.\\d+$/);
-                            return match ? Math.abs(parseFloat(cleanT)) : null;
+                            let match = cleanT.match(/^\\d+\\.\\d+$/);
+                            return match ? parseFloat(cleanT) : null;
                         }});
                         
                         // ONLY accept odds if it matches the expected count for the market!
@@ -1054,9 +1054,13 @@ class OddsPortalScraperNode(BaseNode):
             
             // --- 2. FALLBACK GENERIC EXTRACTION ---
             if (!anyOddsFound) {{
-                let tableContainer = document.querySelector('[data-testid="bookmaker-table"]') || document.querySelector('#odds-data-table') || document.body;
+                let tableContainer = document.querySelector('[data-testid="bookmaker-table"]') || document.querySelector('#odds-data-table');
+                if (!tableContainer) return {{ status: "empty_market", odds: [] }};
                 let allElements = Array.from(tableContainer.querySelectorAll('div, a, span, p')).reverse();
                 for (let el of allElements) {{
+                    // VISIBILITY CHECK: Ignore elements that are hidden (e.g. inactive tabs)
+                    if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
+                    
                     let text = el.innerText || el.alt || el.title || '';
                     if (text.length > 200 || el.children.length > 15) continue;
                     
@@ -1389,8 +1393,8 @@ class OddsPortalScraperNode(BaseNode):
                                     if (txt === '-') {
                                         odds.push(txt);
                                     } else {
-                                        let cleanTxt = txt.replace(/[^0-9+.\\-]/g, '');
-                                        if (cleanTxt.match(/^[+-]?\d+\.\d+$/)) odds.push(cleanTxt);
+                                        let cleanTxt = txt.replace(/[^0-9.\\-]/g, '');
+                                        if (cleanTxt.match(/^\d+\.\d+$/)) odds.push(cleanTxt);
                                     }
                                 }
                                 if (odds.length >= 2) {
@@ -1489,7 +1493,7 @@ class OddsPortalScraperNode(BaseNode):
                             let tokens = text.split(/\s+/);
                             for (let txt of tokens) {
                                 if (txt.includes('%') || txt.toLowerCase().includes('payout')) continue;
-                                if (txt === '-' || txt.match(/^[+-]?\d+\.\d+$/)) {
+                                if (txt === '-' || txt.match(/^\d+\.\d+$/)) {
                                     odds.push(txt);
                                 }
                             }
