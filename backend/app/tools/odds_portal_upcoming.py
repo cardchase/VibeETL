@@ -328,8 +328,10 @@ class OddsPortalUpcomingNode(BaseNode):
                                             self.log(f"   ↳ Found: {', '.join(found_cols) if found_cols else 'None'}")
                                             self.log(f"   ↳ Missing: {', '.join(missing_cols)}")
                                             retry_queue.append({'url': r.get("URL"), 'idx': r.get("_original_order")})
-                                        elif r.get("_skip_retry"):
-                                            # Discard garbage row from skipped redirect URL
+                                        elif r.get("_failed"):
+                                            pass
+                                        elif r.get("_skip_retry") and not r.get("_no_odds"):
+                                            # Discard garbage/honeypot row
                                             pass
                                         else:
                                             all_valid_rows.append(r)
@@ -337,8 +339,8 @@ class OddsPortalUpcomingNode(BaseNode):
                                             all_valid_rows.sort(key=lambda x: (x.get("_season_order", 0), x.get("_original_order", 999999)))
                                             
                                             # Send sequential update to cache manager so UI data tab updates in real-time
-                                            # Exclude _original_order, _season_order, and _skip_retry from final output schema
-                                            clean_rows = [{k: v for k, v in row.items() if k not in ["_original_order", "_season_order", "_skip_retry"]} for row in all_valid_rows]
+                                            # Exclude temporary fields from final output schema
+                                            clean_rows = [{k: v for k, v in row.items() if k not in ["_original_order", "_season_order", "_skip_retry", "_no_odds"]} for row in all_valid_rows]
                                             partial_df = pl.DataFrame(clean_rows, schema=schema) if clean_rows else pl.DataFrame()
                                             sid = getattr(self, "session_id", "default")
                                             
@@ -503,10 +505,9 @@ class OddsPortalUpcomingNode(BaseNode):
                     await page.evaluate("window.scrollBy(0, window.innerHeight)")
                     await page.wait_for_timeout(3000)
                 
-                # Scope to the main column to avoid sidebar (popular matches) pollution
+                # Scope to all links, filtering is done reliably in python
                 links = await page.evaluate("""() => {
-                    let mainColumn = document.querySelector('div.flex.flex-col') || document.body;
-                    return Array.from(mainColumn.querySelectorAll('a')).map(a => a.href);
+                    return Array.from(document.querySelectorAll('a')).map(a => a.href);
                 }""")
                 
                 # Filter for match links
@@ -514,27 +515,37 @@ class OddsPortalUpcomingNode(BaseNode):
                 page_total_valid_links = 0
                 page_already_scraped_links = 0
                 
+                # Dynamically set filtering bounds based on URL type
                 base_url = competition_url.split('/results')[0].split('/standings')[0]
                 if not base_url.endswith('/'):
                     base_url += '/'
+                    
+                is_global_stream = "/matches/football/" in competition_url.lower()
 
                 for l in links:
+                    if not l:
+                        continue
                     if l == competition_url or "outrights" in l or "results" in l or "standings" in l:
                         continue
 
+                    # 1. Handle H2H Links (Whitelist them instantly if valid)
                     if "/h2h/" in l:
                         match = re.search(r'/h2h/([a-zA-Z0-9-]+)-[a-zA-Z0-9]{8}/([a-zA-Z0-9-]+)-[a-zA-Z0-9]{8}/#([a-zA-Z0-9]{8})', l)
                         if match:
-                            home_slug = match.group(1)
-                            away_slug = match.group(2)
-                            match_id = match.group(3)
-                            canonical_url = f"{base_url}{home_slug}-{away_slug}-{match_id}/"
-                            l = canonical_url
+                            pass # Valid H2H link, bypass strict base_url checks
                         else:
                             continue
+                    else:
+                        # 2. Handle Standard Match Links
+                        if is_global_stream:
+                            if not l.startswith("https://www.oddsportal.com/football/") and not l.startswith("https://www.oddsportal.com/match/"):
+                                continue
+                        else:
+                            if not l.startswith(base_url) and not l.startswith("https://www.oddsportal.com/match/"):
+                                continue
                     
-                    # Ensure the match link matches the ID pattern (8 alphanumeric chars hash)
-                    if re.search(r'-[a-zA-Z0-9]{8}/?(?:[?#].*)?$', l):
+                    # 3. Final Pattern Validation & Extraction
+                    if re.search(r'(?:-|/match/)[a-zA-Z0-9]{8}/?(?:[?#].*)?$', l):
                         if "Aonqhgqt" in l:
                             self.log(f"Blocked known honeypot match ID 'Aonqhgqt' from queue: {l}")
                             continue
@@ -692,7 +703,7 @@ class OddsPortalUpcomingNode(BaseNode):
                 await page.wait_for_timeout(2500)
                 
                 current_url = page.url
-                if '/football/' not in current_url.lower():
+                if '/football/' not in current_url.lower() and '/match/' not in current_url.lower():
                     self.log(f"Warning: URL redirected to unexpected page layout ({current_url}). Skipping to prevent infinite tab polling.")
                     extracted_row["_skip_retry"] = True
                     return extracted_row
@@ -701,7 +712,9 @@ class OddsPortalUpcomingNode(BaseNode):
             except Exception as e:
                 await asyncio.sleep(5.0)
                 if attempt == 2:
-                    self.log(f"Failed to load match page after 3 attempts: {e}")
+                    self.log(f"Failed to load match page after 3 attempts: {e}. If this is a Cloudflare/IP block, run in Visible mode and manually solve the CAPTCHA.")
+                    extracted_row["_failed"] = True
+                    extracted_row["_skip_retry"] = True
                     return extracted_row
         
         for selector in ['button:has-text("I Accept")', '#onetrust-accept-btn-handler', '.accept-choices']:
@@ -709,6 +722,12 @@ class OddsPortalUpcomingNode(BaseNode):
                 await page.click(selector, timeout=10000)
             except:
                 pass
+                
+        # Check for Bot Protection / Cloudflare
+        page_title = await page.title()
+        if page_title and ("Just a moment" in page_title or "Attention Required" in page_title or "Security" in page_title):
+            self.log("Bot protection challenge detected! If running in visible mode, please solve it manually. Pausing for 30s...")
+            await asyncio.sleep(30.0)
                 
         # Give the DOM an extra moment to settle text nodes
         await page.wait_for_timeout(2500)
@@ -759,8 +778,7 @@ class OddsPortalUpcomingNode(BaseNode):
             // 3. Extract Live Info & Score from data-testid="live-info" or body
             let liveInfo = document.querySelector('[data-testid="live-info"]') || document.querySelector('.live-info');
             let liveText = liveInfo ? cleanText(liveInfo.innerText) : '';
-            let mainColumn = document.querySelector('div.flex.flex-col') || document.body;
-            let bodyText = cleanText(mainColumn.innerText);
+            let bodyText = cleanText(document.body.innerText);
 
             let fullText = (liveText + ' ' + bodyText).trim();
 
@@ -835,19 +853,28 @@ class OddsPortalUpcomingNode(BaseNode):
                 res.Match_Status = "Finished";
             }
 
-            // 2. Extract Country and Competition from Visual Breadcrumbs (data-testid)
-            let a2 = document.querySelector('a[data-testid="2"]');
-            if (a2) res.Country = cleanText(a2.innerText);
-            let a3 = document.querySelector('a[data-testid="3"]');
-            if (a3) {
-                let compStr = cleanText(a3.innerText);
-                let seasonMatch = compStr.match(/\d{4}\/\d{4}/);
-                if (seasonMatch) {
-                    res.Competition = compStr.replace(seasonMatch[0], '').trim();
-                } else {
-                    res.Competition = compStr.trim();
-                }
+            // 2. Extract Country and Competition directly from URL pathname & JSON-LD Breadcrumbs
+            let pathParts = window.location.pathname.split('/').filter(p => p.length > 0);
+            // Path structure: ['football', 'england', 'premier-league', 'match-slug-id']
+            if (pathParts.length >= 3 && pathParts[0].toLowerCase() === 'football') {
+                res.Country = pathParts[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                
+                // Clean league name (removes historical season years like -2024-2025 if attached)
+                let compRaw = pathParts[2].replace(/-\d{4}(-\d{4})?$/, '');
+                res.Competition = compRaw.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             }
+
+            // Fallback: Check JSON-LD BreadcrumbList
+            document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
+                try {
+                    let d = JSON.parse(script.textContent);
+                    if (d["@type"] === "BreadcrumbList" && Array.isArray(d.itemListElement)) {
+                        let items = d.itemListElement;
+                        if (items[1]?.name) res.Country = cleanText(items[1].name);
+                        if (items[2]?.name) res.Competition = cleanText(items[2].name);
+                    }
+                } catch(e) {}
+            });
 
             // 3. Extract exact Team names from JSON-LD (since team names on DOM can be abbreviated)
             document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
@@ -883,6 +910,29 @@ class OddsPortalUpcomingNode(BaseNode):
                     }
                 } catch(e) {}
             });
+            
+            // 4. Ultimate Fallback: Extract Teams from URL Slug
+            if (!res.HomeTeam || !res.AwayTeam) {
+                try {
+                    let urlParts = window.location.pathname.split('/');
+                    // Format: /football/italy/serie-a/como-udinese-QuSvm8ln/
+                    // The last part is the slug if trailing slash is ignored
+                    let slug = urlParts.filter(p => p.length > 0).pop();
+                    if (slug && slug.includes('-')) {
+                        let slugParts = slug.split('-');
+                        slugParts.pop(); // remove the hash (e.g. QuSvm8ln)
+                        if (slugParts.length >= 2) {
+                            if (!res.HomeTeam) {
+                                res.HomeTeam = slugParts[0].charAt(0).toUpperCase() + slugParts[0].slice(1);
+                            }
+                            if (!res.AwayTeam) {
+                                let awayRaw = slugParts[slugParts.length - 1];
+                                res.AwayTeam = awayRaw.charAt(0).toUpperCase() + awayRaw.slice(1);
+                            }
+                        }
+                    }
+                } catch(e) {}
+            }
 
             if (res.FT_HomeScore !== null && res.FT_AwayScore !== null) {
                 if (res.FT_HomeScore > res.FT_AwayScore) res.Match_Winner_Final = "Home";
@@ -894,16 +944,18 @@ class OddsPortalUpcomingNode(BaseNode):
         """)
         extracted_row.update(score_data)
 
-        # Honeypot / Garbage Data Check
-        match_country = re.search(r'oddsportal\.com/[^/]+/([^/]+)/', url)
-        if match_country and extracted_row.get("Country"):
-            url_country = re.sub(r'[^a-z0-9]', '', match_country.group(1).lower())
-            extracted_country = re.sub(r'[^a-z0-9]', '', extracted_row["Country"].lower())
-            if url_country and extracted_country and url_country != extracted_country:
-                self.log(f"HONEYPOT DETECTED: URL country '{url_country}' does not match page country '{extracted_country}'. Skipping match.")
-                extracted_row["_skip_retry"] = True
-                return extracted_row
-
+        # Extract Country and Competition directly from the Match URL or Target URL
+        for source_url in [url, self.parameters.get("targetUrl", "")]:
+            if not source_url:
+                continue
+            path_match = re.search(r'oddsportal\.com/football/([^/]+)/([^/]+)/?', source_url)
+            if path_match:
+                if not extracted_row.get("Country"):
+                    extracted_row["Country"] = path_match.group(1).replace('-', ' ').title()
+                if not extracted_row.get("Competition"):
+                    clean_comp = re.sub(r'-\d{4}(-\d{4})?$', '', path_match.group(2))
+                    extracted_row["Competition"] = clean_comp.replace('-', ' ').title()
+                break
         # Force the Season from the URL to be 100% accurate (e.g., 2024-2025)
         # as OddsPortal's breadcrumbs and JSON-LD can sometimes be mismatched or missing.
         season_match = re.search(r'-(\d{4}-\d{4})/', url)
@@ -916,6 +968,46 @@ class OddsPortalUpcomingNode(BaseNode):
                 year_match = re.search(r'\d{4}', date_str)
                 if year_match:
                     extracted_row["Season"] = year_match.group(0)
+
+        # --- ZERO-ODDS FAST PROBE (H2H SAFE) ---
+        # If bookmakers haven't opened markets, abort early. 
+        # Restricts scope to the FIRST match row to prevent false positives from historical H2H tables below.
+        has_any_odds = await page.evaluate(r"""
+            () => {
+                let bodyText = document.body.innerText.toLowerCase();
+                if (bodyText.includes("no odds available") || 
+                    bodyText.includes("no bookmakers offer") || 
+                    bodyText.includes("unfortunately, no matches can be displayed")) {
+                    return false;
+                }
+                
+                // Target specifically the FIRST game row (H2H pages) or the primary bookmaker table (Match pages)
+                let firstRow = document.querySelector('[data-testid="game-row"], [data-testid="bookmaker-table-row"]');
+                if (!firstRow) return false;
+                
+                // Find odd containers strictly inside this primary row
+                let oddElements = Array.from(firstRow.querySelectorAll('[data-testid="odd-container-default"], [data-testid="odd-container"], .odds-text, p.font-bold, div.box-border.font-bold'));
+                
+                let hasValidNumber = false;
+                for (let el of oddElements) {
+                    let txt = (el.innerText || el.textContent || '').trim();
+                    if (txt !== '-' && txt !== '' && txt.match(/^[+-]?\d+(\.\d+)?$/)) {
+                        hasValidNumber = true;
+                        break;
+                    }
+                }
+                
+                return hasValidNumber;
+            }
+        """)
+
+        if not has_any_odds and extracted_row.get("Match_Status") == "Upcoming":
+            match_title = f"{extracted_row.get('HomeTeam', 'Unknown')} vs {extracted_row.get('AwayTeam', 'Unknown')}"
+            self.log(f"⚡ [Fast-Bypass] No odds posted yet by bookmakers for: {match_title}. Skipping sub-tabs.")
+            extracted_row["_skip_retry"] = True
+            extracted_row["_no_odds"] = True
+            watcher_task.cancel()
+            return extracted_row
 
         # --- PHASE 3: HARMONIZED CORNER ODDS SCRAPER ENGINE ---
         def get_evaluate_tab_state(expected_mains, expected_sub=None, expected_odds_count=3):
@@ -940,10 +1032,12 @@ class OddsPortalUpcomingNode(BaseNode):
             for (let em of expectedMains) {{
                 if (activeTexts.includes(em)) {{ mainMatch = true; break; }}
             }}
-            if (!mainMatch) return {{ status: "loading", odds: [] }};
+            
+            let isH2H = window.location.href.includes('/h2h/');
+            if (!mainMatch && !isH2H) return {{ status: "loading", odds: [] }};
             
             let expectedSub = {sub_json};
-            if (expectedSub && !activeTexts.includes(expectedSub)) {{
+            if (expectedSub && !activeTexts.includes(expectedSub) && !isH2H) {{
                 return {{ status: "loading", odds: [] }};
             }}
 
@@ -952,24 +1046,30 @@ class OddsPortalUpcomingNode(BaseNode):
                 let extracted = [];
                 for (let t of tokens) {{
                     if (t.includes('%') || t.toLowerCase().includes('payout') || t.toLowerCase().includes('average')) continue;
+                    
+                    // PREVENT BOOKIE NAME CAPTURE: Skip tokens containing letters
+                    if (t.match(/[a-zA-Z]/)) continue;
+                    
                     if (t === '-') {{
                         extracted.push(null);
                         continue;
                     }}
                     
-                    // Regex Extractors for Valid Odds Formats
-                    // Note on Fractional Odds: The regex is strictly bound to `\\d{1,3}` (max 3 digits) 
-                    // to prevent it from accidentally mathematically converting calendar years (e.g., '2026/2027')
-                    // found in page headers into fractional odds and parsing them into massive floats.
+                    // FIX: Explicitly block numeric bookmaker names/fragments
+                    if (t === '365' || t === '888' || t === '1') continue;
                     
-                    let cleanT = t.replace(/[^0-9+.\\-\\/]/g, ''); // Strip arrows/symbols
+                    // FIX: Enforce valid odds formatting (must have decimal, slash, or sign)
+                    if (!t.includes('.') && !t.includes('/') && !t.startsWith('+') && !t.startsWith('-')) continue;
+
+                    let cleanT = t.replace(/[^0-9+.\\-\\/]/g, ''); 
+                    if (!cleanT) continue;
                     
-                    if (cleanT.match(/^[+-]?\\d+\\.\\d+$/)) {{ // Decimal (1, 2 or 3+ decimals)
+                    if (cleanT.match(/^[+-]?\\d+(\\.\\d+)?$/)) {{ 
                         extracted.push(parseFloat(cleanT));
-                    }} else if (cleanT.match(/^\\d{1,3}\\/\\d{1,3}$/)) {{ // Fractional
+                    }} else if (cleanT.match(/^\\d{{1,3}}\\/\\d{{1,3}}$/)) {{ 
                         let p = cleanT.split('/');
                         extracted.push((parseFloat(p[0]) / parseFloat(p[1])) + 1);
-                    }} else if (cleanT.match(/^[+-]\\d+$/)) {{ // American
+                    }} else if (cleanT.match(/^[+-]\\d+$/)) {{ 
                         let num = parseFloat(cleanT);
                         if (num > 0) extracted.push((num / 100) + 1);
                         else extracted.push((100 / Math.abs(num)) + 1);
@@ -982,42 +1082,78 @@ class OddsPortalUpcomingNode(BaseNode):
             let bet365Odds = null;
             let fallbackOdds = null;
             
-            // --- 1. MODERN STRUCTURED EXTRACTION ---
-            let modernRows = document.querySelectorAll('[data-testid="over-under-expanded-row"], [data-testid="bookmaker-table-row"], tr.h-9');
+            // --- 1. MODERN STRUCTURED EXTRACTION (FIXED) ---
+            let modernRows = document.querySelectorAll('[data-testid="over-under-expanded-row"], [data-testid="bookmaker-table-row"], tr.h-9, tr, div.border-b');
             if (modernRows.length > 0) {{
                 let foundAnyModernOdds = false;
                 for (let row of modernRows) {{
                     let text = row.innerText || '';
-                    let isBet365 = text.toLowerCase().includes('bet365') || !!row.querySelector('[title*="bet365" i]');
-                    let oddsNodes = row.querySelectorAll('[data-testid="odd-container"] .odds-text, [data-testid="odd-container"] p');
+                    if (text.includes('Bookmakers') || text.includes('Payout')) continue; 
                     
-                    if (oddsNodes.length >= 2) {{
-                        let oddsArr = Array.from(oddsNodes).map(n => {{
+                    let rowHtml = (row.innerHTML || '').toLowerCase();
+                    let isBet365 = text.toLowerCase().includes('bet365') || 
+                                   rowHtml.includes('bet365') || 
+                                   !!row.querySelector('img[title*="bet365" i], img[alt*="bet365" i], a[href*="bet365" i]');
+                    
+                    let isBookieRow = isBet365 || text.includes('%') || text.toLowerCase().includes('payout') || !!row.querySelector('img');
+                    if (!isBookieRow) continue;
+                    
+                    let rawNodes = Array.from(row.querySelectorAll('[data-testid*="odd-container"], .odds-text, p.font-bold, div.font-bold, td > a, td > p, td > div, td:nth-child(2), td:nth-child(3), td:nth-child(4), td:nth-child(5)'));
+                    let oddsNodes = rawNodes.filter(node => {{
+                        let td = node.closest('td');
+                        if (td && td.cellIndex === 0) return false;
+                        if (node.closest('[data-testid*="bookmaker"]')) return false;
+                        return !rawNodes.some(other => other !== node && other.contains(node));
+                    }});
+                    
+                    // ISOLATE ONLY ODDS: Skip bookie names but keep dashes to preserve column alignment
+                    let validOddsNodes = oddsNodes.filter(n => {{
+                        let t = (n.innerText || n.textContent || '').trim();
+                        if (t === '-') return true;
+                        
+                        // Skip if it contains letters
+                        if (t.match(/[a-zA-Z]/)) return false;
+                        
+                        // FIX: Explicitly block numeric bookmaker fragments
+                        if (t === '365' || t === '888' || t === '1') return false;
+                        
+                        // FIX: Ensure the string represents a standard odds format
+                        let isOddFormat = t.includes('.') || t.includes('/') || t.startsWith('+') || t.startsWith('-');
+                        return isOddFormat && t.match(/[0-9]/);
+                    }});
+                    
+                    if (validOddsNodes.length >= {expected_odds_count}) {{
+                        let oddsArr = validOddsNodes.map(n => {{
                             let t = (n.innerText || n.textContent || '').trim();
                             if (t === '-') return null;
+                            
                             let cleanT = t.replace(/[^0-9+.\\-\\/]/g, '');
-                            let match = cleanT.match(/^[+-]?\\d+(\\.\\d+)?$/);
-                            return match ? parseFloat(cleanT) : null;
+                            if (!cleanT) return null;
+                            
+                            if (cleanT.match(/^[+-]?\\d+(\\.\\d+)?$/)) return parseFloat(cleanT);
+                            if (cleanT.match(/^\\d{{1,3}}\\/\\d{{1,3}}$/)) return (parseFloat(cleanT.split('/')[0]) / parseFloat(cleanT.split('/')[1])) + 1;
+                            if (cleanT.match(/^[+-]\\d+$/)) {{
+                                let num = parseFloat(cleanT);
+                                return num > 0 ? (num / 100) + 1 : (100 / Math.abs(num)) + 1;
+                            }}
+                            return null;
                         }});
                         
                         let actualOdds = oddsArr.slice(0, {expected_odds_count});
                         let validOddsCount = actualOdds.filter(x => x !== null).length;
                         
-                        // ONLY accept odds if it matches the expected count for the market (and is not a completely empty row)!
-                        if (oddsArr.length >= {expected_odds_count} && validOddsCount > 0) {{
+                        if (actualOdds.length >= {expected_odds_count} && validOddsCount > 0) {{
                             anyOddsFound = true;
                             foundAnyModernOdds = true;
                             if (isBet365) {{
-                                bet365Odds = oddsArr;
+                                bet365Odds = actualOdds;
                                 break;
                             }} else if (!fallbackOdds) {{
-                                fallbackOdds = oddsArr;
+                                fallbackOdds = actualOdds;
                             }}
                         }}
                     }}
                 }}
-                
-                // We do NOT return rows_present_no_odds here, because we want to try the fallback generic extraction!
             }}
             
             // --- 2. FALLBACK GENERIC EXTRACTION ---
@@ -1049,31 +1185,16 @@ class OddsPortalUpcomingNode(BaseNode):
                 }}
             }}
             
-            if (bet365Odds) {{
-                return {{ status: "loaded", odds: bet365Odds }};
-            }}
-            if (anyOddsFound && fallbackOdds) {{
-                return {{ status: "loaded", odds: fallbackOdds }};
-            }}
-            
-            if (modernRows.length > 0 && !anyOddsFound) {{
-                return {{ status: "rows_present_no_odds", odds: [] }};
-            }}
+            if (bet365Odds) return {{ status: "loaded", odds: bet365Odds }};
+            if (anyOddsFound && fallbackOdds) return {{ status: "loaded", odds: fallbackOdds }};
+            if (modernRows.length > 0 && !anyOddsFound) return {{ status: "rows_present_no_odds", odds: [] }};
 
-            // Check if market is explicitly empty
             let bodyLower = document.body.innerText.toLowerCase();
             if (bodyLower.includes("unfortunately, no matches can be displayed") || 
                 bodyLower.includes("no odds available") ||
                 bodyLower.includes("no bookmakers offer") ||
-                bodyLower.includes("there is no data available") ||
-                bodyLower.includes("odds, predictions and h2h results")) {{
-                
-                if (bodyLower.includes("unfortunately, no matches can be displayed") || 
-                    bodyLower.includes("no odds available") ||
-                    bodyLower.includes("no bookmakers offer") ||
-                    bodyLower.includes("there is no data available")) {{
-                    return {{ status: "empty_market", odds: [] }};
-                }}
+                bodyLower.includes("there is no data available")) {{
+                return {{ status: "empty_market", odds: [] }};
             }}
 
             return {{ status: "loading", odds: [] }};
@@ -1147,13 +1268,21 @@ class OddsPortalUpcomingNode(BaseNode):
                     else:
                         if hasattr(self, "is_cancelled") and self.is_cancelled():
                             return []
-                        if not page_reloaded and attempt == 0:
-                            self.log(f"Smart Refresh: Tab {label} missing. Reloading page...")
-                            page_reloaded = True
-                            await page.reload(wait_until="domcontentloaded", timeout=30000)
-                            await page.wait_for_timeout(3000)
-                            continue
-                        return []
+                        
+                        is_h2h = "/h2h/" in page.url
+                        if is_h2h:
+                            if "1X2" in main_tab_texts:
+                                pass # Continue to extraction logic since 1X2 odds are visible on H2H page
+                            else:
+                                return []
+                        else:
+                            if not page_reloaded and attempt == 0:
+                                self.log(f"Smart Refresh: Tab {label} missing. Reloading page...")
+                                page_reloaded = True
+                                await page.reload(wait_until="domcontentloaded", timeout=30000)
+                                await page.wait_for_timeout(3000)
+                                continue
+                            return []
                     
                     # 2. Click Sub Tab if present
                     if sub_tab_text:
@@ -1174,14 +1303,22 @@ class OddsPortalUpcomingNode(BaseNode):
                                 await page.wait_for_timeout(2000) # Give React a moment to load tab data
                         else:
                             # Sub tab missing, meaning this market segment doesn't exist for this match
-                            if hasattr(self, "log"):
-                                self.log(f"Sub tab '{sub_tab_text}' missing for market '{main_tab_text}'.")
-                            return []
+                            is_h2h = "/h2h/" in page.url
+                            if is_h2h:
+                                if sub_tab_text == "Full Time":
+                                    pass # Continue for 1X2 Full Time on H2H pages
+                                else:
+                                    return []
+                            else:
+                                if hasattr(self, "log"):
+                                    self.log(f"Sub tab '{sub_tab_text}' missing for market '{main_tab_text}'.")
+                                return []
                     
                     # 3. Smart poll for ANY data
                     empty_market_count = 0
                     rows_present_count = 0
                     loading_count = 0
+                    timeout_reason = None
                     while True:
                         if hasattr(self, "is_cancelled") and self.is_cancelled():
                             return []
@@ -1194,8 +1331,8 @@ class OddsPortalUpcomingNode(BaseNode):
                             return state["odds"]
                         elif state["status"] == "empty_market":
                             empty_market_count += 1
-                            if empty_market_count >= 30: # Enforce a full 30-second wait before trusting 'empty'
-                                await asyncio.sleep(2.0) # Prevent racing through missing tabs
+                            if empty_market_count >= 10: # 10s wait before trusting 'empty'
+                                await asyncio.sleep(1.0)
                                 return []
                         elif state["status"] == "rows_present_no_odds":
                             rows_present_count += 1
@@ -1205,17 +1342,23 @@ class OddsPortalUpcomingNode(BaseNode):
                             empty_market_count = 0
                             rows_present_count = 0
                             loading_count += 1
+                            if is_h2h and loading_count >= 10:
+                                return [] # Fast fail for H2H pages since tabs don't exist to switch
                             if loading_count >= 15:
-                                return []
+                                timeout_reason = "loading"
+                                break
                             
-                    # If we reach here, we timed out
+                    # If we break, we timed out
                     if hasattr(self, "is_cancelled") and self.is_cancelled():
                         return []
-                    self.log(f"Smart Refresh: Timed out waiting for ANY odds on {label}. Reloading page...")
-                    page_reloaded = True
-                    await page.reload(wait_until="domcontentloaded", timeout=30000)
-                    await page.wait_for_timeout(4000)
-                    continue
+                    if not page_reloaded and attempt == 0 and not is_h2h:
+                        self.log(f"Smart Refresh: Timed out waiting for ANY odds on {label}. Reloading page...")
+                        page_reloaded = True
+                        await page.reload(wait_until="domcontentloaded", timeout=30000)
+                        await page.wait_for_timeout(4000)
+                        continue
+                    else:
+                        return []
 
                 except Exception as e:
                     # We silently catch timeout exceptions to allow other odds to continue
@@ -1268,10 +1411,10 @@ class OddsPortalUpcomingNode(BaseNode):
         btts_2h = await navigate_and_scrape("Both Teams to Score", "2nd Half", 2)
         if btts_2h and len(btts_2h) >= 2: extracted_row["BTTS_2H_Yes"], extracted_row["BTTS_2H_No"] = btts_2h[:2]
 
-        # --- PHASE 5: OVER/UNDER EXPANSION PIPELINE ---
+        # --- PHASE 5: OVER/UNDER EXPANSION PIPELINE (FIXED) ---
         for attempt in range(2):
             try:
-                # Structurally click the Over/Under tab
+                # 1. Ensure the Over/Under tab is active
                 target = page.get_by_text(re.compile(r"^Over/Under$", re.I)).filter(visible=True).first
                 try:
                     await target.wait_for(timeout=5000)
@@ -1279,190 +1422,139 @@ class OddsPortalUpcomingNode(BaseNode):
                     pass
                 
                 if await target.count() == 0:
-                    # Try clicking 'More' first
                     more_regex = re.compile(r"^\s*More\s*$", re.I)
                     more_tab = page.get_by_text(more_regex).filter(visible=True).first
                     if await more_tab.count() > 0:
                         await more_tab.click()
-                        await page.wait_for_timeout(3000)
+                        await page.wait_for_timeout(2000)
                     target = page.get_by_text(re.compile(r"^Over/Under$", re.I)).filter(visible=True).first
 
                 if await target.count() > 0:
                     await target.click(timeout=3000)
-                    await page.wait_for_timeout(2000)
-                else:
-                    if not page_reloaded and attempt == 0:
-                        self.log("Smart Refresh: Over/Under tab missing. Reloading page...")
-                        page_reloaded = True
-                        await page.reload(wait_until="domcontentloaded", timeout=30000)
-                        await page.wait_for_timeout(3000)
-                        continue
-                    break
-                        
-                # Smart poll for Over/Under data to load and accordions to appear
-                empty_ou_count = 0
-                for _ in range(120):
-                    await page.wait_for_timeout(500)
-                    has_rows = await page.evaluate("""
-                        () => {
-                            if (document.querySelectorAll('[data-testid="over-under-collapsed-row"]').length > 0) return true;
-                            if (document.querySelectorAll('[data-testid="over-under-expanded-row"]').length > 0) return true;
-                            let hasLegacy = false;
-                            document.querySelectorAll('div, span, p').forEach(b => {
-                                let text = b.innerText || '';
-                                if (text.trim().match(/^Over\\/Under \\+\\d+(\\.\\d+)?$/i) && b.children.length === 0) hasLegacy = true;
-                            });
-                            return hasLegacy;
-                        }
-                    """)
-                    if has_rows:
-                        break
-                    
-                    state = await page.evaluate(get_evaluate_tab_state(["Over/Under"], None))
-                    if state["status"] == "empty_market":
-                        empty_ou_count += 1
-                        if empty_ou_count >= 30:
-                            break
-                    else:
-                        empty_ou_count = 0
-
-                if empty_ou_count >= 30:
-                    break
+                    await page.wait_for_timeout(2500)
                 
-                # Expand all the goal-line accordions so we can see the bookmaker odds
-                # We do this aggressively inside the extraction loop to handle newly loaded rows
-                # Smart poll for the odds extraction logic to find numbers!
-                ou_data = {}
-                for _ in range(60):
-                    await page.wait_for_timeout(500)
-                    ou_data = await page.evaluate(r"""
+                # 2. Expand only truly collapsed accordions
+                await page.evaluate(r"""
+                    () => {
+                        // Click modern collapsed rows
+                        document.querySelectorAll('[data-testid="over-under-collapsed-row"]').forEach(r => r.click());
+                        
+                        // Click table accordion rows if their next sibling isn't the bookmaker list
+                        let rows = Array.from(document.querySelectorAll('tr, div.flex')).filter(el => {
+                            let txt = el.innerText || '';
+                            return txt.match(/Over\/Under \+?\d+(\.\d+)?/i) || txt.match(/O\/U \+?\d+(\.\d+)?/i);
+                        });
+                        for (let r of rows) {
+                            let next = r.nextElementSibling;
+                            if (!next || (!next.innerText.includes('Bookmakers') && !next.querySelector('img, a'))) {
+                                r.click();
+                            }
+                        }
+                    }
+                """)
+                
+                # Allow React time to mount the expanded bookmaker sub-tables
+                await page.wait_for_timeout(3000)
+                
+                # 3. Robust extraction targeting Bet365 specifically
+                ou_data = await page.evaluate(r"""
                 () => {
                     let results = {};
-                    
-                    // Click any collapsed rows
-                    let modernRows = document.querySelectorAll('[data-testid="over-under-collapsed-row"]');
-                    if (modernRows.length > 0) {
-                        modernRows.forEach(row => row.click());
-                    }
-                    
-                    // --- 1. Robust Structured Extraction (Modern UI) ---
-                    let rows = document.querySelectorAll('[data-testid="over-under-expanded-row"]');
-                    if (rows.length > 0) {
-                        let lineCandidates = {};
-                        for (let row of rows) {
-                            let text = (row.textContent || row.innerText || "").trim();
-                            let isBet365 = text.toLowerCase().includes('bet365') || !!row.querySelector('[title*="bet365" i], [alt*="bet365" i]');
-                            
-                            let totalEl = row.querySelector('[data-testid="total-container"]');
-                            let providerDiv = row.querySelector('[provider-name]');
-                            let totalStr = totalEl ? (totalEl.textContent || "").trim() : (providerDiv ? providerDiv.getAttribute('provider-name') : "");
-                            
-                            let match = totalStr.match(/\+?(\d+(?:\.\d+)?)/);
-                            if (!match) continue;
-                            
-                            let val = match[1];
-                            if (!val.includes('.')) val = val + ".0";
-                            let line = "OU" + val.replace(".", "");
-                            
-                            let oddsEls = row.querySelectorAll('[data-testid="odd-container"] .odds-text, [data-testid="odd-container"] p, [data-testid="odd-container"] a.odds-link, [data-testid="odd-container"] a');
-                            let over = null, under = null;
-                            if (oddsEls.length >= 2) {
-                                over = parseFloat(oddsEls[0].textContent || oddsEls[0].innerText) || null;
-                                under = parseFloat(oddsEls[1].textContent || oddsEls[1].innerText) || null;
-                            } else {
-                                // Fallback for odds inside the row
-                                let odds = [];
-                                let tokens = text.split(/\s+/);
-                                for (let txt of tokens) {
-                                    if (txt.includes('%') || txt.toLowerCase().includes('payout')) continue;
-                                    if (txt === '-') {
-                                        odds.push(txt);
-                                    } else {
-                                        let cleanTxt = txt.replace(/[^0-9+.\\-]/g, '');
-                                        if (cleanTxt.match(/^[+-]?\d+\.\d+$/)) odds.push(cleanTxt);
-                                    }
-                                }
-                                if (odds.length >= 2) {
-                                    over = odds[0] === '-' ? null : parseFloat(odds[0]);
-                                    under = odds[1] === '-' ? null : parseFloat(odds[1]);
-                                }
-                            }
-                            
-                            if (over !== null && under !== null) {
-                                if (!lineCandidates[line]) lineCandidates[line] = [];
-                                lineCandidates[line].push({ isBet365, over, under });
-                            }
-                        }
-                        
-                        for (let line in lineCandidates) {
-                            let candidates = lineCandidates[line];
-                            if (candidates.length === 0) continue;
-                            // Prefer bet365, fallback to the first bookie found
-                            let selected = candidates.find(c => c.isBet365) || candidates[0];
-                            results[line + "_Over"] = selected.over;
-                            results[line + "_Under"] = selected.under;
-                        }
-                        
-                        if (Object.keys(results).length > 0) return results;
-                    }
-
-                    // --- 2. Fallback Generic Extraction (Legacy/Alternative UI) ---
                     let lineCandidates = {};
-                    let allNodes = Array.from(document.querySelectorAll('div, a')).filter(el => {
-                        let t = el.textContent || el.innerText || '';
-                        if (t.length > 150) return false;
-                        if (t.match(/Over\/Under \+?\d+(\.\d+)?/i)) return true;
-                        
-                        let oddsCount = (t.match(/\b\d+\.\d+\b/g) || []).length;
-                        return oddsCount >= 2;
-                    });
+                    let targetGoals = ["05", "15", "25", "35", "45", "55"];
                     
+                    let allTrs = Array.from(document.querySelectorAll('tr, div[data-testid="bookmaker-table-row"], div.border-b'));
                     let currentLine = null;
-                    for (let el of allNodes) {
-                        let text = el.textContent || el.innerText || "";
-                        let match = text.match(/Over\/Under \+?(\d+(?:\.\d+)?)/i);
-                        if (match) {
-                            let val = match[1];
-                            if (!val.includes('.')) val = val + ".0"; 
-                            currentLine = "OU" + val.replace(".", "");
+                    
+                    for (let row of allTrs) {
+                        let text = (row.innerText || '').trim();
+                        let headerMatch = text.match(/Over\/Under \+?(\d+(?:\.\d+)?)/i) || text.match(/O\/U \+?(\d+(?:\.\d+)?)/i);
+                        
+                        if (headerMatch && !text.includes('Bookmakers')) {
+                            let rawVal = headerMatch[1];
+                            let formattedVal = rawVal.includes('.') ? rawVal.replace('.', '') : rawVal + '0';
+                            if (formattedVal.length === 1) formattedVal = '0' + formattedVal;
+                            
+                            currentLine = "OU" + formattedVal;
                             if (!lineCandidates[currentLine]) lineCandidates[currentLine] = [];
-                        } else if (currentLine) {
-                            let odds = [];
-                            let tokens = text.split(/\s+/);
-                            for (let txt of tokens) {
-                                if (txt.includes('%') || txt.toLowerCase().includes('payout')) continue;
-                                if (txt === '-' || txt.match(/^[+-]?\d+\.\d+$/)) {
-                                    odds.push(txt);
-                                }
+                            
+                            // Extract fallback odds from header summary if present
+                            let rawNodes = Array.from(row.querySelectorAll('[data-testid*="odd-container"], .odds-text, p.font-bold, div.font-bold'));
+                            let oddsNodes = rawNodes.filter(node => !rawNodes.some(other => other !== node && other.contains(node)));
+                            let nums = oddsNodes.map(n => {
+                                let t = (n.innerText || n.textContent || '').trim();
+                                if (t.match(/[a-zA-Z]/)) return NaN;
+                                return parseFloat(t.replace(/[^0-9.]/g, ''));
+                            }).filter(n => !isNaN(n) && n > 1.0);
+                            if (nums.length >= 2) {
+                                lineCandidates[currentLine].push({ isBet365: false, over: nums[0], under: nums[1], isHeader: true });
                             }
-                            let finalOdds = odds.map(txt => txt === '-' ? null : parseFloat(txt));
-                            if (finalOdds.length >= 2) {
-                                let isBet365 = text.toLowerCase().includes('bet365') || !!el.querySelector('[title*="bet365" i], [alt*="bet365" i]');
-                                lineCandidates[currentLine].push({
-                                    isBet365: isBet365,
-                                    over: finalOdds[0],
-                                    under: finalOdds[1]
+                            continue;
+                        }
+                        
+                        // Check if row is a bookmaker entry under the active line
+                        if (currentLine) {
+                            let rowHtml = (row.innerHTML || '').toLowerCase();
+                            let rowText = text.toLowerCase();
+                            
+                            let isBet365 = rowText.includes('bet365') || 
+                                           rowHtml.includes('bet365') || 
+                                           !!row.querySelector('img[title*="bet365" i], img[alt*="bet365" i], a[href*="bet365" i]');
+                                           
+                            let isBookieRow = isBet365 || rowText.includes('%') || rowText.includes('payout') || !!row.querySelector('img');
+                            
+                            if (isBookieRow) {
+                                let rawNodes = Array.from(row.querySelectorAll('[data-testid*="odd-container"], .odds-text, p.font-bold, div.font-bold, td:nth-child(3), td:nth-child(4)'));
+                                let oddsNodes = rawNodes.filter(node => {
+                                    let td = node.closest('td');
+                                    if (td && td.cellIndex === 0) return false;
+                                    if (node.closest('[data-testid*="bookmaker"]')) return false;
+                                    return !rawNodes.some(other => other !== node && other.contains(node));
                                 });
+                                let nums = oddsNodes.map(n => {
+                                    let t = (n.innerText || n.textContent || '').trim();
+                                    if (t.match(/[a-zA-Z]/)) return NaN;
+                                    
+                                    // FIX: Explicitly block numeric bookmaker fragments
+                                    if (t === '365' || t === '888' || t === '1') return NaN;
+                                    
+                                    // FIX: Ensure the string represents a standard odds format
+                                    let isOddFormat = t.includes('.') || t.includes('/') || t.startsWith('+') || t.startsWith('-');
+                                    if (!isOddFormat) return NaN;
+                                    
+                                    return parseFloat(t.replace(/[^0-9.]/g, ''));
+                                }).filter(n => !isNaN(n) && n > 1.0);
+                                
+                                if (nums.length >= 2) {
+                                    lineCandidates[currentLine].push({ isBet365: isBet365, over: nums[0], under: nums[1], isHeader: false });
+                                }
                             }
                         }
                     }
                     
+                    // Prioritize Bet365 > First Specific Bookmaker > Header Average
                     for (let line in lineCandidates) {
                         let candidates = lineCandidates[line];
-                        if (candidates.length === 0) continue;
-                        let selected = candidates.find(c => c.isBet365) || candidates[0];
-                        results[line + "_Over"] = selected.over;
-                        results[line + "_Under"] = selected.under;
+                        if (!candidates || candidates.length === 0) continue;
+                        
+                        let chosen = candidates.find(c => c.isBet365) || 
+                                     candidates.find(c => !c.isHeader) || 
+                                     candidates[0];
+                                     
+                        results[line + "_Over"] = chosen.over;
+                        results[line + "_Under"] = chosen.under;
                     }
-
+                    
                     return results;
                 }
                 """)
-                    if ou_data and len(ou_data.keys()) > 0:
-                        extracted_row.update(ou_data)
-                        break
-                break
+                
+                if ou_data and any(v is not None for v in ou_data.values()):
+                    extracted_row.update(ou_data)
+                    break
             except Exception as e:
+                if hasattr(self, "log"):
+                    self.log(f"Error extracting Over/Under lines: {e}")
                 break
 
         watcher_task.cancel()
