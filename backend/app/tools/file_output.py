@@ -44,6 +44,7 @@ class FileOutputNode(BaseNode):
             {"field": "saveFile", "type": "boolean", "label": "Write to Disk", "default": True},
             {"field": "outputPath", "type": "string", "label": "Output Path / File Name", "default": "output.csv"},
             {"field": "outputFormat", "type": "select", "label": "Output Format", "options": ["csv", "excel", "parquet", "json", "jsonl", "avro", "html"], "default": "csv"},
+            {"field": "writeMode", "type": "select", "label": "Write Mode", "options": ["overwrite", "append"], "default": "overwrite"},
             {"field": "sheetName", "type": "string", "label": "Sheet Name (Excel Only)", "default": "Sheet1"}
         ]
     }
@@ -117,8 +118,15 @@ class FileOutputNode(BaseNode):
     def _write_csv(self, df: pl.DataFrame, file_path: str) -> None:
         if "__vibe_html_payload__" in df.columns:
             raise ValueError("Attempted to write an HTML payload as a CSV. Please change the Output Format to HTML.")
-        self.log(f"Writing CSV file to {file_path}")
-        df.write_csv(file_path)
+            
+        write_mode = self.parameters.get("writeMode", "overwrite").lower()
+        if write_mode == "append" and os.path.exists(file_path):
+            self.log(f"Appending {df.height} rows to existing CSV file at {file_path}")
+            with open(file_path, "a", newline="", encoding="utf-8") as f:
+                df.write_csv(f, include_header=False)
+        else:
+            self.log(f"Writing CSV file to {file_path}")
+            df.write_csv(file_path)
         
     def _write_excel(self, df: pl.DataFrame, file_path: str) -> None:
         if "__vibe_html_payload__" in df.columns:
@@ -157,8 +165,15 @@ class FileOutputNode(BaseNode):
     def _write_jsonl(self, df: pl.DataFrame, file_path: str) -> None:
         if "__vibe_html_payload__" in df.columns:
             raise ValueError("Attempted to write an HTML payload as a JSONL file. Please change the Output Format to HTML.")
-        self.log(f"Writing JSONL (Newline Delimited JSON) file to {file_path}")
-        df.write_ndjson(file_path)
+            
+        write_mode = self.parameters.get("writeMode", "overwrite").lower()
+        if write_mode == "append" and os.path.exists(file_path):
+            self.log(f"Appending {df.height} rows to existing JSONL file at {file_path}")
+            with open(file_path, "ab") as f:
+                df.write_ndjson(f)
+        else:
+            self.log(f"Writing JSONL (Newline Delimited JSON) file to {file_path}")
+            df.write_ndjson(file_path)
 
     def _write_avro(self, df: pl.DataFrame, file_path: str) -> None:
         if "__vibe_html_payload__" in df.columns:

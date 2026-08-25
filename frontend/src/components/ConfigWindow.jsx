@@ -1574,6 +1574,16 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             <option value="html">HTML (Interactive)</option>
           </SafeSelect>
         </div>
+
+        {(outputFormat === 'csv' || outputFormat === 'jsonl') && (
+          <div className="form-group">
+            <label className="form-label">Write Mode</label>
+            <SafeSelect value={parameters.writeMode || 'overwrite'} onChange={(e) => handleParamChange('writeMode', e.target.value)}>
+              <option value="overwrite">Overwrite existing file</option>
+              <option value="append">Append to existing file</option>
+            </SafeSelect>
+          </div>
+        )}
       </>
     );
   };
