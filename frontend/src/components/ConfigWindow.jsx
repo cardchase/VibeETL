@@ -1533,7 +1533,8 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
             className="file-upload-zone"
             onClick={async () => {
               try {
-                const res = await fetch(`${API_BASE}/api/pick_save_file`);
+                const currentMode = parameters.writeMode || 'overwrite';
+                const res = await fetch(`${API_BASE}/api/pick_save_file?mode=${currentMode}`);
                 const data = await res.json();
                 if (data.file_path) {
                   handleParamChange('outputPath', data.file_path);

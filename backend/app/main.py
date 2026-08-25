@@ -277,7 +277,7 @@ async def execute_dag(pipeline: Dict[str, Any] = Body(...)):
 
 
 @app.get("/api/pick_save_file")
-def pick_save_file():
+def pick_save_file(mode: str = "overwrite"):
     """Opens a native OS file dialog to pick a save destination for outputs."""
     try:
         import tkinter as tk
@@ -288,6 +288,7 @@ def pick_save_file():
         file_path = filedialog.asksaveasfilename(
             title="Select Output Save Location",
             defaultextension=".csv",
+            confirmoverwrite=(mode != "append"),
             filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("Parquet files", "*.parquet"), ("JSON files", "*.json"), ("HTML files", "*.html"), ("All files", "*.*")]
         )
         root.destroy()
