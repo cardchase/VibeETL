@@ -40,6 +40,7 @@ from app.tools.transpose import TransposeNode
 from app.tools.soccer_reader import SoccerReaderNode
 from app.tools.data_profiler import DataProfilerNode
 from app.tools.odds_portal_historical import OddsPortalScraperNode
+from app.tools.odds_portal_historical_v2 import OddsPortalScraperNodeV2
 from app.tools.odds_portal_upcoming import OddsPortalUpcomingNode
 from app.tools.predictor import PredictorNode
 from app.tools.odds_analyzer import OddsAnalyzerNode
@@ -86,6 +87,7 @@ NODE_CLASSES = {
     "soccer_reader": SoccerReaderNode,
     "data_profiler": DataProfilerNode,
     "odds_portal_scraper": OddsPortalScraperNode,
+    "odds_portal_scraper_v2": OddsPortalScraperNodeV2,
     "odds_portal_upcoming": OddsPortalUpcomingNode,
     "predictor": PredictorNode,
     "odds_analyzer": OddsAnalyzerNode,
