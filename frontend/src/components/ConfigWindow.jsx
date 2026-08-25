@@ -187,6 +187,15 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   const [sortColumn, setSortColumn] = useState('');
   const [sortOrder, setSortOrder] = useState('asc');
 
+  // Formula expansion state
+  const [expandedFormulas, setExpandedFormulas] = useState({});
+  const toggleFormulaExpand = (idx) => {
+    setExpandedFormulas(prev => ({
+      ...prev,
+      [idx]: prev[idx] === false ? true : false
+    }));
+  };
+
   // Universal Drag & Drop Handlers for rule arrays
   const dragItemRef = useRef(null);
   const dragOverItemRef = useRef(null);
@@ -1809,16 +1818,30 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ color: 'var(--text-muted)', cursor: 'grab' }}>⋮⋮</span>
-                      <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)' }}>Operation {idx + 1}</span>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                        {f.output_column ? `Formula: ${f.output_column}` : `Operation ${idx + 1}`}
+                      </span>
                     </div>
-                    <button 
-                      onClick={() => handleRemoveFormula(idx)}
-                      style={{ background: 'none', border: 'none', color: 'var(--color-error)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                      title="Remove Formula"
-                    >
-                      <X size={14} />
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button
+                        onClick={() => toggleFormulaExpand(idx)}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                        title={expandedFormulas[idx] === false ? "Expand" : "Collapse"}
+                      >
+                        {expandedFormulas[idx] === false ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                      </button>
+                      <button 
+                        onClick={() => handleRemoveFormula(idx)}
+                        style={{ background: 'none', border: 'none', color: 'var(--color-error)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                        title="Remove Formula"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
                   </div>
+                  
+                  {expandedFormulas[idx] !== false && (
+                    <>
                   
                   <div className="form-group" style={{ marginBottom: 0, cursor: 'default' }}>
                     <label className="form-label" style={{ fontSize: '0.7rem' }}>Target Column (Existing or New)</label>
@@ -1886,6 +1909,8 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
                       height="120px"
                     />
                   </div>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
