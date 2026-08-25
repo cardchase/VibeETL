@@ -76,6 +76,17 @@ Example: `Regex_Replace([Phone], "[^0-9]", "")` (Removes all non-numeric charact
 - `Round([Column], decimals)`: Rounds a numeric column to the specified decimal places.
 Example: `Round([Revenue] / 3, 2)`
 
+9. Date & Time Functions
+------------------------
+- `DateTimeNow()`: Returns the current local timestamp.
+- `DateTimeToday()`: Returns the current local date (without time).
+- `DateTimeUTC()`: Returns the current UTC timestamp.
+- `DateTimeFormat([Column], "format")`: Converts a datetime column to a string using standard format codes (e.g., "%Y-%m-%d").
+- `DateTimeParse([Column], "format")`: Parses a string column into a datetime object.
+- `DateTimeYear([Column])`: Extracts the year as an integer.
+- `DateTimeMonth([Column])`: Extracts the month as an integer.
+- `DateTimeDay([Column])`: Extracts the day as an integer.
+
 ==============================================
 EDGE CASES & BEHAVIORAL NOTES
 ==============================================

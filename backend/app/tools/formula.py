@@ -1,6 +1,7 @@
 import polars as pl
 import re
 import ast
+import datetime
 from typing import Dict, Any
 from app.tools.base import BaseNode, SecurityError
 
@@ -153,7 +154,15 @@ class FormulaNode(BaseNode):
             "ToNumber": lambda col: col.cast(pl.Float64),
             "Round": lambda col, decimals: col.round(decimals),
             "IsNull": lambda col: col.is_null(),
-            "IsNotNull": lambda col: col.is_not_null()
+            "IsNotNull": lambda col: col.is_not_null(),
+            "DateTimeNow": lambda: pl.lit(datetime.datetime.now()),
+            "DateTimeToday": lambda: pl.lit(datetime.datetime.today().date()),
+            "DateTimeUTC": lambda: pl.lit(datetime.datetime.now(datetime.timezone.utc)),
+            "DateTimeYear": lambda col: col.dt.year(),
+            "DateTimeMonth": lambda col: col.dt.month(),
+            "DateTimeDay": lambda col: col.dt.day(),
+            "DateTimeFormat": lambda col, fmt: col.dt.to_string(fmt),
+            "DateTimeParse": lambda col, fmt: col.str.strptime(pl.Datetime, fmt)
         }
 
         for formula_config in formulas:
