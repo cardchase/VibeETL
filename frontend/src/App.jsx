@@ -171,14 +171,20 @@ const resolveNodeSchema = (nodeId, nodes, edges, results = {}) => {
 
   // Formula node appends or replaces a column
   if (node.type === 'formula') {
-    const outputCol = node.data?.parameters?.output_column;
-    if (outputCol) {
-      const exists = upstreamSchema.some(c => c.name === outputCol);
-      if (!exists) {
-        return [...upstreamSchema, { name: outputCol, type: 'String' }];
+    let currentSchema = [...upstreamSchema];
+    const formulas = node.data?.parameters?.formulas || [];
+
+    formulas.forEach(f => {
+      if (f.output_column) {
+        const exists = currentSchema.find(c => c.name === f.output_column);
+        if (!exists) {
+          currentSchema.push({ name: f.output_column, type: f.data_type || 'String' });
+        } else {
+          exists.type = f.data_type || 'String';
+        }
       }
-    }
-    return upstreamSchema;
+    });
+    return currentSchema;
   }
 
   // Record ID appends a column
@@ -1409,6 +1415,13 @@ function App({ isSandbox = false }) {
         category = 'inout';
         icon = 'Database';
         defaultParams = { filePath: '', fileType: 'auto' };
+      } else if (type === 'formula') {
+        label = 'Formula';
+        category = 'prep';
+        icon = 'Calculator';
+        defaultParams = { 
+          formulas: [{ output_column: 'NewColumn', expression: '', data_type: 'String' }] 
+        };
       } else if (type === 'fileOutput') {
         label = 'File Output';
         category = 'inout';
@@ -1469,11 +1482,6 @@ function App({ isSandbox = false }) {
         category = 'prep';
         icon = 'Sparkles';
         defaultParams = { columns: [], replace_nulls_string: false, replace_nulls_numeric: false, trim_whitespace: false, remove_punctuation: false };
-      } else if (type === 'formula') {
-        label = 'Formula';
-        category = 'prep';
-        icon = 'Calculator';
-        defaultParams = { output_column: 'NewColumn', expression: '' };
       } else if (type === 'unique') {
         label = 'Unique';
         category = 'prep';

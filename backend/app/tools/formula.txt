@@ -2,10 +2,83 @@ Formula Node
 
 Formula Compute Node
 
-Calculate new columns or overwrite existing ones using expressions.
+Calculate new columns or overwrite existing ones using expressions. Supports advanced conditional logic, regex, string manipulation, math utilities, and type casting mapped natively to high-performance Polars operations.
 
 Parameters:
-- output_column (String): Name of the column to output the calculation to.
-- expression (String): The math/text formula (e.g. [A] + [B]).
+- formulas (Array): A list of objects containing:
+  - output_column (String): Name of the column to output the calculation to.
+  - expression (String): The formula expression (e.g., `[A] + [B]`).
+  - data_type (String): Target cast type (String, Int64, Float64, Boolean).
 
-Schema Output: Appends the new output_column or overwrites its type if it already exists.
+Schema Output: Appends new output_columns or overwrites types if they already exist, sequentially evaluating multiple formulas.
+
+==============================================
+SUPPORTED OPERATIONS & SYNTAX
+==============================================
+
+1. Column References
+--------------------
+Always enclose column names in square brackets.
+Syntax: `[Column Name]`
+Example: `[Price] * [Tax Rate]`
+
+2. Conditional Logic (Nested & Chained)
+---------------------------------------
+Standard Alteryx/SQL syntax for conditional assignments. Fully supports deep nesting.
+Syntax: `IF condition THEN value ELSEIF condition THEN value ELSE value ENDIF`
+Example: 
+  `IF [Age] > 65 THEN "Senior" ELSEIF [Age] >= 18 THEN "Adult" ELSE "Minor" ENDIF`
+
+Nested Example:
+  `IF [Status] == "Active" THEN (IF [Tenure] > 5 THEN "Vested" ELSE "Unvested" ENDIF) ELSE "Inactive" ENDIF`
+
+3. Logical Operators
+--------------------
+Use `AND` or `OR` to combine conditions.
+Example: `IF [Score] > 90 AND [Attendance] >= 95 THEN "A+" ENDIF`
+
+4. Null Handling
+----------------
+Check for missing values directly.
+- `[Column] IS NULL`
+- `[Column] IS NOT NULL`
+- `IsNull([Column])`
+- `IsNotNull([Column])`
+Example: `IF [Email] IS NULL THEN "No Email" ELSE [Email] ENDIF`
+
+5. Math & Comparison Operators
+------------------------------
+Standard Python/Polars operators are supported natively:
+`>`, `<`, `>=`, `<=`, `==`, `!=`, `+`, `-`, `*`, `/`
+
+6. Text Functions
+-----------------
+- `Contains([Column], "text")`: Returns True if the column contains the string.
+- `StartsWith([Column], "prefix")`: Returns True if it starts with the prefix.
+- `EndsWith([Column], "suffix")`: Returns True if it ends with the suffix.
+- `Replace([Column], "old", "new")`: Replaces all literal occurrences of "old" with "new".
+- `Uppercase([Column])` or `Upper([Column])`: Converts text to UPPERCASE.
+- `Lowercase([Column])` or `Lower([Column])`: Converts text to lowercase.
+- `Length([Column])`: Returns the number of characters.
+- `Trim([Column])`: Removes leading and trailing whitespace.
+
+7. Regex Operations
+-------------------
+- `Regex_Match([Column], "pattern")`: Returns True if the regex pattern matches the text.
+- `Regex_Replace([Column], "pattern", "replacement")`: Replaces matches of the regex pattern.
+- `Regex_Extract([Column], "pattern")`: Extracts the first match of the regex pattern.
+Example: `Regex_Replace([Phone], "[^0-9]", "")` (Removes all non-numeric characters)
+
+8. Type Casting & Math Utilities
+--------------------------------
+- `ToString([Column])`: Casts the value to a String (Utf8).
+- `ToNumber([Column])`: Casts the value to a Float64.
+- `Round([Column], decimals)`: Rounds a numeric column to the specified decimal places.
+Example: `Round([Revenue] / 3, 2)`
+
+==============================================
+EDGE CASES & BEHAVIORAL NOTES
+==============================================
+- Missing ELSE Statements: If an `IF` statement lacks an `ELSE` and the condition evaluates to False, the cell resolves to `null`.
+- Escaping Strings: Use standard double `""` or single `''` quotes for text literals. The parser safely masks strings to protect internal keywords (e.g., `Contains([Text], "THEN")` will not break the parser).
+- Parenthesis Grouping: Use parentheses `()` to enforce order of operations within math logic or nested conditionals.

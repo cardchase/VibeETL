@@ -1,6 +1,7 @@
 import polars as pl
 import pandas as pd
 import xgboost as xgb
+import numpy as np
 import logging
 from typing import Dict
 from app.tools.base import BaseNode
@@ -28,20 +29,6 @@ class PredictorNode(BaseNode):
                 "type": "column_multi_select",
                 "label": "🎯 Target Columns (What to Predict)",
                 "default": ["FT_HomeScore", "FT_AwayScore"]
-            },
-            {
-                "field": "personality",
-                "type": "select",
-                "label": "🎭 Prediction Personality",
-                "options": [
-                    "Conservative (Default, Most Accurate)", 
-                    "Exciting (High Scoring & Upsets)", 
-                    "Underdog Seeker (Boosts Weaker Teams)", 
-                    "Defensive Stalemate (Low Scoring)",
-                    "Form-Heavy (Recency Bias)",
-                    "All Personalities (Outputs Multiple Columns)"
-                ],
-                "default": "Conservative (Default, Most Accurate)"
             },
             {
                 "field": "taskType",
@@ -74,7 +61,6 @@ class PredictorNode(BaseNode):
 
         target_cols = self.parameters.get("targetColumns", ["FT_HomeScore", "FT_AwayScore"])
         task_type = self.parameters.get("taskType", "Auto-Detect")
-        personality = self.parameters.get("personality", "Conservative (Default, Most Accurate)")
 
         if not target_cols:
             self.log("No target columns selected for Predictor.")
@@ -85,10 +71,17 @@ class PredictorNode(BaseNode):
         for target in target_cols:
             if target in df.columns:
                 # Replace empty strings with None so they are properly detected as nulls
-                df = df.with_columns(pl.when(pl.col(target) == "").then(None).otherwise(pl.col(target)).alias(target))
+                if df[target].dtype in (pl.Utf8, getattr(pl, 'String', None)):
+                    df = df.with_columns(pl.when(pl.col(target) == "").then(None).otherwise(pl.col(target)).alias(target))
 
         # We will hold the output DataFrame which will just be `df` with new columns
         full_pd = df.to_pandas()
+        
+        import pandas as pd
+        # Force numeric types for odds features that may have been imported as strings due to empty/null values
+        for col in full_pd.columns:
+            if 'Odds' in col or 'Over' in col or 'Under' in col or 'BTTS_' in col or 'DNB_' in col or 'DC_' in col:
+                full_pd[col] = pd.to_numeric(full_pd[col], errors='coerce')
         
         # Enterprise Anti-Leakage: Post-match outcomes that MUST be hidden to prevent cheating
         post_match_outcomes = {
@@ -97,64 +90,10 @@ class PredictorNode(BaseNode):
             'SH_HomeScore', 'SH_AwayScore',
             'Match_Status', 'Winner', 'Result'
         }
-        
-        def apply_personality(predictions, is_classification, is_poisson, personality_type, target_name, df_full=None):
-            if is_classification or not is_poisson:
-                return predictions
-                
-            if "Conservative" in personality_type:
-                return predictions
             
-            import numpy as np
-            preds_array = np.array(predictions, dtype=float)
-            
-            # Preserve relative distribution dynamics instead of flat multiplication
-            if "Exciting" in personality_type:
-                # Push the lambda harder to shift the Poisson mode from 1 goal to 3 goals
-                preds_array = np.where(preds_array > 1.0, preds_array * 1.5 + 0.4, preds_array * 1.25)
-                self.log(f"💥 Applied 'Exciting' personality to {target_name} (Aggressive attacking boost)")
-                
-            elif "Defensive" in personality_type:
-                # Squash expected goals heavily by a percentage to force 0-0 or 1-0 modes
-                preds_array = np.maximum(0.1, preds_array * 0.6)
-                self.log(f"🛡️ Applied 'Defensive' personality to {target_name} (Heavy defensive suppression)")
-                
-            elif "Underdog" in personality_type:
-                # Invert the traditional strengths drastically to force upset modes
-                if "Away" in target_name:
-                    preds_array = preds_array * 1.4 + 0.5
-                    self.log(f"🐕 Applied 'Underdog' personality to {target_name} (Massive Away boost)")
-                else:
-                    preds_array = preds_array * 0.8
-                    self.log(f"🐕 Applied 'Underdog' personality to {target_name} (Home penalty)")
-            elif "Form-Heavy" in personality_type and not is_classification and df_full is not None:
-                team_type = "HomeTeam" if "Home" in target_name else "AwayTeam"
-                form_col = None
-                for c in df_full.columns:
-                    if team_type in c and "Form_Last5_Pts" in c:
-                        form_col = c
-                        break
-                if form_col:
-                    form_vals = df_full[form_col].fillna(7.0).values
-                    # Base is ~7 pts. 0 pts = 0.7x multiplier, 15 pts = 1.3x multiplier
-                    scale_factor = 0.7 + (form_vals / 15.0) * 0.6
-                    preds_array = preds_array * scale_factor
-                    self.log(f"🔥 Applied 'Form-Heavy' personality to {target_name} (Form multiplier applied)")
-                    
-            return preds_array
-            
-        def store_predictions(raw_preds, is_class, is_poiss, p_type, tgt, df_full, msg_suffix=""):
-            if "All Personalities" in p_type:
-                # Always provide the raw base prediction as the root column
-                df_full[f"Predicted_{tgt}"] = apply_personality(raw_preds, is_class, is_poiss, "Conservative", tgt, df_full)
-                
-                for p_name in ["Conservative", "Exciting", "Underdog", "Defensive", "Form-Heavy"]:
-                    adj_preds = apply_personality(raw_preds, is_class, is_poiss, p_name, tgt, df_full)
-                    df_full[f"Predicted_{tgt}_{p_name}"] = adj_preds
-            else:
-                adj_preds = apply_personality(raw_preds, is_class, is_poiss, p_type, tgt, df_full)
-                df_full[f"Predicted_{tgt}"] = adj_preds
-            self.log(f"Generated predictions for {len(df_infer)} empty rows{msg_suffix}.")
+        def store_predictions(raw_preds, is_class, is_poiss, tgt, df_full, msg_suffix=""):
+            df_full[f"Predicted_{tgt}"] = raw_preds
+            self.log(f"Generated predictions for empty rows{msg_suffix}.")
         
         for target in target_cols:
             if target not in df.columns:
@@ -175,7 +114,7 @@ class PredictorNode(BaseNode):
             
             # Automatically drop high-cardinality or metadata string columns that cause the model to overfit/fail
             for col in full_pd.columns:
-                if col not in features_to_drop and (full_pd[col].dtype == 'object' or str(full_pd[col].dtype) == 'string'):
+                if col not in features_to_drop and (pd.api.types.is_string_dtype(full_pd[col]) or pd.api.types.is_object_dtype(full_pd[col])):
                     unique_count = full_pd[col].nunique()
                     # Drop Date, Time, URL, and any column with massive unique categories (>50% or >1000)
                     if unique_count > 1000 or 'url' in col.lower() or 'date' in col.lower() or 'time' in col.lower():
@@ -190,7 +129,7 @@ class PredictorNode(BaseNode):
 
             # 1. Convert categories on the FULL dataframe first to prevent XGBoost category mismatch
             for col in feature_cols:
-                if full_pd[col].dtype == 'object' or str(full_pd[col].dtype) == 'string':
+                if pd.api.types.is_string_dtype(full_pd[col]) or pd.api.types.is_object_dtype(full_pd[col]):
                     full_pd[col] = full_pd[col].astype('category')
 
             # 2. Slice train_pd AFTER categorical conversion so dtypes match perfectly
@@ -205,8 +144,8 @@ class PredictorNode(BaseNode):
             if task_type == "Auto-Detect":
                 if "Score" in target or "Goal" in target:
                     is_poisson = True
-                    self.log("Auto-detected Poisson task (Count Data).")
-                    # Force cast to float in case Select tool made it a string
+                    self.log("Auto-detected Poisson task (Count Data). Using Market-Prior Residual Modeling.")
+                    # Force cast to float
                     import pandas as pd
                     train_pd[target] = pd.to_numeric(train_pd[target], errors='coerce')
                     full_pd[target] = pd.to_numeric(full_pd[target], errors='coerce')
@@ -222,7 +161,7 @@ class PredictorNode(BaseNode):
                 is_classification = True
             else:
                 is_poisson = True
-                self.log("Auto-detected Poisson task.")
+                self.log("Auto-detected Poisson task. Using Market-Prior Residual Modeling.")
 
             # Categorical features are already encoded on full_pd above
             X_train_full = train_pd[feature_cols]
@@ -235,10 +174,52 @@ class PredictorNode(BaseNode):
                 labels = y_train_full.unique().tolist()
                 label_map = {k: v for v, k in enumerate(labels)}
                 y_train_full = y_train_full.map(label_map)
+                
+            full_market_lambda = None
+            if is_poisson:
+                self.log(f"Applying Market-Prior Residual Modeling for {target}")
+                market_lambda = np.ones(len(full_pd)) * (1.45 if "Home" in target else 1.15)
+                
+                # Try to extract from odds if available
+                if 'FT_HomeOdds' in full_pd.columns and 'FT_AwayOdds' in full_pd.columns and 'FT_DrawOdds' in full_pd.columns:
+                    home_odds = pd.to_numeric(full_pd['FT_HomeOdds'], errors='coerce').replace(0, np.nan)
+                    draw_odds = pd.to_numeric(full_pd['FT_DrawOdds'], errors='coerce').replace(0, np.nan)
+                    away_odds = pd.to_numeric(full_pd['FT_AwayOdds'], errors='coerce').replace(0, np.nan)
+                    
+                    prob_h = 1 / home_odds
+                    prob_d = 1 / draw_odds
+                    prob_a = 1 / away_odds
+                    total_prob = prob_h + prob_d + prob_a
+                    prob_h /= total_prob
+                    prob_d /= total_prob
+                    prob_a /= total_prob
+                    
+                    expected_goals = np.ones(len(full_pd)) * 2.5
+                    if 'OU25_Over' in full_pd.columns and 'OU25_Under' in full_pd.columns:
+                        over_odds = pd.to_numeric(full_pd['OU25_Over'], errors='coerce').replace(0, np.nan)
+                        under_odds = pd.to_numeric(full_pd['OU25_Under'], errors='coerce').replace(0, np.nan)
+                        prob_o = 1 / over_odds
+                        prob_u = 1 / under_odds
+                        total_ou = prob_o + prob_u
+                        prob_o /= total_ou
+                        expected_goals = 1.0 + prob_o * 3.0
+                    
+                    market_lambda_H = expected_goals * (prob_h + 0.5 * prob_d)
+                    market_lambda_A = expected_goals * (prob_a + 0.5 * prob_d)
+                    
+                    if "Home" in target:
+                        market_lambda = market_lambda_H.fillna(1.45).values
+                    else:
+                        market_lambda = market_lambda_A.fillna(1.15).values
+
+                train_market_lambda = market_lambda[full_pd[target].notnull()]
+                full_market_lambda = market_lambda
+                
+                # Use base_margin instead of transforming the target
+                train_base_margin = np.log(np.maximum(0.05, train_market_lambda))
+                full_base_margin = np.log(np.maximum(0.05, full_market_lambda))
+                
             # Dynamic Depth based on dataset size
-            # Small dataset (<5k) -> depth 4 to prevent overfitting
-            # Medium dataset -> depth 6
-            # Large dataset (>20k) -> depth 8
             if len(train_pd) < 5000:
                 dynamic_depth = 4
             elif len(train_pd) < 20000:
@@ -250,7 +231,6 @@ class PredictorNode(BaseNode):
             params = {
                 "tree_method": "hist",
                 "device": "cuda",             # GPU Acceleration
-                "enable_categorical": True,
                 "learning_rate": 0.05,
                 "max_depth": dynamic_depth,
                 "n_estimators": 1000,
@@ -265,52 +245,85 @@ class PredictorNode(BaseNode):
             try:
                 # TRAIN / TEST EVALUATION CYCLE
                 if len(train_pd) > 10:
-                    # Chronological Train/Test Split (Preserves Time Order)
                     split_idx = int(len(X_train_full) * 0.8)
                     X_tr, X_te = X_train_full.iloc[:split_idx], X_train_full.iloc[split_idx:]
                     y_tr, y_te = y_train_full.iloc[:split_idx], y_train_full.iloc[split_idx:]
                     
                     if is_classification:
-                        eval_model = xgb.XGBClassifier(early_stopping_rounds=30, **params)
+                        eval_model = xgb.XGBClassifier(early_stopping_rounds=30, enable_categorical=True, **params)
                         eval_model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
                         best_iteration = eval_model.best_iteration
+                        eval_model.set_params(device="cpu")
                         eval_preds = eval_model.predict(X_te)
                         acc = accuracy_score(y_te, eval_preds) * 100
                         self.log(f"Evaluated Chronological Blind Accuracy: {acc:.2f}%")
+                    elif is_poisson:
+                        # Scikit-learn API model.fit doesn't support base_margin natively via fit params in all versions, 
+                        # so we use xgb.train for Poisson evaluation to pass base_margin properly.
+                        tr_margin = train_base_margin[:split_idx]
+                        te_margin = train_base_margin[split_idx:]
+                        
+                        dtrain = xgb.DMatrix(X_tr, label=y_tr, base_margin=tr_margin, enable_categorical=True)
+                        dvalid = xgb.DMatrix(X_te, label=y_te, base_margin=te_margin, enable_categorical=True)
+                        
+                        xgb_params = params.copy()
+                        n_ests = xgb_params.pop("n_estimators")
+                        eval_model = xgb.train(xgb_params, dtrain, num_boost_round=n_ests, evals=[(dvalid, 'eval')], early_stopping_rounds=30, verbose_eval=False)
+                        best_iteration = eval_model.best_iteration
+                        
+                        eval_preds = eval_model.predict(dvalid)
+                        mae = mean_absolute_error(y_te, eval_preds)
+                        self.log(f"Evaluated Chronological Blind Error (MAE): {mae:.3f}")
                     else:
-                        eval_model = xgb.XGBRegressor(early_stopping_rounds=30, **params)
+                        eval_model = xgb.XGBRegressor(early_stopping_rounds=30, enable_categorical=True, **params)
                         eval_model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
                         best_iteration = eval_model.best_iteration
+                        eval_model.set_params(device="cpu")
                         eval_preds = eval_model.predict(X_te)
                         mae = mean_absolute_error(y_te, eval_preds)
-                        self.log(f"Evaluated Chronological Blind Accuracy (MAE): {mae:.3f}")
+                        self.log(f"Evaluated Chronological Blind Error (MAE): {mae:.3f}")
                 else:
                     self.log("Skipped Out-of-Sample Evaluation: Not enough historical data (< 10 rows). Proceeding directly to full training & prediction.")
 
-                # FINAL RETRAINING ON 100% OF DATA
-                # Scale best_iteration up by 25% because we are training on 100% instead of 80%
                 final_estimators = max(10, int(best_iteration * 1.25))
                 params["n_estimators"] = final_estimators
                 
                 if is_classification:
-                    model = xgb.XGBClassifier(**params)
+                        model = xgb.XGBClassifier(enable_categorical=True, **params)
+                        model.fit(X_train_full, y_train_full)
+                        model.set_params(device="cpu")
+                        preds = model.predict(X_full)
+                elif is_poisson:
+                    # Final train with base_margin
+                    dtrain_full = xgb.DMatrix(X_train_full, label=y_train_full, base_margin=train_base_margin, enable_categorical=True)
+                    dfull = xgb.DMatrix(X_full, base_margin=full_base_margin, enable_categorical=True)
+                    xgb_params = params.copy()
+                    n_ests = xgb_params.pop("n_estimators")
+                    model = xgb.train(xgb_params, dtrain_full, num_boost_round=n_ests)
+                    preds = model.predict(dfull)
                 else:
-                    model = xgb.XGBRegressor(**params)
-                    
-                model.fit(X_train_full, y_train_full)
+                    model = xgb.XGBRegressor(enable_categorical=True, **params)
+                    model.fit(X_train_full, y_train_full)
+                    model.set_params(device="cpu")
+                    preds = model.predict(X_full)
                 
-                # Predict on the full dataset (null rows + existing rows)
-                preds = model.predict(X_full)
-                
-                # Reverse map labels if classification
                 if is_classification and label_map:
                     reverse_map = {v: k for k, v in label_map.items()}
                     preds = [reverse_map.get(p, p) for p in preds]
                 
-                store_predictions(preds, is_classification, is_poisson, personality, target, full_pd)
+                store_predictions(preds, is_classification, is_poisson, target, full_pd)
                 
-                # Log feature importances
-                importance = model.feature_importances_
+                if hasattr(model, 'feature_importances_'):
+                    importance = model.feature_importances_
+                elif hasattr(model, 'get_score'):
+                    importance_dict = model.get_score(importance_type='gain')
+                    # Convert dict to array matching feature_cols
+                    importance = [importance_dict.get(f, 0.0) for f in feature_cols]
+                    total_imp = sum(importance) if sum(importance) > 0 else 1
+                    importance = [x / total_imp for x in importance]
+                else:
+                    importance = [0.0] * len(feature_cols)
+                    
                 feat_imp = sorted(zip(feature_cols, importance), key=lambda x: x[1], reverse=True)
                 self.log("Top Decision Patterns:")
                 for f, imp in feat_imp[:5]:
@@ -318,24 +331,94 @@ class PredictorNode(BaseNode):
                     
             except Exception as e:
                 self.log(f"XGBoost GPU failed for {target}: {e}. Retrying on CPU...")
-                # Fallback to CPU
                 try:
                     params["device"] = "cpu"
                     if is_classification:
                         model = xgb.XGBClassifier(**params)
+                        model.fit(X_train_full, y_train_full)
+                        preds = model.predict(X_full)
+                    elif is_poisson:
+                        dtrain_full = xgb.DMatrix(X_train_full, label=y_train_full, base_margin=train_base_margin, enable_categorical=True)
+                        dfull = xgb.DMatrix(X_full, base_margin=full_base_margin, enable_categorical=True)
+                        xgb_params = params.copy()
+                        n_ests = xgb_params.pop("n_estimators")
+                        model = xgb.train(xgb_params, dtrain_full, num_boost_round=n_ests)
+                        preds = model.predict(dfull)
                     else:
                         model = xgb.XGBRegressor(**params)
+                        model.fit(X_train_full, y_train_full)
+                        preds = model.predict(X_full)
                         
-                    model.fit(X_train_full, y_train_full)
-                    preds = model.predict(X_full)
                     if is_classification and label_map:
                         reverse_map = {v: k for k, v in label_map.items()}
                         preds = [reverse_map.get(p, p) for p in preds]
                         
-                    store_predictions(preds, is_classification, is_poisson, personality, target, full_pd, " using CPU")
+                    store_predictions(preds, is_classification, is_poisson, target, full_pd, " using CPU")
                 except Exception as inner_e:
                     self.log(f"CPU fallback also failed: {inner_e}")
                     raise
+
+        # 3-Class Classifier for Match Result
+        if "FT_HomeScore" in df.columns and "FT_AwayScore" in df.columns:
+            self.log("Training dedicated 3-class classifier for Match Result (Home/Draw/Away)...")
+            try:
+                # 1. Work directly on full_pd using boolean masks to preserve exact index integrity
+                valid_score_mask = full_pd["FT_HomeScore"].notnull() & full_pd["FT_AwayScore"].notnull()
+                
+                if valid_score_mask.sum() > 10:
+                    # 2. Derive targets directly from full_pd
+                    h_scores = pd.to_numeric(full_pd.loc[valid_score_mask, "FT_HomeScore"], errors='coerce')
+                    a_scores = pd.to_numeric(full_pd.loc[valid_score_mask, "FT_AwayScore"], errors='coerce')
+                    
+                    y_res = np.where(h_scores > a_scores, 0, np.where(h_scores == a_scores, 1, 2))
+                    
+                    # 3. Identify and encode feature columns
+                    features_to_drop_res = {'FT_HomeScore', 'FT_AwayScore', 'HT_HomeScore', 'HT_AwayScore', 
+                                            'SH_HomeScore', 'SH_AwayScore', 'Match_Status', 'Winner', 'Result'}
+                    for col in full_pd.columns:
+                        if col not in features_to_drop_res and (full_pd[col].dtype == 'object' or str(full_pd[col].dtype) == 'string'):
+                            if full_pd[col].nunique() > 1000 or 'url' in col.lower() or 'date' in col.lower() or 'time' in col.lower():
+                                features_to_drop_res.add(col)
+                                
+                    feature_cols_res = [c for c in full_pd.columns if c not in features_to_drop_res]
+                    
+                    for col in feature_cols_res:
+                        if full_pd[col].dtype == 'object' or str(full_pd[col].dtype) == 'string':
+                            full_pd[col] = full_pd[col].astype('category')
+                            
+                    # 4. Slice cleanly with the exact boolean mask
+                    X_res_train = full_pd.loc[valid_score_mask, feature_cols_res]
+                    X_res_full_feats = full_pd[feature_cols_res]
+                    
+                    res_params = {
+                        "tree_method": "hist",
+                        "device": "cuda",
+                        "learning_rate": 0.05,
+                        "max_depth": 6,
+                        "n_estimators": 150,
+                        "objective": "multi:softprob",
+                        "num_class": 3,
+                        "random_state": 42
+                    }
+                    
+                    try:
+                        model_res = xgb.XGBClassifier(enable_categorical=True, **res_params)
+                        model_res.fit(X_res_train, y_res)
+                        model_res.set_params(device="cpu")
+                        probs = model_res.predict_proba(X_res_full_feats)
+                    except Exception as e:
+                        self.log(f"Classifier GPU failed: {e}. Falling back to CPU...")
+                        res_params["device"] = "cpu"
+                        model_res = xgb.XGBClassifier(enable_categorical=True, **res_params)
+                        model_res.fit(X_res_train, y_res)
+                        probs = model_res.predict_proba(X_res_full_feats)
+                        
+                    full_pd["Softmax_Prob_Home"] = probs[:, 0]
+                    full_pd["Softmax_Prob_Draw"] = probs[:, 1]
+                    full_pd["Softmax_Prob_Away"] = probs[:, 2]
+                    self.log("Softmax classifier completed successfully with aligned indexes.")
+            except Exception as e:
+                self.log(f"Failed to train 3-class classifier: {e}")
 
         # Convert back to Polars
         full_pl = pl.from_pandas(full_pd)
@@ -345,8 +428,6 @@ class PredictorNode(BaseNode):
             mask = df[target_cols[0]].is_null()
             upcoming_pl = full_pl.filter(mask)
             
-            # If we successfully found upcoming matches, return just them. 
-            # Otherwise return full dataset (e.g. if everything was predicted already)
             if len(upcoming_pl) > 0:
                 self.log(f"Filtered output from {len(full_pl)} total rows down to {len(upcoming_pl)} Upcoming matches.")
                 return upcoming_pl

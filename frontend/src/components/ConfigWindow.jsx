@@ -1718,9 +1718,15 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
   };
 
   const renderFormulaConfig = () => {
-    // Keep existing formula rendering...
-    const output_column = parameters.output_column || 'NewColumn';
-    const expression = parameters.expression || '';
+    let formulas = parameters.formulas;
+    
+    // Legacy migration
+    if (!formulas && parameters.output_column && parameters.expression) {
+      formulas = [{ output_column: parameters.output_column, expression: parameters.expression }];
+      setTimeout(() => onUpdateParams(id, { ...parameters, formulas, output_column: undefined, expression: undefined }), 0);
+    }
+    
+    const currentFormulas = formulas || [];
 
     // Generate smart examples based on schema
     let examples = [];
@@ -1745,6 +1751,22 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
       examples = ['[Column1] + [Column2]', '[Name] + " " + [Surname]', '[Salary] * 1.1'];
     }
 
+    const handleAddFormula = () => {
+      onUpdateParams(id, { ...parameters, formulas: [...currentFormulas, { output_column: '', expression: '' }] });
+    };
+    
+    const handleFormulaChange = (index, field, value) => {
+      const newFormulas = [...currentFormulas];
+      newFormulas[index] = { ...newFormulas[index], [field]: value };
+      onUpdateParams(id, { ...parameters, formulas: newFormulas });
+    };
+
+    const handleRemoveFormula = (index) => {
+      const newFormulas = [...currentFormulas];
+      newFormulas.splice(index, 1);
+      onUpdateParams(id, { ...parameters, formulas: newFormulas });
+    };
+
     return (
       <>
         {!hasUpstreamColumns && (
@@ -1756,35 +1778,142 @@ const ConfigWindow = ({ selectedNode, upstreamSchema, onUpdateParams, availableT
           </div>
         )}
 
-        <div className="form-group">
-          <label className="form-label">Output Column Name</label>
-          <SafeInput
-            type="text"
-            placeholder="E.g., FullName or TotalCost"
-            value={output_column}
-            onChange={(e) => handleParamChange('output_column', e.target.value)}
-          />
+        <div className="formulas-container">
+          <label className="form-label">Formula Operations (Executed Sequentially)</label>
+          
+          {currentFormulas.length === 0 ? (
+             <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', border: '1px dashed var(--border-color)', borderRadius: '6px', fontSize: '0.75rem', marginBottom: '16px' }}>
+               No formulas configured.
+             </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px' }}>
+              {currentFormulas.map((f, idx) => (
+                <div 
+                  key={idx}
+                  draggable 
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onDragEnter={(e) => handleDragEnter(e, idx)}
+                  onDragEnd={(e) => handleDropArray(e, currentFormulas, 'formulas')}
+                  onDragOver={(e) => e.preventDefault()}
+                  style={{ 
+                    background: 'var(--bg-secondary)', 
+                    border: '1px solid var(--border-color)', 
+                    borderRadius: '6px', 
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    cursor: 'grab'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)', cursor: 'grab' }}>⋮⋮</span>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)' }}>Operation {idx + 1}</span>
+                    </div>
+                    <button 
+                      onClick={() => handleRemoveFormula(idx)}
+                      style={{ background: 'none', border: 'none', color: 'var(--color-error)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      title="Remove Formula"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  
+                  <div className="form-group" style={{ marginBottom: 0, cursor: 'default' }}>
+                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Target Column (Existing or New)</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {hasUpstreamColumns && (
+                        <SafeSelect 
+                          value={upstreamSchema.find(c => c.name === f.output_column) ? f.output_column : ''} 
+                          onChange={(e) => {
+                            if (e.target.value) handleFormulaChange(idx, 'output_column', e.target.value);
+                          }}
+                          style={{ flex: 1, boxSizing: 'border-box', cursor: 'pointer' }}
+                        >
+                          <option value="">-- Select Existing Column --</option>
+                          {upstreamSchema.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                        </SafeSelect>
+                      )}
+                      <SafeInput
+                        type="text"
+                        placeholder="Or type column name..."
+                        value={f.output_column || ''}
+                        onChange={(e) => handleFormulaChange(idx, 'output_column', e.target.value)}
+                        style={{ flex: 1, boxSizing: 'border-box' }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0, cursor: 'default', marginTop: '12px' }}>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <div style={{ flex: 1 }}>
+                        <label className="form-label" style={{ fontSize: '0.7rem' }}>Data Type</label>
+                        <SafeSelect 
+                          value={f.data_type || 'V_WString'} 
+                          onChange={(e) => handleFormulaChange(idx, 'data_type', e.target.value)}
+                          style={{ width: '100%', boxSizing: 'border-box', cursor: 'pointer' }}
+                        >
+                          <option value="V_WString">V_WString</option>
+                          <option value="String">String</option>
+                          <option value="Int32">Int32</option>
+                          <option value="Int64">Int64</option>
+                          <option value="Float32">Float32</option>
+                          <option value="Float64">Float64</option>
+                          <option value="Bool">Bool</option>
+                        </SafeSelect>
+                      </div>
+                      <div style={{ width: '80px' }}>
+                        <label className="form-label" style={{ fontSize: '0.7rem' }}>Size</label>
+                        <SafeInput
+                          type="text"
+                          value={f.size || ''}
+                          onChange={(e) => handleFormulaChange(idx, 'size', e.target.value)}
+                          style={{ width: '100%', boxSizing: 'border-box' }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ position: 'relative', marginBottom: 0, cursor: 'default', marginTop: '12px' }} onMouseDown={(e) => e.stopPropagation()}>
+                    <label className="form-label" style={{ fontSize: '0.7rem' }}>Formula Expression</label>
+                    <FormulaEditor
+                      value={f.expression || ''}
+                      onChange={(e) => handleFormulaChange(idx, 'expression', e.target.value)}
+                      columns={upstreamSchema || []}
+                      height="120px"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          <button 
+            onClick={handleAddFormula}
+            style={{ width: '100%', padding: '8px', background: 'var(--color-accent)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+          >
+            <Plus size={14} /> Add Formula
+          </button>
         </div>
 
-        <div className="form-group" style={{ position: 'relative' }}>
-          <label className="form-label">Formula Expression</label>
-          <FormulaEditor
-            value={expression}
-            onChange={(e) => handleParamChange('expression', e.target.value)}
-            columns={upstreamSchema || []}
-            height="150px"
-          />
-        </div>
-
-        <div className="form-group" style={{ marginTop: '16px' }}>
+        <div className="form-group" style={{ marginTop: '24px' }}>
           <label className="form-label">Contextual Examples</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {examples.map((ex, i) => (
               <div 
                 key={i} 
-                onClick={() => handleParamChange('expression', ex)}
+                onClick={() => {
+                   if (currentFormulas.length === 0) {
+                      onUpdateParams(id, { ...parameters, formulas: [{ output_column: '', expression: ex }] });
+                   } else {
+                      handleFormulaChange(currentFormulas.length - 1, 'expression', ex);
+                   }
+                }}
                 style={{ background: 'var(--bg-secondary)', padding: '6px 10px', borderRadius: '4px', border: '1px dashed var(--border-color)', fontSize: '0.7rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', cursor: 'pointer' }}
-                title="Click to use this formula"
+                title="Click to apply this formula to the last operation"
               >
                 {ex}
               </div>
