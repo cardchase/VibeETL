@@ -1,4 +1,5 @@
 import time
+import os
 import polars as pl
 from graphlib import TopologicalSorter
 from typing import Dict, Any, List, Set
